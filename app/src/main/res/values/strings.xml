@@ -1,3 +1,25 @@
 <resources>
-    <string name="app_name">pitgo</string>
+    <string name="app_name">PitGo</string>
+
+    <string name="home_title">Como podemos ajudar?</string>
+    <string name="home_services_title">Serviços</string>
+
+    <string name="service_tire_shop">Borracharia</string>
+    <string name="service_vehicle_electrician">Eletricista veicular</string>
+    <string name="service_battery">Bateria</string>
+    <string name="service_tire_change">Troca de pneu</string>
+    <string name="service_mechanic">Mecânico</string>
+
+    <string name="service_action_tire_shop">Buscar prestadores de borracharia</string>
+    <string name="service_action_vehicle_electrician">Buscar prestadores de eletricista veicular</string>
+    <string name="service_action_battery">Buscar prestadores de bateria</string>
+    <string name="service_action_tire_change">Buscar prestadores de troca de pneu</string>
+    <string name="service_action_mechanic">Buscar prestadores de mecânico</string>
+
+    <string name="provider_search_title">Busca de prestadores</string>
+    <string name="provider_search_category_label">Categoria selecionada</string>
+    <string name="provider_search_category">%1$s</string>
+    <string name="provider_search_entry_message">Categoria recebida para iniciar a busca.</string>
+    <string name="provider_search_invalid_category">Não foi possível identificar a categoria selecionada.</string>
+    <string name="action_back">Voltar</string>
 </resources>
