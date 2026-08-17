@@ -15,11 +15,15 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.dropUnlessResumed
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.trustarx.pitgo.core.common.model.DemoServiceId
 import com.trustarx.pitgo.features.home.ui.HomeRoute
+import com.trustarx.pitgo.features.requestservice.ui.RequestServiceRoute
 import com.trustarx.pitgo.features.welcome.ui.WelcomeRoute
 
 @Composable
@@ -27,7 +31,9 @@ fun PitGoNavHost() {
     val navController = rememberNavController()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
-    val useDarkSystemBarIcons = currentRoute == PitGoRoutes.Home && !isSystemInDarkTheme()
+    val usesAppSurface = currentRoute == PitGoRoutes.Home ||
+        currentRoute == PitGoRoutes.RequestServicePattern
+    val useDarkSystemBarIcons = usesAppSurface && !isSystemInDarkTheme()
 
     SystemBarIconAppearance(useDarkIcons = useDarkSystemBarIcons)
 
@@ -59,7 +65,57 @@ fun PitGoNavHost() {
         }
 
         composable(PitGoRoutes.Home) {
-            HomeRoute()
+            var serviceNavigationPending by remember { mutableStateOf(false) }
+            var selectedServiceId by remember { mutableStateOf<DemoServiceId?>(null) }
+
+            LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+                serviceNavigationPending = false
+                selectedServiceId = null
+            }
+
+            val performRequestServiceNavigation = dropUnlessResumed {
+                val serviceId = selectedServiceId
+                if (!serviceNavigationPending && serviceId != null) {
+                    serviceNavigationPending = true
+                    navController.navigate(PitGoRoutes.requestService(serviceId)) {
+                        launchSingleTop = true
+                    }
+                }
+            }
+            val navigateToRequestService: (DemoServiceId) -> Unit = { serviceId ->
+                selectedServiceId = serviceId
+                performRequestServiceNavigation()
+            }
+
+            HomeRoute(onServiceClick = navigateToRequestService)
+        }
+
+        composable(
+            route = PitGoRoutes.RequestServicePattern,
+            arguments = listOf(
+                navArgument(PitGoRoutes.RequestServiceArg) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) {
+            val navigateBack = {
+                if (!navController.popBackStack()) {
+                    navController.navigate(PitGoRoutes.Home) {
+                        popUpTo(PitGoRoutes.RequestServicePattern) {
+                            inclusive = true
+                        }
+                        launchSingleTop = true
+                    }
+                }
+            }
+
+            RequestServiceRoute(
+                onBack = navigateBack,
+                onSubmit = {},
+                onBottomItemClick = {},
+            )
         }
     }
 }

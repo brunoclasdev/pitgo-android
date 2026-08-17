@@ -238,6 +238,12 @@ obj/
 .idea/copyright/profiles_settings.xml
 .idea/encodings.xml
 .idea/misc.xml
+
+# Local tooling and environment
+.env*
+.vscode/
+Thumbs.db
+*.tmp
 .idea/modules.xml
 .idea/scopes/scope_settings.xml
 .idea/dictionaries

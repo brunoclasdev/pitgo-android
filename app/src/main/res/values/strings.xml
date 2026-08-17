@@ -43,4 +43,27 @@
     <string name="nav_garage">Garagem</string>
     <string name="nav_appointments">Atendimentos</string>
     <string name="nav_profile">Perfil</string>
+
+    <string name="request_service_title">Solicitar atendimento</string>
+    <string name="request_service_back_description">Voltar</string>
+    <string name="request_service_label">Serviço</string>
+    <string name="request_vehicle_label">Veículo</string>
+    <string name="request_vehicle_details">%1$s · %2$d</string>
+    <string name="request_location_label">Local do atendimento</string>
+    <string name="request_problem_label">Descreva o problema (opcional)</string>
+    <string name="request_problem_placeholder">Ex.: Carro não está ligando</string>
+    <string name="request_arrival_label">Chegada estimada</string>
+    <string name="request_arrival_value">20-40 min</string>
+    <string name="request_estimate_label">Estimativa</string>
+    <string name="request_estimate_value">R$ %1$d</string>
+    <string name="request_payment_section">PAGAMENTO</string>
+    <string name="request_payment_pix">PIX</string>
+    <string name="request_payment_credit">Crédito</string>
+    <string name="request_payment_debit">Débito</string>
+    <string name="request_payment_selected">Selecionado</string>
+    <string name="request_submit_action">SOLICITAR PITTECH</string>
+    <string name="request_value_disclaimer">Valor final pode variar conforme diagnóstico e peças usadas.</string>
+    <string name="request_invalid_service_title">Serviço indisponível</string>
+    <string name="request_invalid_service_message">Não foi possível carregar o serviço selecionado.</string>
+    <string name="request_invalid_service_action">Voltar para o início</string>
 </resources>

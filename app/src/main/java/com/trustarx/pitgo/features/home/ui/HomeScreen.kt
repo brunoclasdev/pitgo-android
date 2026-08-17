@@ -28,9 +28,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,26 +41,26 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trustarx.pitgo.R
+import com.trustarx.pitgo.core.common.model.DemoService
+import com.trustarx.pitgo.core.common.model.DemoServiceId
+import com.trustarx.pitgo.core.common.model.DemoVehicle
 import com.trustarx.pitgo.core.design.theme.PitGoElevation
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
-import com.trustarx.pitgo.features.home.model.BottomItemId
-import com.trustarx.pitgo.features.home.model.BottomNavigationItem
+import com.trustarx.pitgo.core.ui.BottomItemId
+import com.trustarx.pitgo.core.ui.PitGoBottomNavigation
 import com.trustarx.pitgo.features.home.model.DemoProfile
-import com.trustarx.pitgo.features.home.model.DemoService
-import com.trustarx.pitgo.features.home.model.DemoServiceId
-import com.trustarx.pitgo.features.home.model.DemoVehicle
 import com.trustarx.pitgo.features.home.model.DiagnosticPrompt
 import com.trustarx.pitgo.features.home.viewmodel.HomeUiState
 import com.trustarx.pitgo.features.home.viewmodel.HomeViewModel
 
 @Composable
 fun HomeRoute(
+    onServiceClick: (DemoServiceId) -> Unit = {},
     viewModel: HomeViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -71,7 +68,7 @@ fun HomeRoute(
     HomeScreen(
         uiState = uiState,
         onDiagnosticClick = {},
-        onServiceClick = {},
+        onServiceClick = onServiceClick,
         onBottomItemClick = {},
     )
 }
@@ -91,7 +88,7 @@ fun HomeScreen(
             WindowInsetsSides.Horizontal + WindowInsetsSides.Top,
         ),
         bottomBar = {
-            HomeBottomNavigation(
+            PitGoBottomNavigation(
                 items = uiState.bottomNavigationItems,
                 selectedItem = uiState.selectedBottomItem,
                 onItemClick = onBottomItemClick,
@@ -371,41 +368,5 @@ private fun IconContainer(iconRes: Int) {
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(PitGoSize.ServiceIcon),
         )
-    }
-}
-
-@Composable
-private fun HomeBottomNavigation(
-    items: List<BottomNavigationItem>,
-    selectedItem: BottomItemId,
-    onItemClick: (BottomItemId) -> Unit,
-) {
-    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-        items.forEach { item ->
-            NavigationBarItem(
-                selected = item.id == selectedItem,
-                onClick = { onItemClick(item.id) },
-                icon = {
-                    Icon(
-                        painter = painterResource(item.iconRes),
-                        contentDescription = null,
-                        modifier = Modifier.size(PitGoSize.NavigationIcon),
-                    )
-                },
-                label = {
-                    Text(
-                        text = stringResource(item.labelRes),
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                    )
-                },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ),
-            )
-        }
     }
 }
