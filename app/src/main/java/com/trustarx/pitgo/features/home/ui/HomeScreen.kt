@@ -1,16 +1,24 @@
 package com.trustarx.pitgo.features.home.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -20,86 +28,137 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.design.theme.PitGoElevation
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
-import com.trustarx.pitgo.features.home.model.ServiceCategory
-import com.trustarx.pitgo.features.home.model.ServiceCategoryId
+import com.trustarx.pitgo.features.home.model.BottomItemId
+import com.trustarx.pitgo.features.home.model.BottomNavigationItem
+import com.trustarx.pitgo.features.home.model.DemoProfile
+import com.trustarx.pitgo.features.home.model.DemoService
+import com.trustarx.pitgo.features.home.model.DemoServiceId
+import com.trustarx.pitgo.features.home.model.DemoVehicle
+import com.trustarx.pitgo.features.home.model.DiagnosticPrompt
 import com.trustarx.pitgo.features.home.viewmodel.HomeUiState
 import com.trustarx.pitgo.features.home.viewmodel.HomeViewModel
 
 @Composable
 fun HomeRoute(
-    onCategorySelected: (ServiceCategoryId) -> Unit,
     viewModel: HomeViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
     HomeScreen(
         uiState = uiState,
-        onCategorySelected = onCategorySelected,
+        onDiagnosticClick = {},
+        onServiceClick = {},
+        onBottomItemClick = {},
     )
 }
 
 @Composable
 fun HomeScreen(
     uiState: HomeUiState,
-    onCategorySelected: (ServiceCategoryId) -> Unit,
+    onDiagnosticClick: () -> Unit,
+    onServiceClick: (DemoServiceId) -> Unit,
+    onBottomItemClick: (BottomItemId) -> Unit,
 ) {
-    val gridState = rememberLazyGridState()
+    val layoutDirection = LocalLayoutDirection.current
 
-    Scaffold { innerPadding ->
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets.safeDrawing.only(
+            WindowInsetsSides.Horizontal + WindowInsetsSides.Top,
+        ),
+        bottomBar = {
+            HomeBottomNavigation(
+                items = uiState.bottomNavigationItems,
+                selectedItem = uiState.selectedBottomItem,
+                onItemClick = onBottomItemClick,
+            )
+        },
+    ) { innerPadding ->
+        val startInset = if (layoutDirection == LayoutDirection.Ltr) {
+            innerPadding.calculateLeftPadding(layoutDirection)
+        } else {
+            innerPadding.calculateRightPadding(layoutDirection)
+        }
+        val endInset = if (layoutDirection == LayoutDirection.Ltr) {
+            innerPadding.calculateRightPadding(layoutDirection)
+        } else {
+            innerPadding.calculateLeftPadding(layoutDirection)
+        }
+
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = PitGoSize.ServiceCardMinWidth),
+            columns = GridCells.Fixed(2),
             modifier = Modifier.fillMaxSize(),
-            state = gridState,
+            state = rememberLazyGridState(),
             contentPadding = PaddingValues(
-                start = PitGoSpacing.Medium,
-                top = innerPadding.calculateTopPadding() + PitGoSpacing.Large,
-                end = PitGoSpacing.Medium,
+                start = startInset + PitGoSpacing.Large,
+                top = innerPadding.calculateTopPadding() + PitGoSpacing.Medium,
+                end = endInset + PitGoSpacing.Large,
                 bottom = innerPadding.calculateBottomPadding() + PitGoSpacing.Large,
             ),
-            horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
-            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
+            horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.SmallMedium),
+            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.SmallMedium),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                Column {
-                    Text(
-                        text = stringResource(R.string.home_title),
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.semantics { heading() },
-                    )
-                    Spacer(Modifier.height(PitGoSpacing.Large))
-                    Text(
-                        text = stringResource(R.string.home_services_title),
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.semantics { heading() },
-                    )
-                }
+                HomeHeader(profile = uiState.profile)
+            }
+
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                VehicleCard(vehicle = uiState.vehicle)
+            }
+
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                LocationRow(vehicle = uiState.vehicle)
+            }
+
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Text(
+                    text = stringResource(R.string.home_services_question),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier
+                        .padding(top = PitGoSpacing.Small)
+                        .semantics { heading() },
+                )
+            }
+
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                DiagnosticCard(
+                    prompt = uiState.diagnosticPrompt,
+                    onClick = onDiagnosticClick,
+                )
             }
 
             items(
-                items = uiState.categories,
-                key = { category -> category.id.routeValue },
-            ) { category ->
-                ServiceCategoryCard(
-                    category = category,
-                    onClick = { onCategorySelected(category.id) },
+                items = uiState.services,
+                key = { service -> service.id },
+            ) { service ->
+                ServiceCard(
+                    service = service,
+                    onClick = { onServiceClick(service.id) },
                 )
             }
         }
@@ -107,11 +166,117 @@ fun HomeScreen(
 }
 
 @Composable
-private fun ServiceCategoryCard(
-    category: ServiceCategory,
+private fun HomeHeader(profile: DemoProfile) {
+    val avatarDescription = stringResource(R.string.home_avatar_description)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column {
+            Text(
+                text = stringResource(profile.greetingRes),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(profile.nameRes),
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.semantics { heading() },
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .size(PitGoSize.Avatar)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary)
+                .semantics {
+                    contentDescription = avatarDescription
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = stringResource(profile.avatarInitialRes),
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onPrimary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun VehicleCard(vehicle: DemoVehicle) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = PitGoElevation.Card),
+    ) {
+        Row(
+            modifier = Modifier.padding(PitGoSpacing.Medium),
+            horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconContainer(iconRes = vehicle.iconRes)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.home_selected_vehicle),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = stringResource(vehicle.modelRes),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(
+                        R.string.home_vehicle_details,
+                        vehicle.year,
+                        stringResource(vehicle.plateRes),
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocationRow(vehicle: DemoVehicle) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = PitGoSpacing.ExtraSmall),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_home_location),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(PitGoSize.FeatureIcon),
+        )
+        Spacer(Modifier.width(PitGoSpacing.Small))
+        Text(
+            text = stringResource(vehicle.addressRes),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun DiagnosticCard(
+    prompt: DiagnosticPrompt,
     onClick: () -> Unit,
 ) {
-    val actionDescription = stringResource(category.accessibilityActionRes)
+    val actionDescription = stringResource(R.string.diagnostic_action_description)
 
     Card(
         onClick = onClick,
@@ -122,31 +287,125 @@ private fun ServiceCategoryCard(
                 contentDescription = actionDescription
             },
         colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(PitGoSpacing.Medium),
+            horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconContainer(iconRes = prompt.iconRes)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(prompt.titleRes),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    text = stringResource(prompt.descriptionRes),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ServiceCard(
+    service: DemoService,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val serviceName = stringResource(service.nameRes)
+    val actionDescription = stringResource(
+        R.string.service_action_description,
+        serviceName,
+        service.startingPrice,
+    )
+
+    Card(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .sizeIn(minHeight = PitGoSize.MinimumTouchTarget)
+            .semantics(mergeDescendants = true) {
+                contentDescription = actionDescription
+            },
+        colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface,
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = PitGoElevation.ServiceCard),
+        elevation = CardDefaults.cardElevation(defaultElevation = PitGoElevation.Card),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(PitGoSpacing.Medium),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    painter = painterResource(category.iconRes),
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(PitGoSize.ServiceIcon),
-                )
-                Spacer(Modifier.height(PitGoSpacing.Small))
-                Text(
-                    text = stringResource(category.nameRes),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
+        Column(modifier = Modifier.padding(PitGoSpacing.Medium)) {
+            IconContainer(iconRes = service.iconRes)
+            Spacer(Modifier.height(PitGoSpacing.Medium))
+            Text(
+                text = serviceName,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.service_price, service.startingPrice),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun IconContainer(iconRes: Int) {
+    Box(
+        modifier = Modifier
+            .size(PitGoSize.ServiceIconContainer)
+            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(PitGoSize.ServiceIcon),
+        )
+    }
+}
+
+@Composable
+private fun HomeBottomNavigation(
+    items: List<BottomNavigationItem>,
+    selectedItem: BottomItemId,
+    onItemClick: (BottomItemId) -> Unit,
+) {
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+        items.forEach { item ->
+            NavigationBarItem(
+                selected = item.id == selectedItem,
+                onClick = { onItemClick(item.id) },
+                icon = {
+                    Icon(
+                        painter = painterResource(item.iconRes),
+                        contentDescription = null,
+                        modifier = Modifier.size(PitGoSize.NavigationIcon),
+                    )
+                },
+                label = {
+                    Text(
+                        text = stringResource(item.labelRes),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                    )
+                },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
+            )
         }
     }
 }

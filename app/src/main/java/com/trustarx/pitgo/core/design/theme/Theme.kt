@@ -7,28 +7,34 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 
 private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
+    primary = BrandPurple,
     onPrimary = White,
     primaryContainer = PurpleContainerLight,
-    onPrimaryContainer = Black,
-    background = White,
-    onBackground = Black,
+    onPrimaryContainer = DarkPurple,
+    secondary = DarkPurple,
+    onSecondary = White,
+    background = LightBackground,
+    onBackground = TextPrimary,
     surface = White,
-    onSurface = Black,
-    onSurfaceVariant = DarkGray,
+    onSurface = TextPrimary,
+    surfaceVariant = PurpleContainerLight,
+    onSurfaceVariant = TextSecondary,
     outline = OutlineLight,
 )
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    onPrimary = Black,
+    primary = BrandPurple,
+    onPrimary = White,
     primaryContainer = PurpleContainerDark,
-    onPrimaryContainer = White,
-    background = Black,
-    onBackground = White,
-    surface = NearBlack,
-    onSurface = White,
-    onSurfaceVariant = LightGray,
+    onPrimaryContainer = DarkTextPrimary,
+    secondary = BrandPurple,
+    onSecondary = White,
+    background = DarkBackground,
+    onBackground = DarkTextPrimary,
+    surface = DarkSurface,
+    onSurface = DarkTextPrimary,
+    surfaceVariant = DarkSurfaceVariant,
+    onSurfaceVariant = DarkTextSecondary,
     outline = OutlineDark,
 )
 

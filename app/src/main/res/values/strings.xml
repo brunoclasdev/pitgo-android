@@ -1,25 +1,46 @@
 <resources>
     <string name="app_name">PitGo</string>
 
-    <string name="home_title">Como podemos ajudar?</string>
-    <string name="home_services_title">Serviços</string>
+    <string name="welcome_wordmark">PitGo</string>
+    <string name="welcome_title_line_one">Seu carro precisa.</string>
+    <string name="welcome_title_line_two">O PitGo resolve.</string>
+    <string name="welcome_subtitle">Encontre assistência para bateria, óleo, pneus e muito mais, onde você estiver.</string>
+    <string name="benefit_fast_title">Atendimento rápido</string>
+    <string name="benefit_fast_description">PitTechs próximos em minutos.</string>
+    <string name="benefit_verified_title">Técnicos verificados</string>
+    <string name="benefit_verified_description">Profissionais avaliados e aprovados.</string>
+    <string name="benefit_app_title">Tudo pelo app</string>
+    <string name="benefit_app_description">Bateria, óleo, pneus, diagnóstico e mais.</string>
+    <string name="action_create_account">Criar conta</string>
+    <string name="action_enter">Entrar</string>
+    <string name="action_register_company">Sou uma empresa · Cadastrar</string>
 
-    <string name="service_tire_shop">Borracharia</string>
-    <string name="service_vehicle_electrician">Eletricista veicular</string>
+    <string name="home_greeting">Olá,</string>
+    <string name="home_user_name">Rafael 👋</string>
+    <string name="home_avatar_initial">R</string>
+    <string name="home_avatar_description">Avatar de Rafael</string>
+    <string name="home_selected_vehicle">Veículo selecionado</string>
+    <string name="home_vehicle_model">BMW 320i M Sport</string>
+    <string name="home_vehicle_plate">PGO-2A20</string>
+    <string name="home_vehicle_details">%1$d · %2$s</string>
+    <string name="home_address">Av. Paulista, 1500 · São Paulo</string>
+    <string name="home_services_question">O que seu carro precisa hoje?</string>
+    <string name="diagnostic_title">Não sei o que aconteceu</string>
+    <string name="diagnostic_description">Descreva o problema e sugerimos o serviço</string>
+    <string name="diagnostic_action_description">Descrever o problema do carro</string>
+
     <string name="service_battery">Bateria</string>
-    <string name="service_tire_change">Troca de pneu</string>
-    <string name="service_mechanic">Mecânico</string>
+    <string name="service_oil_change">Troca de óleo</string>
+    <string name="service_tires">Pneus</string>
+    <string name="service_dashboard_light">Luz no painel</string>
+    <string name="service_small_repairs">Pequenos reparos</string>
+    <string name="service_car_wont_start">Carro não liga</string>
+    <string name="service_price">A partir de R$ %1$d</string>
+    <string name="service_action_description">Ver %1$s, a partir de R$ %2$d</string>
 
-    <string name="service_action_tire_shop">Buscar prestadores de borracharia</string>
-    <string name="service_action_vehicle_electrician">Buscar prestadores de eletricista veicular</string>
-    <string name="service_action_battery">Buscar prestadores de bateria</string>
-    <string name="service_action_tire_change">Buscar prestadores de troca de pneu</string>
-    <string name="service_action_mechanic">Buscar prestadores de mecânico</string>
-
-    <string name="provider_search_title">Busca de prestadores</string>
-    <string name="provider_search_category_label">Categoria selecionada</string>
-    <string name="provider_search_category">%1$s</string>
-    <string name="provider_search_entry_message">Categoria recebida para iniciar a busca.</string>
-    <string name="provider_search_invalid_category">Não foi possível identificar a categoria selecionada.</string>
-    <string name="action_back">Voltar</string>
+    <string name="nav_home">Início</string>
+    <string name="nav_services">Serviços</string>
+    <string name="nav_garage">Garagem</string>
+    <string name="nav_appointments">Atendimentos</string>
+    <string name="nav_profile">Perfil</string>
 </resources>
