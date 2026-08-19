@@ -1,0 +1,14 @@
+.git/
+.gradle/
+.idea/
+.vscode/
+**/build/
+*.log*
+.env*
+local.properties
+Dockerfile*
+.dockerignore
+coverage/
+node_modules/
+supabase/.branches/
+supabase/.temp/

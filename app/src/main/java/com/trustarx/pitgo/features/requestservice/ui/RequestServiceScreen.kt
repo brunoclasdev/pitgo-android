@@ -42,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,8 +72,9 @@ import com.trustarx.pitgo.core.design.theme.PitGoElevation
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 import com.trustarx.pitgo.core.ui.BottomItemId
-import com.trustarx.pitgo.core.ui.DemoBottomNavigation
+import com.trustarx.pitgo.core.ui.PitGoBottomNavigationItems
 import com.trustarx.pitgo.core.ui.PitGoBottomNavigation
+import com.trustarx.pitgo.core.vehicle.model.Vehicle
 import com.trustarx.pitgo.features.requestservice.model.PaymentMethod
 import com.trustarx.pitgo.features.requestservice.model.RequestServiceUiState
 import com.trustarx.pitgo.features.requestservice.model.SubmissionStatus
@@ -80,12 +82,14 @@ import com.trustarx.pitgo.features.requestservice.viewmodel.RequestServiceViewMo
 
 @Composable
 fun RequestServiceRoute(
+    vehicle: Vehicle?,
     onBack: () -> Unit,
     onSubmit: () -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
     viewModel: RequestServiceViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(vehicle) { viewModel.bindVehicle(vehicle) }
 
     RequestServiceScreen(
         uiState = uiState,
@@ -135,7 +139,7 @@ fun RequestServiceScreen(
                         ),
                     ) {
                         Icon(
-                            painter = painterResource(R.drawable.ic_request_back),
+                            painter = painterResource(R.drawable.ic_back),
                             contentDescription = stringResource(R.string.request_service_back_description),
                         )
                     }
@@ -149,7 +153,7 @@ fun RequestServiceScreen(
         },
         bottomBar = {
             PitGoBottomNavigation(
-                items = DemoBottomNavigation,
+                items = PitGoBottomNavigationItems,
                 selectedItem = BottomItemId.HOME,
                 onItemClick = onBottomItemClick,
             )
@@ -213,21 +217,28 @@ private fun RequestServiceContent(
         }
 
         item {
+            val vehicle = uiState.vehicle
+            val vehicleValue = if (vehicle == null) {
+                stringResource(R.string.request_vehicle_none)
+            } else {
+                val year = vehicle.modelYear ?: vehicle.manufactureYear
+                if (year == null) vehicle.displayName else stringResource(
+                    R.string.request_vehicle_details,
+                    vehicle.displayName,
+                    year,
+                )
+            }
             InfoCard(
                 label = stringResource(R.string.request_vehicle_label),
-                value = stringResource(
-                    R.string.request_vehicle_details,
-                    stringResource(uiState.vehicle.modelRes),
-                    uiState.vehicle.year,
-                ),
-                iconRes = uiState.vehicle.iconRes,
+                value = vehicleValue,
+                iconRes = R.drawable.ic_home_vehicle,
             )
         }
 
         item {
             InfoCard(
                 label = stringResource(R.string.request_location_label),
-                value = stringResource(uiState.addressRes),
+                value = stringResource(R.string.home_address_empty),
                 iconRes = R.drawable.ic_home_location,
             )
         }
@@ -569,7 +580,7 @@ private fun PrimaryRequestButton(
         enabled = enabled,
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 56.dp)
+            .heightIn(min = PitGoSize.PrimaryActionMinHeight)
             .clip(CircleShape)
             .background(
                 brush = Brush.horizontalGradient(gradientColors),

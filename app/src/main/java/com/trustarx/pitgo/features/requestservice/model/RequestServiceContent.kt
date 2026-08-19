@@ -3,7 +3,7 @@ package com.trustarx.pitgo.features.requestservice.model
 import androidx.annotation.StringRes
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.common.model.DemoService
-import com.trustarx.pitgo.core.common.model.DemoVehicle
+import com.trustarx.pitgo.core.vehicle.model.Vehicle
 
 enum class PaymentMethod(
     @param:StringRes val labelRes: Int,
@@ -21,16 +21,12 @@ enum class SubmissionStatus {
 sealed interface RequestServiceUiState {
     data class Content(
         val selectedService: DemoService,
-        val vehicle: DemoVehicle,
+        val vehicle: Vehicle? = null,
         val problemDescription: String = "",
         @param:StringRes val estimatedArrivalRes: Int = R.string.request_arrival_value,
         val paymentMethod: PaymentMethod = PaymentMethod.PIX,
         val submissionStatus: SubmissionStatus = SubmissionStatus.READY,
     ) : RequestServiceUiState {
-        @get:StringRes
-        val addressRes: Int
-            get() = vehicle.addressRes
-
         val estimatedPrice: Int
             get() = selectedService.startingPrice
     }

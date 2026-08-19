@@ -15,6 +15,7 @@ object PitGoSpacing {
 
 object PitGoSize {
     val MinimumTouchTarget = 48.dp
+    val PrimaryActionMinHeight = 56.dp
     val Avatar = 48.dp
     val FeatureIconContainer = 44.dp
     val FeatureIcon = 24.dp

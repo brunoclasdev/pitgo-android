@@ -13,7 +13,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             PitGoTheme {
-                PitGoNavHost()
+                PitGoNavHost(
+                    container = (application as PitGoApplication).container,
+                )
             }
         }
     }

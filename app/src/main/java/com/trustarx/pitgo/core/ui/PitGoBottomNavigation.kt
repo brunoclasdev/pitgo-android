@@ -32,7 +32,7 @@ data class BottomNavigationItem(
     val displayOrder: Int,
 )
 
-val DemoBottomNavigation = listOf(
+val PitGoBottomNavigationItems = listOf(
     BottomNavigationItem(BottomItemId.HOME, R.string.nav_home, R.drawable.ic_nav_home, 0),
     BottomNavigationItem(BottomItemId.SERVICES, R.string.nav_services, R.drawable.ic_nav_services, 1),
     BottomNavigationItem(BottomItemId.GARAGE, R.string.nav_garage, R.drawable.ic_nav_garage, 2),

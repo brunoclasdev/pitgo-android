@@ -132,6 +132,7 @@ private fun isLegacyAnonKey(value: String): Boolean {
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 private val supabaseConfiguration = validateSupabaseConfiguration(
@@ -196,7 +197,13 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.supabase.core)
+    implementation(libs.supabase.auth)
+    implementation(libs.supabase.postgrest)
     implementation(libs.ktor.client.android)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.ktor3)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

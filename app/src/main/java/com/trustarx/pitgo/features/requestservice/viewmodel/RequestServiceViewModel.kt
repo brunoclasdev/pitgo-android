@@ -2,10 +2,10 @@ package com.trustarx.pitgo.features.requestservice.viewmodel
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import com.trustarx.pitgo.core.common.model.DemoHomeVehicle
 import com.trustarx.pitgo.core.common.model.DemoServiceId
 import com.trustarx.pitgo.core.common.model.DemoServices
 import com.trustarx.pitgo.core.navigation.PitGoRoutes
+import com.trustarx.pitgo.core.vehicle.model.Vehicle
 import com.trustarx.pitgo.features.requestservice.model.PaymentMethod
 import com.trustarx.pitgo.features.requestservice.model.RequestServiceUiState
 import com.trustarx.pitgo.features.requestservice.model.SubmissionStatus
@@ -22,6 +22,12 @@ class RequestServiceViewModel(
     )
 
     val uiState: StateFlow<RequestServiceUiState> = _uiState.asStateFlow()
+
+    fun bindVehicle(vehicle: Vehicle?) {
+        updateContent { content ->
+            if (content.vehicle == vehicle) content else content.copy(vehicle = vehicle)
+        }
+    }
 
     fun onProblemDescriptionChanged(description: String) {
         updateContent { content ->
@@ -61,10 +67,7 @@ class RequestServiceViewModel(
             val service = DemoServices.firstOrNull { candidate -> candidate.id == serviceId }
                 ?: return RequestServiceUiState.InvalidService
 
-            return RequestServiceUiState.Content(
-                selectedService = service,
-                vehicle = DemoHomeVehicle,
-            )
+            return RequestServiceUiState.Content(selectedService = service)
         }
     }
 }
