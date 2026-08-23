@@ -1,6 +1,8 @@
 package com.trustarx.pitgo.core.auth.model
 
 import com.trustarx.pitgo.core.account.model.AccountSnapshot
+import com.trustarx.pitgo.core.account.model.ProviderOnboardingSession
+import com.trustarx.pitgo.core.account.model.ProviderSnapshot
 
 sealed interface AppSessionState {
     data object Initializing : AppSessionState
@@ -10,7 +12,24 @@ sealed interface AppSessionState {
     ) : AppSessionState
     data object OfflineVerification : AppSessionState
     data class ProfileBlocked(val reason: ProfileBlockedReason) : AppSessionState
-    data class Authenticated(val account: AccountSnapshot) : AppSessionState
+    sealed interface Authenticated : AppSessionState {
+        val userId: String
+
+        data class Client(
+            val account: AccountSnapshot,
+            val legacyProviderMigrationAvailable: Boolean = false,
+        ) : Authenticated {
+            override val userId: String get() = account.userId
+        }
+
+        data class ProviderOnboarding(val session: ProviderOnboardingSession) : Authenticated {
+            override val userId: String get() = session.userId
+        }
+
+        data class ProviderReady(val account: ProviderSnapshot) : Authenticated {
+            override val userId: String get() = account.userId
+        }
+    }
 }
 
 enum class UnauthenticatedReason {

@@ -44,6 +44,7 @@ class SupabaseSignUpRepository(
                 email = registration.email
                 password = registration.password
                 data = buildJsonObject {
+                    put("account_type", "CLIENT")
                     put("name", registration.name)
                     put("phone", registration.phone)
                     registration.cpf?.let { put("cpf", it) }

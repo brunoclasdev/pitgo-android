@@ -22,13 +22,17 @@ import kotlinx.coroutines.launch
 
 class SignUpViewModel(
     private val repository: SignUpRepository,
+    lockedPersonType: PersonType? = null,
 ) : ViewModel() {
-    private val _uiState = MutableStateFlow(SignUpUiState())
+    private val _uiState = MutableStateFlow(
+        SignUpUiState(personType = lockedPersonType, personTypeLocked = lockedPersonType != null),
+    )
     val uiState: StateFlow<SignUpUiState> = _uiState.asStateFlow()
 
     private var focusRequestId = 0L
 
     fun onPersonTypeChanged(personType: PersonType) = edit { state ->
+        if (state.personTypeLocked) return@edit state
         state.copy(
             personType = personType,
             document = "",
@@ -199,12 +203,15 @@ class SignUpViewModel(
     )
 
     companion object {
-        fun factory(repository: SignUpRepository): ViewModelProvider.Factory =
+        fun factory(
+            repository: SignUpRepository,
+            lockedPersonType: PersonType? = null,
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     require(modelClass.isAssignableFrom(SignUpViewModel::class.java))
-                    return SignUpViewModel(repository) as T
+                    return SignUpViewModel(repository, lockedPersonType) as T
                 }
             }
     }

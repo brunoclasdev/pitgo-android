@@ -103,6 +103,7 @@ sealed interface SignUpSubmissionState {
 
 data class SignUpUiState(
     val personType: PersonType? = null,
+    val personTypeLocked: Boolean = false,
     val name: String = "",
     val email: String = "",
     val phone: String = "",

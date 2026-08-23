@@ -33,7 +33,7 @@ class VehicleOnboardingViewModel(
 
     private fun resolve(destination: OnboardingDestination) {
         if (_uiState.value == VehicleOnboardingUiState.Resolving) return
-        val account = (sessionRepository.state.value as? AppSessionState.Authenticated)?.account
+        val account = (sessionRepository.state.value as? AppSessionState.Authenticated.Client)?.account
             ?: return
         _uiState.value = VehicleOnboardingUiState.Resolving
         viewModelScope.launch {

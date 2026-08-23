@@ -18,6 +18,13 @@ private data class SupabaseBuildConfiguration(
     val key: String,
 )
 
+private data class MapStyleBuildConfiguration(
+    val url: String,
+    val providerName: String,
+    val attribution: String,
+    val attributionUrl: String,
+)
+
 private fun javaStringLiteral(value: String): String = buildString {
     append('"')
     value.forEach { character ->
@@ -44,7 +51,7 @@ private fun javaStringLiteral(value: String): String = buildString {
     append('"')
 }
 
-private fun Project.supabaseProperty(name: String): String? {
+private fun Project.environmentProperty(name: String): String? {
     val gradleProperty = providers.gradleProperty(name)
     if (gradleProperty.isPresent) return gradleProperty.get()
 
@@ -55,6 +62,66 @@ private fun Project.supabaseProperty(name: String): String? {
     return runCatching {
         Properties().apply { load(localPropertiesText.reader()) }.getProperty(name)
     }.getOrNull()
+}
+
+private fun validateMapStyleConfiguration(
+    rawUrl: String?,
+    rawProviderName: String?,
+    rawAttribution: String?,
+    rawAttributionUrl: String?,
+): MapStyleBuildConfiguration {
+    val url = rawUrl?.trim().orEmpty()
+    val providerName = rawProviderName?.trim().orEmpty()
+    val attribution = rawAttribution?.trim().orEmpty()
+    val attributionUrl = rawAttributionUrl?.trim().orEmpty()
+    val errors = mutableListOf<String>()
+
+    if (!isValidManagedMapUrl(url, rejectKnownPublicHosts = true)) {
+        errors += "'mapStyleUrl' must be a managed absolute HTTPS URL without user-info, " +
+            "fragment, placeholder, or public/demo OSM host."
+    }
+    if (providerName.isBlank() || providerName.isPlaceholder()) {
+        errors += "'mapStyleProviderName' must be a public non-placeholder provider name."
+    }
+    if (attribution.isBlank() || attribution.isPlaceholder() ||
+        !attribution.contains("OpenStreetMap", ignoreCase = true)
+    ) {
+        errors += "'mapStyleAttribution' must include OpenStreetMap and provider attribution."
+    }
+    if (!isValidManagedMapUrl(attributionUrl, rejectKnownPublicHosts = false)) {
+        errors += "'mapStyleAttributionUrl' must be an absolute HTTPS URL without user-info, " +
+            "fragment, or placeholder."
+    }
+
+    if (errors.isNotEmpty()) {
+        throw GradleException(
+            errors.joinToString(
+                separator = "\n- ",
+                prefix = "Invalid MapLibre style configuration:\n- ",
+            )
+        )
+    }
+
+    return MapStyleBuildConfiguration(url, providerName, attribution, attributionUrl)
+}
+
+private fun isValidManagedMapUrl(value: String, rejectKnownPublicHosts: Boolean): Boolean =
+    runCatching {
+        if (value.isBlank() || value.isPlaceholder()) return@runCatching false
+        val uri = URI(value)
+        val host = uri.host?.lowercase().orEmpty()
+        val knownPublicOrDemoHost = host == "tile.openstreetmap.org" ||
+            host.endsWith(".tile.openstreetmap.org") ||
+            host == "demotiles.maplibre.org"
+        uri.isAbsolute && !uri.isOpaque && uri.scheme.equals("https", ignoreCase = true) &&
+            host.isNotBlank() && uri.userInfo == null && uri.fragment == null &&
+            (!rejectKnownPublicHosts || !knownPublicOrDemoHost)
+    }.getOrDefault(false)
+
+private fun String.isPlaceholder(): Boolean {
+    val normalized = uppercase()
+    return '<' in this || '>' in this || "CHANGE_ME" in normalized ||
+        "YOUR_" in normalized || "PLACEHOLDER" in normalized
 }
 
 private fun validateSupabaseConfiguration(
@@ -136,8 +203,14 @@ plugins {
 }
 
 private val supabaseConfiguration = validateSupabaseConfiguration(
-    rawUrl = project.supabaseProperty("supabaseUrl"),
-    rawKey = project.supabaseProperty("supabaseKey"),
+    rawUrl = project.environmentProperty("supabaseUrl"),
+    rawKey = project.environmentProperty("supabaseKey"),
+)
+private val mapStyleConfiguration = validateMapStyleConfiguration(
+    rawUrl = project.environmentProperty("mapStyleUrl"),
+    rawProviderName = project.environmentProperty("mapStyleProviderName"),
+    rawAttribution = project.environmentProperty("mapStyleAttribution"),
+    rawAttributionUrl = project.environmentProperty("mapStyleAttributionUrl"),
 )
 
 android {
@@ -160,6 +233,22 @@ android {
             "String",
             "SUPABASE_KEY",
             javaStringLiteral(supabaseConfiguration.key),
+        )
+        buildConfigField("String", "MAP_STYLE_URL", javaStringLiteral(mapStyleConfiguration.url))
+        buildConfigField(
+            "String",
+            "MAP_STYLE_PROVIDER_NAME",
+            javaStringLiteral(mapStyleConfiguration.providerName),
+        )
+        buildConfigField(
+            "String",
+            "MAP_STYLE_ATTRIBUTION",
+            javaStringLiteral(mapStyleConfiguration.attribution),
+        )
+        buildConfigField(
+            "String",
+            "MAP_STYLE_ATTRIBUTION_URL",
+            javaStringLiteral(mapStyleConfiguration.attributionUrl),
         )
     }
 
@@ -199,7 +288,11 @@ dependencies {
     implementation(libs.supabase.core)
     implementation(libs.supabase.auth)
     implementation(libs.supabase.postgrest)
-    implementation(libs.ktor.client.android)
+    implementation(libs.supabase.functions)
+    implementation(libs.supabase.realtime)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.maplibre.android.opengl)
+    implementation(libs.google.play.services.location)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.coil.compose)

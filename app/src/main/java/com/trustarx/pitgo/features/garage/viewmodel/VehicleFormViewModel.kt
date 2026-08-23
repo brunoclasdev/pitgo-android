@@ -75,7 +75,7 @@ class VehicleFormViewModel(
     init {
         viewModelScope.launch {
             sessionRepository.state.collectLatest { state ->
-                if (state !is AppSessionState.Authenticated) clearForExpiredSession()
+                if (state !is AppSessionState.Authenticated.Client) clearForExpiredSession()
             }
         }
         loadVehicleCount()
@@ -147,7 +147,7 @@ class VehicleFormViewModel(
     }
 
     private fun loadVehicleCount() {
-        val account = (sessionRepository.state.value as? AppSessionState.Authenticated)?.account
+        val account = (sessionRepository.state.value as? AppSessionState.Authenticated.Client)?.account
             ?: return clearForExpiredSession()
         viewModelScope.launch {
             when (val result = vehicleRepository.listActiveVehicles(account.userId)) {

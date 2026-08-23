@@ -4,7 +4,7 @@ import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.account.model.Profile
-import com.trustarx.pitgo.core.common.model.DemoService
+import com.trustarx.pitgo.core.catalog.model.HomeService
 import com.trustarx.pitgo.core.vehicle.model.Vehicle
 
 data class DiagnosticPrompt(
@@ -24,11 +24,11 @@ sealed interface HomeUiState {
     data class Content(
         val profile: Profile,
         val vehicle: Vehicle,
-        val services: List<DemoService>,
+        val services: List<HomeService>,
     ) : HomeUiState
     data class NoVehicle(
         val profile: Profile,
-        val services: List<DemoService>,
+        val services: List<HomeService>,
     ) : HomeUiState
     data object Failure : HomeUiState
 }

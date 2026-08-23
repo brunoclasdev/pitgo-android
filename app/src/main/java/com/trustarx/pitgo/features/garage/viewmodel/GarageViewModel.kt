@@ -30,7 +30,7 @@ class GarageViewModel(
 
     fun refresh() {
         if (loadInProgress) return
-        val account = (sessionRepository.state.value as? AppSessionState.Authenticated)?.account
+        val account = (sessionRepository.state.value as? AppSessionState.Authenticated.Client)?.account
             ?: run {
                 _uiState.value = GarageUiState.Failure(GarageFailureReason.SESSION_EXPIRED)
                 return

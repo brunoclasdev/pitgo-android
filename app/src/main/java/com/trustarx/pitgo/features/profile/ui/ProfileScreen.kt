@@ -18,6 +18,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,6 +44,8 @@ import com.trustarx.pitgo.core.ui.PitGoBottomNavigationItems
 @Composable
 fun ProfileScreen(
     account: AccountSnapshot,
+    legacyProviderMigrationAvailable: Boolean,
+    onMigrateProvider: () -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -75,6 +78,12 @@ fun ProfileScreen(
             )
             Text(account.profile.displayName, style = MaterialTheme.typography.titleLarge)
             Text(account.authEmail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (legacyProviderMigrationAvailable) {
+                OutlinedButton(
+                    onClick = onMigrateProvider,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = PitGoSize.MinimumTouchTarget),
+                ) { Text(stringResource(R.string.provider_migration_action)) }
+            }
             Button(
                 onClick = { confirmLogout = true },
                 modifier = Modifier.fillMaxWidth().heightIn(

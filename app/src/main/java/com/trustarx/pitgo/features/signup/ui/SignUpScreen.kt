@@ -83,6 +83,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.trustarx.pitgo.R
+import com.trustarx.pitgo.core.ui.CnpjVisualTransformation
+import com.trustarx.pitgo.core.ui.CpfVisualTransformation
+import com.trustarx.pitgo.core.ui.PhoneVisualTransformation
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 import com.trustarx.pitgo.features.signup.model.PersonType
@@ -318,13 +321,15 @@ private fun SignUpForm(
 
                     FailureBanner(uiState.submissionState)
 
-                    PersonTypeSelector(
-                        selected = uiState.personType,
-                        enabled = inputEnabled,
-                        error = uiState.errors.personType,
-                        handles = focusHandles.getValue(SignUpField.PERSON_TYPE),
-                        onSelected = onPersonTypeChanged,
-                    )
+                    if (!uiState.personTypeLocked) {
+                        PersonTypeSelector(
+                            selected = uiState.personType,
+                            enabled = inputEnabled,
+                            error = uiState.errors.personType,
+                            handles = focusHandles.getValue(SignUpField.PERSON_TYPE),
+                            onSelected = onPersonTypeChanged,
+                        )
+                    }
 
                     SignUpTextField(
                         value = uiState.name,

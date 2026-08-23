@@ -47,8 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.account.model.Profile
-import com.trustarx.pitgo.core.common.model.DemoService
-import com.trustarx.pitgo.core.common.model.DemoServiceId
+import com.trustarx.pitgo.core.catalog.model.HomeService
 import com.trustarx.pitgo.core.design.theme.PitGoElevation
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
@@ -63,7 +62,7 @@ import com.trustarx.pitgo.features.home.viewmodel.HomeViewModel
 @Composable
 fun HomeRoute(
     viewModel: HomeViewModel,
-    onServiceClick: (DemoServiceId) -> Unit,
+    onServiceClick: (String) -> Unit,
     onOpenGarage: () -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
 ) {
@@ -81,7 +80,7 @@ fun HomeRoute(
 fun HomeScreen(
     state: HomeUiState,
     onDiagnosticClick: () -> Unit,
-    onServiceClick: (DemoServiceId) -> Unit,
+    onServiceClick: (String) -> Unit,
     onOpenGarage: () -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
 ) {
@@ -134,9 +133,9 @@ private fun HomeGrid(
     padding: PaddingValues,
     profile: Profile,
     vehicle: Vehicle?,
-    services: List<DemoService>,
+    services: List<HomeService>,
     onDiagnosticClick: () -> Unit,
-    onServiceClick: (DemoServiceId) -> Unit,
+    onServiceClick: (String) -> Unit,
     onOpenGarage: () -> Unit,
 ) {
     LazyVerticalGrid(
@@ -188,6 +187,12 @@ private fun HomeGrid(
         }
         items(services, key = { it.id }) { service ->
             ServiceCard(service = service, onClick = { onServiceClick(service.id) })
+        }
+        if (services.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+            Text(
+                stringResource(R.string.home_services_empty),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -281,19 +286,19 @@ private fun NeutralLocationRow() {
 }
 
 @Composable
-fun ServiceCard(service: DemoService, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val name = stringResource(service.nameRes)
+fun ServiceCard(service: HomeService, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Card(
         onClick = onClick,
         modifier = modifier.fillMaxWidth().sizeIn(minHeight = PitGoSize.MinimumTouchTarget),
         elevation = CardDefaults.cardElevation(defaultElevation = PitGoElevation.Card),
     ) {
         Column(modifier = Modifier.padding(PitGoSpacing.Medium)) {
-            IconContainer(service.iconRes)
+            IconContainer(R.drawable.ic_service_mechanic)
             Spacer(Modifier.height(PitGoSpacing.Medium))
-            Text(name, style = MaterialTheme.typography.titleMedium)
+            Text(service.name, style = MaterialTheme.typography.titleMedium)
             Text(
-                stringResource(R.string.service_price, service.startingPrice),
+                service.minimumPrice?.let { stringResource(R.string.service_map_price, it) }
+                    ?: service.categoryName,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

@@ -31,6 +31,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,7 +65,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.design.theme.BrandPurple
 import com.trustarx.pitgo.core.design.theme.DarkPurple
@@ -86,7 +86,7 @@ fun RequestServiceRoute(
     onBack: () -> Unit,
     onSubmit: () -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
-    viewModel: RequestServiceViewModel = viewModel(),
+    viewModel: RequestServiceViewModel,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     LaunchedEffect(vehicle) { viewModel.bindVehicle(vehicle) }
@@ -160,6 +160,8 @@ fun RequestServiceScreen(
         },
     ) { innerPadding ->
         when (uiState) {
+            RequestServiceUiState.Loading -> LoadingServiceContent(innerPadding)
+
             is RequestServiceUiState.Content -> RequestServiceContent(
                 uiState = uiState,
                 innerPadding = innerPadding,
@@ -169,6 +171,11 @@ fun RequestServiceScreen(
             )
 
             RequestServiceUiState.InvalidService -> InvalidServiceContent(
+                innerPadding = innerPadding,
+                onBack = onBack,
+            )
+
+            RequestServiceUiState.Failure -> InvalidServiceContent(
                 innerPadding = innerPadding,
                 onBack = onBack,
             )
@@ -211,8 +218,8 @@ private fun RequestServiceContent(
         item {
             InfoCard(
                 label = stringResource(R.string.request_service_label),
-                value = stringResource(uiState.selectedService.nameRes),
-                iconRes = uiState.selectedService.iconRes,
+                value = uiState.selectedService.name,
+                iconRes = R.drawable.ic_nav_services,
             )
         }
 
@@ -314,6 +321,22 @@ private fun RequestServiceContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = PitGoSpacing.Small),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LoadingServiceContent(innerPadding: PaddingValues) {
+    Box(
+        modifier = Modifier.fillMaxSize().padding(innerPadding),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator()
+            Text(
+                stringResource(R.string.request_loading_service),
+                modifier = Modifier.padding(top = PitGoSpacing.Small),
             )
         }
     }

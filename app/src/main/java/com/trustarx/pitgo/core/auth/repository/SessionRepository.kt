@@ -1,7 +1,7 @@
 package com.trustarx.pitgo.core.auth.repository
 
-import com.trustarx.pitgo.core.account.repository.AccountLoadResult
-import com.trustarx.pitgo.core.account.repository.AccountRepository
+import com.trustarx.pitgo.core.account.repository.AccountContextLoadResult
+import com.trustarx.pitgo.core.account.repository.AccountContextRepository
 import com.trustarx.pitgo.core.auth.data.AuthFailure
 import com.trustarx.pitgo.core.auth.data.AuthOperationResult
 import com.trustarx.pitgo.core.auth.data.SupabaseAuthDataSource
@@ -32,7 +32,8 @@ sealed interface SessionLoginResult {
 
 class SessionRepository(
     private val authDataSource: SupabaseAuthDataSource,
-    private val accountRepository: AccountRepository,
+    private val accountRepository: AccountContextRepository,
+    private val beforeSignOut: suspend () -> Unit = {},
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val bootstrapMutex = Mutex()
@@ -100,6 +101,7 @@ class SessionRepository(
         }
 
     suspend fun signOut() {
+        beforeSignOut()
         _state.value = AppSessionState.Unauthenticated(UnauthenticatedReason.SIGNED_OUT)
         authDataSource.clearLocalSession()
     }
@@ -122,16 +124,22 @@ class SessionRepository(
     }
 
     private suspend fun loadAccount(userId: String, authEmail: String) {
-        _state.value = when (val result = accountRepository.loadAccount(userId, authEmail)) {
-            is AccountLoadResult.Success -> AppSessionState.Authenticated(result.account)
-            is AccountLoadResult.Blocked -> AppSessionState.ProfileBlocked(result.reason)
-            AccountLoadResult.Offline, AccountLoadResult.Timeout,
-            AccountLoadResult.ServiceUnavailable -> AppSessionState.OfflineVerification
-            AccountLoadResult.Unauthorized -> {
+        _state.value = when (val result = accountRepository.load(userId, authEmail)) {
+            is AccountContextLoadResult.Client -> AppSessionState.Authenticated.Client(
+                result.account, result.legacyProviderMigrationAvailable,
+            )
+            is AccountContextLoadResult.ProviderOnboarding ->
+                AppSessionState.Authenticated.ProviderOnboarding(result.session)
+            is AccountContextLoadResult.ProviderReady ->
+                AppSessionState.Authenticated.ProviderReady(result.account)
+            is AccountContextLoadResult.Blocked -> AppSessionState.ProfileBlocked(result.reason)
+            AccountContextLoadResult.Offline, AccountContextLoadResult.Timeout,
+            AccountContextLoadResult.ServiceUnavailable -> AppSessionState.OfflineVerification
+            AccountContextLoadResult.Unauthorized -> {
                 authDataSource.clearLocalSession()
                 AppSessionState.Unauthenticated(UnauthenticatedReason.INVALID_OR_EXPIRED)
             }
-            AccountLoadResult.Unknown -> AppSessionState.ProfileBlocked(
+            AccountContextLoadResult.Unknown -> AppSessionState.ProfileBlocked(
                 ProfileBlockedReason.INCONSISTENT,
             )
         }

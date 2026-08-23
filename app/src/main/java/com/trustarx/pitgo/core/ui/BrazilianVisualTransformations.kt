@@ -1,11 +1,11 @@
-package com.trustarx.pitgo.features.signup.ui
+package com.trustarx.pitgo.core.ui
 
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 
-internal object PhoneVisualTransformation : VisualTransformation {
+object PhoneVisualTransformation : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val separators = if (text.length > 10) {
             mapOf(0 to "(", 2 to ") ", 7 to "-")
@@ -16,17 +16,24 @@ internal object PhoneVisualTransformation : VisualTransformation {
     }
 }
 
-internal object CpfVisualTransformation : VisualTransformation {
+object CpfVisualTransformation : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText = transformWithSeparators(
         text = text,
         separatorsBeforeIndex = mapOf(3 to ".", 6 to ".", 9 to "-"),
     )
 }
 
-internal object CnpjVisualTransformation : VisualTransformation {
+object CnpjVisualTransformation : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText = transformWithSeparators(
         text = text,
         separatorsBeforeIndex = mapOf(2 to ".", 5 to ".", 8 to "/", 12 to "-"),
+    )
+}
+
+object CepVisualTransformation : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText = transformWithSeparators(
+        text = text,
+        separatorsBeforeIndex = mapOf(5 to "-"),
     )
 }
 

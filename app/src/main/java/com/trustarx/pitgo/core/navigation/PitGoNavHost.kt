@@ -26,7 +26,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.trustarx.pitgo.core.app.PitGoAppContainer
 import com.trustarx.pitgo.core.auth.model.AppSessionState
-import com.trustarx.pitgo.core.common.model.DemoServiceId
 import com.trustarx.pitgo.core.ui.BottomItemId
 import com.trustarx.pitgo.core.vehicle.model.VehicleFormOrigin
 import com.trustarx.pitgo.features.garage.ui.GarageRoute
@@ -41,7 +40,23 @@ import com.trustarx.pitgo.features.onboarding.ui.VehicleOnboardingRoute
 import com.trustarx.pitgo.features.onboarding.viewmodel.OnboardingDestination
 import com.trustarx.pitgo.features.onboarding.viewmodel.VehicleOnboardingViewModel
 import com.trustarx.pitgo.features.profile.ui.ProfileScreen
+import com.trustarx.pitgo.features.providerdashboard.ui.ProviderDashboardRoute
+import com.trustarx.pitgo.features.providerdashboard.viewmodel.ProviderDashboardViewModel
+import com.trustarx.pitgo.features.providerregistration.ui.ProviderRegistrationRoute
+import com.trustarx.pitgo.features.providerregistration.viewmodel.ProviderRegistrationViewModel
+import com.trustarx.pitgo.features.providersignup.ui.ProviderSignUpRoute
+import com.trustarx.pitgo.features.providersignup.viewmodel.ProviderSignUpViewModel
+import com.trustarx.pitgo.features.providermigration.model.ProviderMigrationStage
+import com.trustarx.pitgo.features.providermigration.ui.ProviderMigrationRoute
+import com.trustarx.pitgo.features.providermigration.viewmodel.ProviderMigrationViewModel
+import com.trustarx.pitgo.features.providertracking.ui.ProviderTrackingRoute
+import com.trustarx.pitgo.features.providertracking.viewmodel.ProviderTrackingViewModel
+import com.trustarx.pitgo.features.appointmenttracking.ui.AppointmentTrackingRoute
+import com.trustarx.pitgo.features.appointmenttracking.viewmodel.AppointmentTrackingViewModel
+import com.trustarx.pitgo.features.providermap.ui.ServiceMapRoute
+import com.trustarx.pitgo.features.providermap.viewmodel.ServiceMapViewModel
 import com.trustarx.pitgo.features.requestservice.ui.RequestServiceRoute
+import com.trustarx.pitgo.features.requestservice.viewmodel.RequestServiceViewModel
 import com.trustarx.pitgo.features.session.ui.SessionGateScreen
 import com.trustarx.pitgo.features.session.viewmodel.SessionViewModel
 import com.trustarx.pitgo.features.signup.ui.SignUpRoute
@@ -55,6 +70,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         factory = SessionViewModel.factory(container.sessionRepository),
     )
     val sessionState by sessionViewModel.state.collectAsStateWithLifecycle()
+    val migrationStage by container.providerMigrationCoordinator.stage.collectAsStateWithLifecycle()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
     val usesAppSurface = currentRoute in setOf(
@@ -66,7 +82,14 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         PitGoRoutes.VehicleOnboarding,
         PitGoRoutes.VehicleFormPattern,
         PitGoRoutes.RequestServicePattern,
-        PitGoRoutes.SignUp,
+        PitGoRoutes.SignUpPattern,
+        PitGoRoutes.ProviderSignUp,
+        PitGoRoutes.ProviderRegistration,
+        PitGoRoutes.ProviderDashboard,
+        PitGoRoutes.ProviderMigration,
+        PitGoRoutes.ProviderTracking,
+        PitGoRoutes.AppointmentTracking,
+        PitGoRoutes.ServiceMap,
     )
     SystemBarIconAppearance(usesAppSurface && !isSystemInDarkTheme())
 
@@ -74,18 +97,41 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         val publicRoute = currentRoute in setOf(
             PitGoRoutes.Welcome,
             PitGoRoutes.Login,
-            PitGoRoutes.SignUp,
+            PitGoRoutes.SignUpPattern,
+            PitGoRoutes.ProviderSignUp,
         )
         when (val state = sessionState) {
             is AppSessionState.Unauthenticated -> if (!publicRoute) {
                 navController.navigateRoot(PitGoRoutes.Welcome)
             }
-            is AppSessionState.Authenticated -> {
-                if (publicRoute || currentRoute == PitGoRoutes.SessionGate) {
-                    val destination = if (
-                        container.onboardingRepository.isPending(state.account.userId)
-                    ) PitGoRoutes.VehicleOnboarding else PitGoRoutes.Home
+            is AppSessionState.Authenticated.Client -> {
+                val providerOnly = currentRoute in setOf(
+                    PitGoRoutes.ProviderRegistration,
+                    PitGoRoutes.ProviderDashboard,
+                )
+                if (publicRoute || providerOnly || currentRoute == PitGoRoutes.SessionGate) {
+                    val destination = if (container.onboardingRepository.isPending(state.account.userId)) {
+                        PitGoRoutes.VehicleOnboarding
+                    } else PitGoRoutes.Home
                     navController.navigateRoot(destination)
+                }
+            }
+            is AppSessionState.Authenticated.ProviderOnboarding -> {
+                val destination = if (migrationStage == ProviderMigrationStage.AWAITING_PROVIDER ||
+                    migrationStage == ProviderMigrationStage.CLAIMING
+                ) PitGoRoutes.ProviderMigration else PitGoRoutes.ProviderRegistration
+                if (currentRoute != destination) {
+                    navController.navigateRoot(destination)
+                }
+            }
+            is AppSessionState.Authenticated.ProviderReady -> {
+                if (currentRoute !in setOf(
+                        PitGoRoutes.ProviderDashboard,
+                        PitGoRoutes.ProviderTracking,
+                        PitGoRoutes.AppointmentTracking,
+                    )
+                ) {
+                    navController.navigateRoot(PitGoRoutes.ProviderDashboard)
                 }
             }
             AppSessionState.Initializing,
@@ -116,7 +162,9 @@ fun PitGoNavHost(container: PitGoAppContainer) {
             val navigateToSignUp = dropUnlessResumed {
                 if (!navigationPending) {
                     navigationPending = true
-                    navController.navigate(PitGoRoutes.SignUp) { launchSingleTop = true }
+                    navController.navigate(PitGoRoutes.SignUp) {
+                        launchSingleTop = true
+                    }
                 }
             }
             val navigateToLogin = dropUnlessResumed {
@@ -125,10 +173,18 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     navController.navigate(PitGoRoutes.Login) { launchSingleTop = true }
                 }
             }
+            val navigateToProviderSignUp = dropUnlessResumed {
+                if (!navigationPending) {
+                    navigationPending = true
+                    navController.navigate(PitGoRoutes.ProviderSignUp) {
+                        launchSingleTop = true
+                    }
+                }
+            }
             WelcomeRoute(
                 onCreateAccount = navigateToSignUp,
                 onEnter = navigateToLogin,
-                onRegisterCompany = {},
+                onRegisterCompany = navigateToProviderSignUp,
             )
         }
 
@@ -144,7 +200,10 @@ fun PitGoNavHost(container: PitGoAppContainer) {
 
         composable(PitGoRoutes.SignUp) {
             val signUpViewModel: SignUpViewModel = viewModel(
-                factory = SignUpViewModel.factory(container.signUpRepository),
+                factory = SignUpViewModel.factory(
+                    repository = container.signUpRepository,
+                    lockedPersonType = null,
+                ),
             )
             SignUpRoute(
                 onBack = { navController.popBackStack() },
@@ -153,8 +212,19 @@ fun PitGoNavHost(container: PitGoAppContainer) {
             )
         }
 
+        composable(PitGoRoutes.ProviderSignUp) {
+            val providerSignUpViewModel: ProviderSignUpViewModel = viewModel(
+                factory = ProviderSignUpViewModel.factory(container.providerSignUpRepository),
+            )
+            ProviderSignUpRoute(
+                viewModel = providerSignUpViewModel,
+                onBack = { navController.popBackStack() },
+                onAccountCreated = sessionViewModel::refresh,
+            )
+        }
+
         composable(PitGoRoutes.VehicleOnboarding) {
-            if (sessionState is AppSessionState.Authenticated) {
+            if (sessionState is AppSessionState.Authenticated.Client) {
                 val onboardingViewModel: VehicleOnboardingViewModel = viewModel(
                     factory = VehicleOnboardingViewModel.factory(
                         container.onboardingRepository,
@@ -189,7 +259,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     entry.arguments?.getString(PitGoRoutes.VehicleFormOriginArg).orEmpty(),
                 )
             }.getOrDefault(VehicleFormOrigin.GARAGE)
-            if (sessionState is AppSessionState.Authenticated) {
+            if (sessionState is AppSessionState.Authenticated.Client) {
                 val formViewModel: VehicleFormViewModel = viewModel(
                     factory = VehicleFormViewModel.factory(
                         origin,
@@ -219,13 +289,16 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         }
 
         composable(PitGoRoutes.Home) {
-            val account = (sessionState as? AppSessionState.Authenticated)?.account
+            val account = (sessionState as? AppSessionState.Authenticated.Client)?.account
             if (account != null) {
                 val homeViewModel: HomeViewModel = viewModel(
-                    factory = HomeViewModel.factory(container.sessionRepository),
+                    factory = HomeViewModel.factory(
+                        container.sessionRepository,
+                        container.serviceCatalogRepository,
+                    ),
                 )
                 var navigationPending by remember { mutableStateOf(false) }
-                var selectedServiceId by remember { mutableStateOf<DemoServiceId?>(null) }
+                var selectedServiceId by remember { mutableStateOf<String?>(null) }
                 LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
                     navigationPending = false
                     selectedServiceId = null
@@ -234,7 +307,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     selectedServiceId?.let { serviceId ->
                         if (!navigationPending) {
                             navigationPending = true
-                            navController.navigate(PitGoRoutes.requestService(serviceId)) {
+                            navController.navigate(PitGoRoutes.serviceMap(serviceId)) {
                                 launchSingleTop = true
                             }
                         }
@@ -266,7 +339,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         }
 
         composable(PitGoRoutes.Garage) {
-            if (sessionState is AppSessionState.Authenticated) {
+            if (sessionState is AppSessionState.Authenticated.Client) {
                 val garageViewModel: GarageViewModel = viewModel(
                     factory = GarageViewModel.factory(
                         container.vehicleRepository,
@@ -295,10 +368,13 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         }
 
         composable(PitGoRoutes.Profile) {
-            val account = (sessionState as? AppSessionState.Authenticated)?.account
+            val clientSession = sessionState as? AppSessionState.Authenticated.Client
+            val account = clientSession?.account
             if (account != null) {
                 ProfileScreen(
                     account = account,
+                    legacyProviderMigrationAvailable = clientSession.legacyProviderMigrationAvailable,
+                    onMigrateProvider = { navController.navigate(PitGoRoutes.ProviderMigration) },
                     onBottomItemClick = { item ->
                         when (item) {
                             BottomItemId.HOME -> navController.navigate(PitGoRoutes.Home) {
@@ -317,17 +393,148 @@ fun PitGoNavHost(container: PitGoAppContainer) {
             }
         }
 
+        composable(PitGoRoutes.ProviderMigration) {
+            val providerMigrationViewModel: ProviderMigrationViewModel = viewModel(
+                factory = ProviderMigrationViewModel.factory(
+                    container.providerMigrationRepository,
+                    container.providerMigrationCoordinator,
+                ),
+            )
+            ProviderMigrationRoute(
+                viewModel = providerMigrationViewModel,
+                providerSession = sessionState is AppSessionState.Authenticated.ProviderOnboarding,
+                onSwitchAccount = sessionViewModel::logout,
+                onCompleted = sessionViewModel::refresh,
+            )
+        }
+
+        composable(PitGoRoutes.ProviderRegistration) {
+            val account = (sessionState as? AppSessionState.Authenticated.ProviderOnboarding)?.session
+            if (account != null) {
+                val providerViewModel: ProviderRegistrationViewModel = viewModel(
+                    factory = ProviderRegistrationViewModel.factory(
+                        account = account,
+                        repository = container.providerRegistrationRepository,
+                        addressVerificationRepository = container.providerAddressVerificationRepository,
+                        sessionRepository = container.sessionRepository,
+                    ),
+                )
+                ProviderRegistrationRoute(
+                    viewModel = providerViewModel,
+                    onBack = {
+                        if (!navController.popBackStack()) {
+                            navController.navigateRoot(PitGoRoutes.Welcome)
+                        }
+                    },
+                    onFinished = {
+                        sessionViewModel.refresh()
+                    },
+                    onSessionExpired = sessionViewModel::refresh,
+                )
+            }
+        }
+
+        composable(PitGoRoutes.ProviderDashboard) {
+            val account = (sessionState as? AppSessionState.Authenticated.ProviderReady)?.account
+            if (account != null) {
+                val dashboardViewModel: ProviderDashboardViewModel = viewModel(
+                    factory = ProviderDashboardViewModel.factory(
+                        account,
+                        container.providerDashboardRepository,
+                    ),
+                )
+                ProviderDashboardRoute(
+                    viewModel = dashboardViewModel,
+                    onLogout = sessionViewModel::logout,
+                )
+            }
+        }
+
+        composable(
+            route = PitGoRoutes.ProviderTracking,
+            arguments = listOf(navArgument(PitGoRoutes.AppointmentIdArg) { type = NavType.StringType }),
+        ) { entry ->
+            val appointmentId = entry.arguments?.getString(PitGoRoutes.AppointmentIdArg).orEmpty()
+            if (sessionState is AppSessionState.Authenticated.ProviderReady && appointmentId.isNotBlank()) {
+                val trackingViewModel: ProviderTrackingViewModel = viewModel(
+                    factory = ProviderTrackingViewModel.factory(
+                        appointmentId, container.providerTrackingStateRepository,
+                    ),
+                )
+                ProviderTrackingRoute(trackingViewModel)
+            }
+        }
+
+        composable(
+            route = PitGoRoutes.AppointmentTracking,
+            arguments = listOf(navArgument(PitGoRoutes.AppointmentIdArg) { type = NavType.StringType }),
+        ) { entry ->
+            val appointmentId = entry.arguments?.getString(PitGoRoutes.AppointmentIdArg).orEmpty()
+            if (sessionState is AppSessionState.Authenticated && appointmentId.isNotBlank()) {
+                val trackingViewModel: AppointmentTrackingViewModel = viewModel(
+                    factory = AppointmentTrackingViewModel.factory(
+                        appointmentId, container.appointmentTrackingRepository,
+                    ),
+                )
+                AppointmentTrackingRoute(
+                    viewModel = trackingViewModel,
+                    onBack = { navController.popBackStack() },
+                    onSessionExpired = sessionViewModel::refresh,
+                )
+            }
+        }
+
+        composable(
+            route = PitGoRoutes.ServiceMap,
+            arguments = listOf(navArgument(PitGoRoutes.ServiceMapArg) { type = NavType.StringType }),
+        ) { entry ->
+            val serviceId = entry.arguments?.getString(PitGoRoutes.ServiceMapArg).orEmpty()
+            if (sessionState is AppSessionState.Authenticated.Client) {
+                val mapViewModel: ServiceMapViewModel = viewModel(
+                    factory = ServiceMapViewModel.factory(
+                        serviceId,
+                        container.serviceMapRepository,
+                        container.deviceLocationRepository,
+                        container.connectivityObserver,
+                    ),
+                )
+                ServiceMapRoute(
+                    viewModel = mapViewModel,
+                    onBack = { navController.popBackStack() },
+                    onRequestService = { providerId, selectedServiceId ->
+                        navController.navigate(
+                            PitGoRoutes.requestService(selectedServiceId, providerId),
+                        ) { launchSingleTop = true }
+                    },
+                    onSessionExpired = sessionViewModel::refresh,
+                )
+            }
+        }
+
         composable(
             route = PitGoRoutes.RequestServicePattern,
-            arguments = listOf(navArgument(PitGoRoutes.RequestServiceArg) {
-                type = NavType.StringType
-                nullable = true
-                defaultValue = null
-            }),
+            arguments = listOf(
+                navArgument(PitGoRoutes.RequestServiceArg) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+                navArgument(PitGoRoutes.RequestProviderArg) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
         ) {
-            if (sessionState is AppSessionState.Authenticated) {
+            val clientSession = sessionState as? AppSessionState.Authenticated.Client
+            if (clientSession != null) {
+                val requestViewModel: RequestServiceViewModel =
+                    viewModel(
+                        factory = RequestServiceViewModel.factory(container.serviceCatalogRepository),
+                    )
                 RequestServiceRoute(
-                    vehicle = (sessionState as AppSessionState.Authenticated).account.primaryVehicle,
+                    viewModel = requestViewModel,
+                    vehicle = clientSession.account.primaryVehicle,
                     onBack = { navController.popBackStack() },
                     onSubmit = {},
                     onBottomItemClick = { item ->

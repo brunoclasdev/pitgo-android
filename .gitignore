@@ -103,9 +103,12 @@ target/
 out/
 
 *.DS_Store
+Thumbs.db
+*.tmp
 *.class
 *.swp
 *~
+.vscode/
 
 .idea
 *.ipr

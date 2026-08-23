@@ -33,3 +33,13 @@ secure_password_change = false
 max_frequency = "1s"
 otp_length = 6
 otp_expiry = 3600
+
+[auth.hook.before_user_created]
+enabled = true
+uri = "pg-functions://postgres/private/validate_account_signup"
+
+[functions.geocode-provider-address]
+verify_jwt = true
+
+[functions.refresh-provider-geocodes]
+verify_jwt = false
