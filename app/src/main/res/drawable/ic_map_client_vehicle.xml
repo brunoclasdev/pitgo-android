@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Client marker used while a service is in progress: the client is inside/near their
+     vehicle (being towed or waiting for assistance), so a car glyph reads clearer than a
+     generic pedestrian pin (see ic_map_client_location, still used by the "browse nearby
+     requests" map where the client hasn't necessarily broken down yet). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="52dp"
+    android:height="52dp"
+    android:viewportWidth="52"
+    android:viewportHeight="52">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M26,1C14.4,1 5,10.4 5,22c0,14.5 21,29 21,29s21,-14.5 21,-29C47,10.4 37.6,1 26,1z" />
+    <path
+        android:fillColor="#16A34A"
+        android:pathData="M26,4C16.1,4 8,12.1 8,22c0,11.5 18,25.4 18,25.4S44,33.5 44,22C44,12.1 35.9,4 26,4z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M15,25 L15,19 L20,19 L22,13 L30,13 L32,19 L37,19 L37,25 Z
+                           M23,28a3,3 0,1 0,-6 0a3,3 0,1 0,6 0
+                           M35,28a3,3 0,1 0,-6 0a3,3 0,1 0,6 0" />
+</vector>

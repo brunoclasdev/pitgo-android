@@ -44,7 +44,7 @@ class ServiceMapViewModel(
     private var cameraRevision = 0L
 
     init {
-        if (_state.value is ServiceMapUiState.Content) search(initialViewport.center)
+        if (_state.value is ServiceMapUiState.Content) loadInitialProviders()
         viewModelScope.launch {
             connectivityObserver.state.collect { connectivity ->
                 update { current ->
@@ -52,6 +52,23 @@ class ServiceMapViewModel(
                         current.copy(dataState = DiscoveryDataState.Offline)
                     } else current
                 }
+            }
+        }
+    }
+
+    private fun loadInitialProviders() {
+        generation += 1
+        val expected = generation
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            val result = repository.listInitial(serviceId)
+            if (expected != generation) return@launch
+            when (result) {
+                is ProviderDiscoveryResult.Success -> applyInitialProviders(result.providers)
+                ProviderDiscoveryResult.Offline -> update { it.copy(dataState = DiscoveryDataState.Offline) }
+                ProviderDiscoveryResult.SessionExpired -> update { it.copy(dataState = DiscoveryDataState.SessionExpired) }
+                ProviderDiscoveryResult.InvalidInput -> _state.value = ServiceMapUiState.InvalidService
+                else -> update { it.copy(dataState = DiscoveryDataState.Failure) }
             }
         }
     }
@@ -87,7 +104,12 @@ class ServiceMapViewModel(
 
     fun onLocationPermissionResult(granted: Boolean) {
         if (!granted) {
-            update { it.copy(clientLocationState = ClientLocationState.Denied) }
+            update {
+                it.copy(
+                    clientLocationState = ClientLocationState.Denied,
+                    clientCoordinate = null,
+                )
+            }
             return
         }
         useDeviceLocation()
@@ -100,7 +122,12 @@ class ServiceMapViewModel(
             is DeviceLocationResult.Success -> {
                 val center = MapCoordinate(result.fix.latitude, result.fix.longitude)
                 if (!center.isValid) {
-                    update { it.copy(clientLocationState = ClientLocationState.Unavailable) }
+                    update {
+                        it.copy(
+                            clientLocationState = ClientLocationState.Unavailable,
+                            clientCoordinate = null,
+                        )
+                    }
                     return@launch
                 }
                 cameraRevision += 1
@@ -110,11 +137,17 @@ class ServiceMapViewModel(
                         viewport = target,
                         cameraCommand = MapViewportCommand(target, cameraRevision),
                         clientLocationState = ClientLocationState.InUse,
+                        clientCoordinate = center,
                     )
                 }
                 search(center)
             }
-            else -> update { it.copy(clientLocationState = ClientLocationState.Unavailable) }
+            else -> update {
+                it.copy(
+                    clientLocationState = ClientLocationState.Unavailable,
+                    clientCoordinate = null,
+                )
+            }
         }
     }
 
@@ -180,6 +213,7 @@ class ServiceMapViewModel(
                 clientLocationState = if (it.clientLocationState == ClientLocationState.InUse) {
                     ClientLocationState.NotRequested
                 } else it.clientLocationState,
+                clientCoordinate = null,
             )
         }
     }
@@ -198,6 +232,33 @@ class ServiceMapViewModel(
             selectedGroupKey = current.selectedGroupKey?.takeIf(groups::containsKey),
             dataState = if (providers.isEmpty()) DiscoveryDataState.Empty else DiscoveryDataState.Ready,
         )
+    }
+
+    private fun applyInitialProviders(providers: List<PublicProvider>) {
+        applyProviders(providers)
+        if (providers.isEmpty()) return
+        val latitudes = providers.map { it.addressCoordinate.latitude }
+        val longitudes = providers.map { it.addressCoordinate.longitude }
+        val latitudeSpan = (latitudes.maxOrNull() ?: 0.0) - (latitudes.minOrNull() ?: 0.0)
+        val longitudeSpan = (longitudes.maxOrNull() ?: 0.0) - (longitudes.minOrNull() ?: 0.0)
+        val span = maxOf(latitudeSpan, longitudeSpan)
+        val zoom = when {
+            providers.size == 1 -> 13.0
+            span <= 0.5 -> 10.0
+            span <= 5.0 -> 6.0
+            else -> 4.0
+        }
+        cameraRevision += 1
+        val target = MapViewport(
+            center = MapCoordinate(latitudes.average(), longitudes.average()),
+            zoom = zoom,
+        )
+        update {
+            it.copy(
+                viewport = target,
+                cameraCommand = MapViewportCommand(target, cameraRevision),
+            )
+        }
     }
 
     private inline fun update(block: (ServiceMapUiState.Content) -> ServiceMapUiState.Content) {

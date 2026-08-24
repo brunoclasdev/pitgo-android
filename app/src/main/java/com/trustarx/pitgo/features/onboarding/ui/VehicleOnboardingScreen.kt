@@ -36,22 +36,22 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
-import com.trustarx.pitgo.features.onboarding.viewmodel.OnboardingDestination
 import com.trustarx.pitgo.features.onboarding.viewmodel.VehicleOnboardingUiState
 import com.trustarx.pitgo.features.onboarding.viewmodel.VehicleOnboardingViewModel
 
 @Composable
 fun VehicleOnboardingRoute(
     viewModel: VehicleOnboardingViewModel,
-    onCompleted: (OnboardingDestination) -> Unit,
+    onRegisterVehicle: () -> Unit,
+    onCompleted: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     LaunchedEffect(state) {
-        (state as? VehicleOnboardingUiState.Completed)?.let { onCompleted(it.destination) }
+        if (state == VehicleOnboardingUiState.Completed) onCompleted()
     }
     VehicleOnboardingScreen(
         state = state,
-        onRegisterVehicle = viewModel::registerVehicle,
+        onRegisterVehicle = onRegisterVehicle,
         onSkip = viewModel::skipForNow,
     )
 }

@@ -9,7 +9,7 @@ class ProviderTrackingViewModel(
     private val repository: ProviderTrackingStateRepository,
 ) : ViewModel() {
     val state = repository.state
-    fun start() = repository.start(appointmentId)
+    fun start() = repository.start()
     fun stop() = repository.stop()
 
     companion object {

@@ -15,15 +15,16 @@ internal data class PublicProviderDto(
     @SerialName("location_mode") val locationMode: String,
     val latitude: Double,
     val longitude: Double,
-    @SerialName("distance_meters") val distanceMeters: Double,
+    @SerialName("distance_meters") val distanceMeters: Double? = null,
     @SerialName("minimum_price") val minimumPrice: JsonElement? = null,
 ) {
     fun toDomainOrNull(): PublicProvider? {
         val coordinate = MapCoordinate(latitude, longitude)
         val mode = ProviderLocationMode.entries.firstOrNull { it.name == locationMode }
             ?: return null
-        if (!coordinate.isValid || displayName.isBlank() || !distanceMeters.isFinite() ||
-            distanceMeters < 0 || !isUuid(providerId)
+        if (!coordinate.isValid || displayName.isBlank() ||
+            (distanceMeters != null && (!distanceMeters.isFinite() || distanceMeters < 0)) ||
+            !isUuid(providerId)
         ) return null
         return PublicProvider(
             id = providerId,

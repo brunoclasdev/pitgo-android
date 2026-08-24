@@ -2,7 +2,9 @@ package com.trustarx.pitgo.features.providerregistration.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +24,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -59,6 +62,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -93,8 +97,11 @@ import com.trustarx.pitgo.features.providerregistration.model.ProviderFieldError
 import com.trustarx.pitgo.features.providerregistration.model.ProviderRegistrationUiState
 import com.trustarx.pitgo.features.providerregistration.model.ProviderSubmissionState
 import com.trustarx.pitgo.features.providerregistration.model.ProviderSummary
+import com.trustarx.pitgo.core.address.model.PostalCodeLookupFailure
+import com.trustarx.pitgo.core.address.model.PostalCodeLookupState
 import com.trustarx.pitgo.features.providerregistration.model.ServiceCategory
 import com.trustarx.pitgo.features.providerregistration.viewmodel.ProviderRegistrationViewModel
+import com.trustarx.pitgo.features.providerregistration.validation.ProviderRegistrationValidation
 import kotlinx.coroutines.yield
 
 @Composable
@@ -129,6 +136,7 @@ fun ProviderRegistrationRoute(
         onBack = ::handleBack,
         onRetryStartup = viewModel::retryStartup,
         onFieldChanged = viewModel::onFieldChanged,
+        onLookupPostalCode = viewModel::lookupPostalCode,
         onLocationModeSelected = viewModel::onLocationModeSelected,
         onVerifyAddress = requestAddressVerification,
         onConfirmDivergence = viewModel::verifyAddress,
@@ -182,6 +190,7 @@ fun ProviderRegistrationScreen(
     onBack: () -> Unit,
     onRetryStartup: () -> Unit,
     onFieldChanged: (ProviderField, String) -> Unit,
+    onLookupPostalCode: () -> Unit,
     onLocationModeSelected: (ProviderLocationMode) -> Unit,
     onVerifyAddress: () -> Unit,
     onConfirmDivergence: () -> Unit,
@@ -235,6 +244,7 @@ fun ProviderRegistrationScreen(
                 is ProviderRegistrationUiState.Editing -> RegistrationForm(
                     content = state.content,
                     onFieldChanged = onFieldChanged,
+                    onLookupPostalCode = onLookupPostalCode,
                     onLocationModeSelected = onLocationModeSelected,
                     onVerifyAddress = onVerifyAddress,
                     onConfirmDivergence = onConfirmDivergence,
@@ -273,6 +283,7 @@ fun ProviderRegistrationScreen(
 private fun RegistrationForm(
     content: ProviderEditingContent,
     onFieldChanged: (ProviderField, String) -> Unit,
+    onLookupPostalCode: () -> Unit,
     onLocationModeSelected: (ProviderLocationMode) -> Unit,
     onVerifyAddress: () -> Unit,
     onConfirmDivergence: () -> Unit,
@@ -289,16 +300,14 @@ private fun RegistrationForm(
     val focusRequesters = remember { mutableStateMapOf<ProviderField, FocusRequester>() }
     val keyboard = LocalSoftwareKeyboardController.current
     val submitting = content.submission == ProviderSubmissionState.Submitting
+    val postalCodeLoading = content.postalCodeLookup is PostalCodeLookupState.Loading
     val categories = (content.categories as? LoadState.Content)?.value.orEmpty()
     val selectedServices = content.draft.offers.mapNotNull(OfferDraft::serviceId).toSet()
 
     LaunchedEffect(content.focusRequest) {
         val request = content.focusRequest ?: return@LaunchedEffect
-        val offerIndex = (request.field as? ProviderField.Offer)?.let { field ->
-            content.draft.offers.indexOfFirst { it.localId == field.localId }
-        }
-        if (offerIndex != null && offerIndex >= 0) {
-            listState.animateScrollToItem(FORM_ITEMS_BEFORE_OFFERS + offerIndex)
+        formRowIndex(request.field, content)?.let { itemIndex ->
+            listState.animateScrollToItem(itemIndex)
             yield()
         }
         focusRequesters[request.field]?.requestFocus()
@@ -329,6 +338,11 @@ private fun RegistrationForm(
             ProviderModeSection(
                 selected = content.draft.locationMode,
                 enabled = !submitting,
+                error = content.errors[ProviderField.LocationMode],
+                focusRequester = rememberFieldFocusRequester(
+                    focusRequesters,
+                    ProviderField.LocationMode,
+                ),
                 onSelected = onLocationModeSelected,
             )
         }
@@ -361,14 +375,17 @@ private fun RegistrationForm(
         }
         item { SectionTitle(R.string.provider_address_section) }
         item {
-            FormTextField(content.draft.address.postalCode, ProviderField.PostalCode,
-                R.string.provider_zip_code_label, content, submitting, focusRequesters,
-                onFieldChanged, KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
-                visualTransformation = CepVisualTransformation)
+            CepLookupField(
+                content = content,
+                submitting = submitting,
+                focusRequesters = focusRequesters,
+                onChanged = { onFieldChanged(ProviderField.PostalCode, it) },
+                onLookup = onLookupPostalCode,
+            )
         }
         item {
             FormTextField(content.draft.address.street, ProviderField.Street, R.string.provider_street_label,
-                content, submitting, focusRequesters, onFieldChanged,
+                content, submitting || postalCodeLoading, focusRequesters, onFieldChanged,
                 KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next))
         }
         item {
@@ -378,23 +395,23 @@ private fun RegistrationForm(
         }
         item {
             FormTextField(content.draft.address.complement, ProviderField.Complement,
-                R.string.provider_complement_label, content, submitting, focusRequesters,
+                R.string.provider_complement_label, content, submitting || postalCodeLoading, focusRequesters,
                 onFieldChanged, KeyboardOptions(imeAction = ImeAction.Next))
         }
         item {
             FormTextField(content.draft.address.neighborhood, ProviderField.Neighborhood,
-                R.string.provider_neighborhood_label, content, submitting, focusRequesters,
+                R.string.provider_neighborhood_label, content, submitting || postalCodeLoading, focusRequesters,
                 onFieldChanged, KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next))
         }
         item {
             FormTextField(content.draft.address.city, ProviderField.City, R.string.provider_city_label,
-                content, submitting, focusRequesters, onFieldChanged,
+                content, submitting || postalCodeLoading, focusRequesters, onFieldChanged,
                 KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next))
         }
         item {
             StateDropdown(
                 selected = content.draft.address.state,
-                enabled = !submitting,
+                enabled = !submitting && !postalCodeLoading,
                 error = content.errors[ProviderField.State],
                 focusRequester = rememberFieldFocusRequester(focusRequesters, ProviderField.State),
                 onSelected = { onFieldChanged(ProviderField.State, it) },
@@ -412,8 +429,33 @@ private fun RegistrationForm(
                 )
             }
         }
-        item { AddressVerificationSection(content, submitting, onVerifyAddress, onConfirmDivergence) }
-        item { SectionTitle(R.string.provider_offers_section) }
+        item {
+            AddressVerificationSection(
+                content,
+                submitting || postalCodeLoading,
+                rememberFieldFocusRequester(
+                    focusRequesters,
+                    ProviderField.LocationVerification,
+                ),
+                onVerifyAddress,
+                onConfirmDivergence,
+            )
+        }
+        item {
+            val offersError = content.errors[ProviderField.Offers]?.let {
+                fieldErrorMessage(it, ProviderField.Offers)
+            }
+            Box(
+                modifier = Modifier.focusRequester(
+                    rememberFieldFocusRequester(focusRequesters, ProviderField.Offers),
+                ).focusable().then(
+                    if (offersError != null) Modifier.semantics { error(offersError) }
+                    else Modifier,
+                ),
+            ) {
+                SectionTitle(R.string.provider_offers_section)
+            }
+        }
         if (content.categories == LoadState.Loading) {
             item { CatalogMessage(stringResource(R.string.provider_catalog_loading), loading = true) }
         } else if (content.categories == LoadState.Empty) {
@@ -467,7 +509,8 @@ private fun RegistrationForm(
                         keyboard?.hide()
                         onSubmit()
                     },
-                    enabled = !submitting && content.categories is LoadState.Content &&
+                    enabled = !submitting && !postalCodeLoading &&
+                        content.categories is LoadState.Content &&
                         content.draft.offers.isNotEmpty(),
                     modifier = Modifier.fillMaxWidth().heightIn(min = PitGoSize.PrimaryActionMinHeight),
                 ) {
@@ -490,10 +533,20 @@ private fun RegistrationForm(
 private fun ProviderModeSection(
     selected: ProviderLocationMode?,
     enabled: Boolean,
+    error: ProviderFieldError?,
+    focusRequester: FocusRequester,
     onSelected: (ProviderLocationMode) -> Unit,
 ) {
+    val errorMessage = error?.let { fieldErrorMessage(it, ProviderField.LocationMode) }
     FormWidth {
-        Column(verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
+        Column(
+            modifier = Modifier.focusRequester(focusRequester).focusable()
+                .then(
+                    if (errorMessage != null) Modifier.semantics { error(errorMessage) }
+                    else Modifier,
+                ),
+            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
+        ) {
             Text(
                 stringResource(R.string.provider_mode_label),
                 style = MaterialTheme.typography.titleMedium,
@@ -518,6 +571,9 @@ private fun ProviderModeSection(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            errorMessage?.let {
+                Text(it, color = MaterialTheme.colorScheme.error)
+            }
         }
     }
 }
@@ -526,11 +582,22 @@ private fun ProviderModeSection(
 private fun AddressVerificationSection(
     content: ProviderEditingContent,
     submitting: Boolean,
+    focusRequester: FocusRequester,
     onVerifyAddress: () -> Unit,
     onConfirmDivergence: () -> Unit,
 ) {
+    val errorMessage = content.errors[ProviderField.LocationVerification]?.let {
+        fieldErrorMessage(it, ProviderField.LocationVerification)
+    }
     FormWidth {
-        Column(verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
+        Column(
+            modifier = Modifier.focusRequester(focusRequester).focusable()
+                .then(
+                    if (errorMessage != null) Modifier.semantics { error(errorMessage) }
+                    else Modifier,
+                ),
+            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
+        ) {
             Text(
                 stringResource(R.string.provider_location_verification_explanation),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -575,6 +642,133 @@ private fun AddressVerificationSection(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
+            errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+    }
+}
+
+@Composable
+private fun CepLookupField(
+    content: ProviderEditingContent,
+    submitting: Boolean,
+    focusRequesters: MutableMap<ProviderField, FocusRequester>,
+    onChanged: (String) -> Unit,
+    onLookup: () -> Unit,
+) {
+    val lookup = content.postalCodeLookup
+    val loading = lookup is PostalCodeLookupState.Loading
+    val error = content.errors[ProviderField.PostalCode]
+    val errorMessage = error?.let { fieldErrorMessage(it, ProviderField.PostalCode) }
+    val focusRequester = rememberFieldFocusRequester(
+        focusRequesters,
+        ProviderField.PostalCode,
+    )
+    val keyboard = LocalSoftwareKeyboardController.current
+    val canLookup = content.draft.address.postalCode.length == 8 && !loading && !submitting
+    val status = when (lookup) {
+        PostalCodeLookupState.Idle -> null
+        is PostalCodeLookupState.Loading -> stringResource(R.string.provider_zip_searching)
+        is PostalCodeLookupState.Found -> {
+            val address = content.draft.address
+            if (address.street.isNotBlank() && address.neighborhood.isNotBlank() &&
+                address.city.isNotBlank() && BrazilianInputValidation.isValidState(address.state)
+            ) stringResource(R.string.provider_zip_success)
+            else stringResource(R.string.provider_zip_success_incomplete)
+        }
+        is PostalCodeLookupState.NotFound -> null
+        is PostalCodeLookupState.Failure -> when (lookup.reason) {
+            PostalCodeLookupFailure.OFFLINE -> stringResource(R.string.provider_zip_lookup_offline)
+            PostalCodeLookupFailure.TIMEOUT -> stringResource(R.string.provider_zip_lookup_timeout)
+            PostalCodeLookupFailure.SERVICE_UNAVAILABLE ->
+                stringResource(R.string.provider_zip_lookup_unavailable)
+            PostalCodeLookupFailure.UNEXPECTED_RESPONSE ->
+                stringResource(R.string.provider_zip_lookup_unexpected)
+        }
+    }
+    val buttonLabel = if (lookup is PostalCodeLookupState.Failure ||
+        lookup is PostalCodeLookupState.NotFound
+    ) {
+        stringResource(R.string.action_retry)
+    } else {
+        stringResource(R.string.provider_zip_search)
+    }
+
+    FormWidth {
+        BoxWithConstraints {
+            val horizontal = maxWidth >= 480.dp && LocalDensity.current.fontScale < 1.5f
+            val field: @Composable () -> Unit = {
+                OutlinedTextField(
+                    value = content.draft.address.postalCode,
+                    onValueChange = onChanged,
+                    enabled = !submitting,
+                    label = { Text(stringResource(R.string.provider_zip_code_label)) },
+                    isError = errorMessage != null,
+                    supportingText = errorMessage?.let { { Text(it) } },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Search,
+                    ),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        if (canLookup) {
+                            keyboard?.hide()
+                            onLookup()
+                        }
+                    }),
+                    visualTransformation = CepVisualTransformation,
+                    modifier = Modifier.fillMaxWidth()
+                        .focusRequester(focusRequester)
+                        .then(
+                            if (errorMessage != null) {
+                                Modifier.semantics { error(errorMessage) }
+                            } else Modifier,
+                        ),
+                )
+            }
+            val action: @Composable () -> Unit = {
+                OutlinedButton(
+                    onClick = onLookup,
+                    enabled = canLookup,
+                    modifier = Modifier.fillMaxWidth()
+                        .heightIn(min = PitGoSize.MinimumTouchTarget),
+                ) {
+                    if (loading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(PitGoSize.FeatureIcon),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.size(PitGoSpacing.Small))
+                    }
+                    Text(if (loading) stringResource(R.string.provider_zip_searching) else buttonLabel)
+                }
+            }
+            if (horizontal) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Box(Modifier.weight(1f)) { field() }
+                    Box(Modifier.widthIn(min = 144.dp)) { action() }
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
+                    field()
+                    action()
+                }
+            }
+        }
+        status?.let { message ->
+            Text(
+                message,
+                color = if (lookup is PostalCodeLookupState.Failure) {
+                    MaterialTheme.colorScheme.error
+                } else MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.semantics {
+                    liveRegion = LiveRegionMode.Polite
+                    stateDescription = message
+                },
+            )
         }
     }
 }
@@ -1022,6 +1216,8 @@ private fun fieldErrorMessage(
     field: ProviderField? = null,
 ): String = when (error) {
     ProviderFieldError.REQUIRED -> when (field) {
+        ProviderField.LocationMode -> stringResource(R.string.provider_mode_required_error)
+        ProviderField.Offers -> stringResource(R.string.provider_offers_empty)
         is ProviderField.Offer -> when (field.field) {
             OfferField.CATEGORY -> stringResource(R.string.provider_category_required_error)
             OfferField.SERVICE -> stringResource(R.string.provider_service_required_error)
@@ -1035,6 +1231,7 @@ private fun fieldErrorMessage(
     ProviderFieldError.INVALID_PHONE -> stringResource(R.string.provider_phone_invalid_error)
     ProviderFieldError.INVALID_CNPJ -> stringResource(R.string.provider_cnpj_invalid_error)
     ProviderFieldError.INVALID_POSTAL_CODE -> stringResource(R.string.provider_zip_code_invalid_error)
+    ProviderFieldError.POSTAL_CODE_NOT_FOUND -> stringResource(R.string.provider_zip_not_found)
     ProviderFieldError.INVALID_STATE -> stringResource(R.string.provider_state_invalid_error)
     ProviderFieldError.COORDINATE_PAIR_REQUIRED -> stringResource(R.string.provider_coordinates_pair_error)
     ProviderFieldError.COORDINATE_OUT_OF_RANGE -> if (field == ProviderField.Longitude) {
@@ -1047,7 +1244,10 @@ private fun fieldErrorMessage(
     ProviderFieldError.INVALID_PRICE -> stringResource(R.string.provider_price_invalid_error)
     ProviderFieldError.PRICE_MUST_BE_POSITIVE -> stringResource(R.string.provider_price_positive_error)
     ProviderFieldError.INVALID_DURATION -> stringResource(R.string.provider_duration_range_error)
-    ProviderFieldError.TEXT_TOO_LONG -> stringResource(R.string.provider_failure_contract)
+    ProviderFieldError.TEXT_TOO_LONG -> stringResource(
+        R.string.provider_text_too_long_error,
+        ProviderRegistrationValidation.maximumLength(field ?: ProviderField.Description) ?: 1,
+    )
     ProviderFieldError.UNAVAILABLE -> if (field == ProviderField.Cnpj) {
         stringResource(R.string.provider_cnpj_unavailable_error)
     } else {
@@ -1067,4 +1267,27 @@ private fun failureMessage(failure: ProviderFailure): String = when (failure) {
     ProviderFailure.Unknown -> stringResource(R.string.provider_failure_unknown)
 }
 
-private const val FORM_ITEMS_BEFORE_OFFERS = 18
+private fun formRowIndex(field: ProviderField, content: ProviderEditingContent): Int? = when (field) {
+    ProviderField.LocationMode -> 2
+    ProviderField.Name -> 3
+    ProviderField.Description -> 4
+    ProviderField.Email -> 5
+    ProviderField.Phone -> 6
+    ProviderField.Cnpj -> 7
+    ProviderField.PostalCode -> 9
+    ProviderField.Street -> 10
+    ProviderField.Number -> 11
+    ProviderField.Complement -> 12
+    ProviderField.Neighborhood -> 13
+    ProviderField.City -> 14
+    ProviderField.State -> 15
+    ProviderField.LocationVerification -> 17
+    ProviderField.Offers -> 18
+    is ProviderField.Offer -> {
+        val catalogRowCount = if (content.categories is LoadState.Content) 0 else 1
+        val emptyOffersRowCount = if (content.draft.offers.isEmpty()) 1 else 0
+        val offerIndex = content.draft.offers.indexOfFirst { it.localId == field.localId }
+        if (offerIndex < 0) null else 19 + catalogRowCount + emptyOffersRowCount + offerIndex
+    }
+    ProviderField.Latitude, ProviderField.Longitude -> 17
+}

@@ -3,6 +3,7 @@ package com.trustarx.pitgo.features.providertracking.repository
 import com.trustarx.pitgo.features.providertracking.data.PublishLocationResponseDto
 import com.trustarx.pitgo.features.providertracking.model.ProviderLocationUpdate
 import com.trustarx.pitgo.features.providertracking.model.PublishLocationResult
+import com.trustarx.pitgo.features.providertracking.model.ProviderTrackingTarget
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.exceptions.HttpRequestException
 import io.github.jan.supabase.postgrest.exception.PostgrestRestException
@@ -15,8 +16,7 @@ import java.time.Instant
 
 class ProviderLocationRepository(private val client: SupabaseClient) {
     suspend fun publish(update: ProviderLocationUpdate): PublishLocationResult = try {
-        val result = client.postgrest.rpc("publish_provider_location", buildJsonObject {
-            put("p_appointment_id", update.appointmentId)
+        val result = client.postgrest.rpc("publish_mobile_provider_location", buildJsonObject {
             put("p_latitude", update.fix.latitude)
             put("p_longitude", update.fix.longitude)
             put("p_accuracy_m", update.fix.accuracyMeters)
@@ -25,7 +25,11 @@ class ProviderLocationRepository(private val client: SupabaseClient) {
             put("p_tracker_sequence", update.sequence)
         }).decodeAs<PublishLocationResponseDto>()
         when (result.outcome) {
-            "PUBLISHED" -> PublishLocationResult.Published(result.version ?: 0)
+            "PUBLISHED" -> PublishLocationResult.Published(
+                result.version ?: 0,
+                runCatching { ProviderTrackingTarget.valueOf(result.target.orEmpty()) }
+                    .getOrDefault(ProviderTrackingTarget.DISCOVERY),
+            )
             "IGNORED" -> PublishLocationResult.Ignored
             "PUBLISHER_CONFLICT" -> PublishLocationResult.Conflict
             else -> PublishLocationResult.Failed
@@ -40,12 +44,11 @@ class ProviderLocationRepository(private val client: SupabaseClient) {
           else PublishLocationResult.Failed
       } catch (_: Throwable) { PublishLocationResult.Failed }
 
-    suspend fun stop(appointmentId: String, trackerId: String) {
-        runCatching {
-            client.postgrest.rpc("stop_provider_location", buildJsonObject {
-                put("p_appointment_id", appointmentId)
+    suspend fun stop(trackerId: String) {
+        try {
+            client.postgrest.rpc("stop_mobile_provider_location", buildJsonObject {
                 put("p_tracker_instance_id", trackerId)
             })
-        }
+        } catch (cancel: CancellationException) { throw cancel } catch (_: Throwable) { Unit }
     }
 }

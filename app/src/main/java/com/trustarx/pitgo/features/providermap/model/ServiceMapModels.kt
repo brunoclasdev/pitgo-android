@@ -16,7 +16,7 @@ data class PublicProvider(
     val displayName: String,
     val locationMode: ProviderLocationMode,
     val addressCoordinate: MapCoordinate,
-    val distanceMeters: Double,
+    val distanceMeters: Double?,
     val minimumPrice: String?,
 )
 
@@ -52,6 +52,7 @@ sealed interface ServiceMapUiState {
         val selectedGroupKey: String? = null,
         val coincidentGroups: Map<String, List<String>> = emptyMap(),
         val clientLocationState: ClientLocationState = ClientLocationState.NotRequested,
+        val clientCoordinate: MapCoordinate? = null,
         val styleReloadRevision: Long = 0L,
         val searchGeneration: Long = 0L,
     ) : ServiceMapUiState {
@@ -71,7 +72,9 @@ sealed interface ServiceMapUiState {
                     MapMarkerSpec(
                         id = provider.id,
                         coordinate = provider.addressCoordinate,
-                        kind = MapMarkerKind.ADDRESS,
+                        kind = if (provider.locationMode == ProviderLocationMode.MOBILE) {
+                            MapMarkerKind.MOBILE_PROVIDER
+                        } else MapMarkerKind.ADDRESS,
                         selected = provider.id == selectedProviderId,
                         accessibilityLabel = provider.displayName,
                     )
@@ -88,8 +91,20 @@ sealed interface ServiceMapUiState {
                         accessibilityLabel = "${ids.size} prestadores no mesmo endereço",
                     )
                 }
-                return singles + groups
+                val client = clientCoordinate?.takeIf(MapCoordinate::isValid)?.let { coordinate ->
+                    MapMarkerSpec(
+                        id = CLIENT_LOCATION_MARKER_ID,
+                        coordinate = coordinate,
+                        kind = MapMarkerKind.CLIENT_LOCATION,
+                        accessibilityLabel = "Sua localização atual",
+                    )
+                }
+                return singles + groups + listOfNotNull(client)
             }
+
+        private companion object {
+            const val CLIENT_LOCATION_MARKER_ID = "client-current-location"
+        }
     }
 
     data object InvalidService : ServiceMapUiState

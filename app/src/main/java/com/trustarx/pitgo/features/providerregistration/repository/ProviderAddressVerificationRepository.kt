@@ -1,6 +1,7 @@
 package com.trustarx.pitgo.features.providerregistration.repository
 
-import com.trustarx.pitgo.features.providerregistration.model.AddressDraft
+import com.trustarx.pitgo.core.address.model.AddressDraft
+import com.trustarx.pitgo.core.common.time.parseSupabaseInstant
 import com.trustarx.pitgo.features.providerregistration.model.AddressVerificationState
 import com.trustarx.pitgo.features.providerregistration.model.ProviderFailure
 import io.github.jan.supabase.SupabaseClient
@@ -12,7 +13,6 @@ import io.ktor.client.plugins.HttpRequestTimeoutException
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import java.time.Instant
 
 sealed interface AddressVerificationResult {
     data class Verified(val state: AddressVerificationState.Verified) : AddressVerificationResult
@@ -30,7 +30,7 @@ class ProviderAddressVerificationRepository(private val client: SupabaseClient) 
                 address = AddressDto(
                     address.street.trim(), address.number.trim(), address.neighborhood.trim(),
                     address.postalCode.filter(Char::isDigit), address.city.trim(),
-                    address.state.trim().uppercase(),
+                    address.state.trim().uppercase(), country = "BR",
                 ),
             ),
         )
@@ -42,7 +42,7 @@ class ProviderAddressVerificationRepository(private val client: SupabaseClient) 
                 longitude = dto.longitude,
                 distanceMeters = dto.distanceMeters,
                 mismatchConfirmed = dto.mismatchConfirmed,
-                expiresAtEpochMillis = Instant.parse(dto.expiresAt).toEpochMilli(),
+                expiresAtEpochMillis = parseSupabaseInstant(dto.expiresAt).toEpochMilli(),
             ),
         )
     } catch (cancel: CancellationException) { throw cancel }
@@ -78,7 +78,7 @@ class ProviderAddressVerificationRepository(private val client: SupabaseClient) 
     @SerialName("zip_code") val postalCode: String,
     val city: String,
     val state: String,
-    val country: String = "BR",
+    val country: String,
 )
 @Serializable private data class VerificationResponseDto(
     @SerialName("verification_token") val verificationToken: String,

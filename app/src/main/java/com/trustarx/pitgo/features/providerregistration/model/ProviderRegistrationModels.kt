@@ -1,5 +1,8 @@
 package com.trustarx.pitgo.features.providerregistration.model
 
+import com.trustarx.pitgo.core.address.model.AddressDraft
+import com.trustarx.pitgo.core.address.model.CepAutofillProvenance
+import com.trustarx.pitgo.core.address.model.PostalCodeLookupState
 import java.math.BigDecimal
 
 data class ServiceCategory(
@@ -21,18 +24,6 @@ data class CompanyDraft(
     val email: String = "",
     val phone: String = "",
     val cnpj: String = "",
-)
-
-data class AddressDraft(
-    val street: String = "",
-    val number: String = "",
-    val neighborhood: String = "",
-    val postalCode: String = "",
-    val city: String = "",
-    val state: String = "",
-    val complement: String = "",
-    val latitude: String = "",
-    val longitude: String = "",
 )
 
 data class OfferDraft(
@@ -166,6 +157,7 @@ enum class ProviderFieldError {
     INVALID_PHONE,
     INVALID_CNPJ,
     INVALID_POSTAL_CODE,
+    POSTAL_CODE_NOT_FOUND,
     INVALID_STATE,
     COORDINATE_PAIR_REQUIRED,
     COORDINATE_OUT_OF_RANGE,
@@ -212,6 +204,8 @@ data class ProviderEditingContent(
     val baselineDraft: ProviderRegistrationDraft,
     val categories: LoadState<List<ServiceCategory>> = LoadState.Loading,
     val servicesByCategory: Map<String, LoadState<List<CatalogService>>> = emptyMap(),
+    val postalCodeLookup: PostalCodeLookupState = PostalCodeLookupState.Idle,
+    val cepAutofillProvenance: CepAutofillProvenance? = null,
     val addressVerification: AddressVerificationState = AddressVerificationState.Unverified,
     val errors: Map<ProviderField, ProviderFieldError> = emptyMap(),
     val focusRequest: ProviderFocusRequest? = null,

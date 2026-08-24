@@ -13,7 +13,7 @@ data class DeviceLocationFix(
 
     companion object {
         const val MAX_PROVIDER_ACCURACY_METERS = 100f
-        const val MAX_FIX_AGE_MILLIS = 60_000L
+        const val MAX_FIX_AGE_MILLIS = 30_000L
     }
 }
 

@@ -1,6 +1,7 @@
 package com.trustarx.pitgo.features.home.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -55,6 +56,7 @@ import com.trustarx.pitgo.core.ui.BottomItemId
 import com.trustarx.pitgo.core.ui.PitGoBottomNavigation
 import com.trustarx.pitgo.core.ui.PitGoBottomNavigationItems
 import com.trustarx.pitgo.core.vehicle.model.Vehicle
+import com.trustarx.pitgo.features.clientaddress.model.ClientAddress
 import com.trustarx.pitgo.features.home.model.HomeDiagnosticPrompt
 import com.trustarx.pitgo.features.home.model.HomeUiState
 import com.trustarx.pitgo.features.home.viewmodel.HomeViewModel
@@ -62,8 +64,9 @@ import com.trustarx.pitgo.features.home.viewmodel.HomeViewModel
 @Composable
 fun HomeRoute(
     viewModel: HomeViewModel,
-    onServiceClick: (String) -> Unit,
+    onServiceClick: (HomeService) -> Unit,
     onOpenGarage: () -> Unit,
+    onOpenAddress: () -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -72,6 +75,7 @@ fun HomeRoute(
         onDiagnosticClick = {},
         onServiceClick = onServiceClick,
         onOpenGarage = onOpenGarage,
+        onOpenAddress = onOpenAddress,
         onBottomItemClick = onBottomItemClick,
     )
 }
@@ -80,8 +84,9 @@ fun HomeRoute(
 fun HomeScreen(
     state: HomeUiState,
     onDiagnosticClick: () -> Unit,
-    onServiceClick: (String) -> Unit,
+    onServiceClick: (HomeService) -> Unit,
     onOpenGarage: () -> Unit,
+    onOpenAddress: () -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
 ) {
     Scaffold(
@@ -111,18 +116,22 @@ fun HomeScreen(
                 profile = state.profile,
                 vehicle = state.vehicle,
                 services = state.services,
+                address = state.address,
                 onDiagnosticClick = onDiagnosticClick,
                 onServiceClick = onServiceClick,
                 onOpenGarage = onOpenGarage,
+                onOpenAddress = onOpenAddress,
             )
             is HomeUiState.NoVehicle -> HomeGrid(
                 padding = padding,
                 profile = state.profile,
                 vehicle = null,
                 services = state.services,
+                address = state.address,
                 onDiagnosticClick = onDiagnosticClick,
                 onServiceClick = onServiceClick,
                 onOpenGarage = onOpenGarage,
+                onOpenAddress = onOpenAddress,
             )
         }
     }
@@ -134,9 +143,11 @@ private fun HomeGrid(
     profile: Profile,
     vehicle: Vehicle?,
     services: List<HomeService>,
+    address: ClientAddress?,
     onDiagnosticClick: () -> Unit,
-    onServiceClick: (String) -> Unit,
+    onServiceClick: (HomeService) -> Unit,
     onOpenGarage: () -> Unit,
+    onOpenAddress: () -> Unit,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 148.dp),
@@ -154,7 +165,7 @@ private fun HomeGrid(
         item(span = { GridItemSpan(maxLineSpan) }) {
             if (vehicle == null) NoVehicleCard(onOpenGarage) else VehicleCard(vehicle)
         }
-        item(span = { GridItemSpan(maxLineSpan) }) { NeutralLocationRow() }
+        item(span = { GridItemSpan(maxLineSpan) }) { AddressRow(address, onOpenAddress) }
         item(span = { GridItemSpan(maxLineSpan) }) {
             Text(
                 text = stringResource(R.string.home_services_question),
@@ -186,7 +197,7 @@ private fun HomeGrid(
             }
         }
         items(services, key = { it.id }) { service ->
-            ServiceCard(service = service, onClick = { onServiceClick(service.id) })
+            ServiceCard(service = service, onClick = { onServiceClick(service) })
         }
         if (services.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
             Text(
@@ -273,15 +284,26 @@ private fun NoVehicleCard(onOpenGarage: () -> Unit) {
 }
 
 @Composable
-private fun NeutralLocationRow() {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+private fun AddressRow(address: ClientAddress?, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .sizeIn(minHeight = PitGoSize.MinimumTouchTarget)
+            .clip(MaterialTheme.shapes.small)
+            .clickable(onClick = onClick),
+    ) {
         Icon(
             painter = painterResource(R.drawable.ic_home_location),
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
         )
         Spacer(Modifier.width(PitGoSpacing.Small))
-        Text(stringResource(R.string.home_address_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            address?.let { stringResource(R.string.home_address_summary, it.street, it.number, it.city) }
+                ?: stringResource(R.string.home_address_empty),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

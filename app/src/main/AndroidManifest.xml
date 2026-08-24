@@ -8,6 +8,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Lets the provider dashboard prompt for battery-optimization exemption: without it,
+         Android's Doze/App Standby kills ProviderLocationTrackingService after a few minutes
+         idle even though it's a proper foreground service — confirmed live (service survived
+         a clean 8-minute idle window only once the app was added to the deviceidle whitelist;
+         it died within minutes without it). See ProviderDashboardScreen's battery banner. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:name=".PitGoApplication"

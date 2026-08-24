@@ -4,10 +4,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.trustarx.pitgo.core.account.model.ProviderOnboardingSession
+import com.trustarx.pitgo.core.address.model.AddressDraft
+import com.trustarx.pitgo.core.address.model.CepAddressField
+import com.trustarx.pitgo.core.address.model.CepAutofillProvenance
+import com.trustarx.pitgo.core.address.model.PostalCodeLookupResult
+import com.trustarx.pitgo.core.address.model.PostalCodeLookupState
+import com.trustarx.pitgo.core.address.repository.ViaCepAddressLookupRepository
 import com.trustarx.pitgo.core.auth.model.AppSessionState
 import com.trustarx.pitgo.core.auth.repository.SessionRepository
 import com.trustarx.pitgo.features.providerregistration.model.AddressVerificationState
-import com.trustarx.pitgo.features.providerregistration.model.AddressDraft
 import com.trustarx.pitgo.features.providerregistration.model.CompanyDraft
 import com.trustarx.pitgo.features.providerregistration.model.LoadState
 import com.trustarx.pitgo.features.providerregistration.model.OfferDraft
@@ -36,12 +41,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class ProviderRegistrationViewModel(
     private val expectedUserId: String,
     private val initialEmail: String,
     private val repository: ProviderRegistrationRepository,
     private val addressVerificationRepository: ProviderAddressVerificationRepository,
+    private val viaCepAddressLookupRepository: ViaCepAddressLookupRepository,
     private val sessionRepository: SessionRepository,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow<ProviderRegistrationUiState>(
@@ -54,6 +61,8 @@ class ProviderRegistrationViewModel(
     private var bootstrapJob: Job? = null
     private var submitJob: Job? = null
     private var verificationJob: Job? = null
+    private var postalCodeLookupJob: Job? = null
+    private var postalCodeLookupAttemptId = 0L
 
     init {
         viewModelScope.launch {
@@ -67,21 +76,106 @@ class ProviderRegistrationViewModel(
 
     fun retryStartup() = bootstrap()
 
-    fun onFieldChanged(field: ProviderField, value: String) = updateEditing { content ->
+    fun onFieldChanged(field: ProviderField, value: String) {
         val normalized = when (field) {
             ProviderField.Phone -> ProviderRegistrationValidation.normalizePhone(value)
             ProviderField.Cnpj -> ProviderRegistrationValidation.normalizeCnpj(value)
             ProviderField.PostalCode -> ProviderRegistrationValidation.normalizePostalCode(value)
             else -> value
         }
+        val current = (_uiState.value as? ProviderRegistrationUiState.Editing)?.content ?: return
+        val postalCodeChanged = field == ProviderField.PostalCode &&
+            normalized != current.draft.address.postalCode
         val addressChanged = field in ADDRESS_FIELDS
-        content.copy(
-            draft = content.draft.withField(field, normalized),
-            addressVerification = if (addressChanged) AddressVerificationState.Unverified
-                else content.addressVerification,
-            errors = content.errors - field,
-            submission = ProviderSubmissionState.Idle,
+        if (addressChanged) cancelAddressVerification()
+        if (postalCodeChanged || (field in CEP_DERIVED_FIELDS &&
+                current.postalCodeLookup is PostalCodeLookupState.Loading)
+        ) {
+            cancelPostalCodeLookup()
+        }
+
+        updateEditing { content ->
+            var draft = content.draft
+            var provenance = content.cepAutofillProvenance
+            var lookup = content.postalCodeLookup
+            if (postalCodeChanged) {
+                draft = draft.clearCepDerivedFields(provenance?.fields.orEmpty())
+                provenance = null
+                lookup = PostalCodeLookupState.Idle
+            }
+            draft = draft.withField(field, normalized)
+            val verification = if (addressChanged) AddressVerificationState.Unverified
+                else content.addressVerification
+            val errors = revalidatePresentedField(
+                content = content,
+                draft = draft,
+                verification = verification,
+                field = field,
+                clearPostalNotFound = postalCodeChanged,
+            )
+            content.copy(
+                draft = draft,
+                postalCodeLookup = lookup,
+                cepAutofillProvenance = provenance,
+                addressVerification = verification,
+                errors = errors,
+                submission = ProviderSubmissionState.Idle,
+            )
+        }
+    }
+
+    fun lookupPostalCode() {
+        val content = (_uiState.value as? ProviderRegistrationUiState.Editing)?.content ?: return
+        if (content.submission == ProviderSubmissionState.Submitting ||
+            content.postalCodeLookup is PostalCodeLookupState.Loading ||
+            postalCodeLookupJob != null
+        ) return
+
+        val postalCode = ProviderRegistrationValidation.normalizePostalCode(
+            content.draft.address.postalCode,
         )
+        if (postalCode.length != POSTAL_CODE_LENGTH) {
+            requestFocus(
+                ProviderField.PostalCode,
+                content.errors + (
+                    ProviderField.PostalCode to ProviderFieldError.INVALID_POSTAL_CODE
+                    ),
+            )
+            return
+        }
+
+        cancelAddressVerification()
+        val attemptId = ++postalCodeLookupAttemptId
+        _uiState.updateEditing {
+            it.copy(
+                postalCodeLookup = PostalCodeLookupState.Loading(attemptId, postalCode),
+                addressVerification = AddressVerificationState.Unverified,
+                errors = it.errors - ProviderField.PostalCode,
+                submission = ProviderSubmissionState.Idle,
+            )
+        }
+        postalCodeLookupJob = viewModelScope.launch {
+            try {
+                when (val result = viaCepAddressLookupRepository.lookup(postalCode)) {
+                    is PostalCodeLookupResult.Found -> applyPostalCodeResult(
+                        attemptId,
+                        postalCode,
+                        result,
+                    )
+                    PostalCodeLookupResult.NotFound -> applyPostalCodeNotFound(
+                        attemptId,
+                        postalCode,
+                    )
+                    is PostalCodeLookupResult.Failure -> applyPostalCodeFailure(
+                        attemptId,
+                        postalCode,
+                        result,
+                    )
+                }
+            } finally {
+                if (postalCodeLookupAttemptId == attemptId) postalCodeLookupJob = null
+            }
+        }
     }
 
     fun onLocationModeSelected(mode: ProviderLocationMode) = updateEditing { content ->
@@ -94,50 +188,180 @@ class ProviderRegistrationViewModel(
     fun verifyAddress() {
         if (verificationJob != null) return
         val content = (_uiState.value as? ProviderRegistrationUiState.Editing)?.content ?: return
+        if (content.postalCodeLookup is PostalCodeLookupState.Loading ||
+            content.submission == ProviderSubmissionState.Submitting
+        ) return
+        val fingerprint = content.draft.address.fingerprint()
         verificationJob = viewModelScope.launch {
             try {
                 _uiState.updateEditing { it.copy(addressVerification = AddressVerificationState.Verifying) }
                 when (val result = addressVerificationRepository.verify(content.draft.address)) {
                     is AddressVerificationResult.Verified -> _uiState.updateEditing {
-                        it.copy(
-                            addressVerification = result.state,
-                            errors = it.errors - ProviderField.LocationVerification,
-                        )
+                        if (isSessionCurrent() && it.draft.address.fingerprint() == fingerprint) {
+                            it.copy(
+                                addressVerification = result.state,
+                                errors = it.errors - ProviderField.LocationVerification,
+                            )
+                        } else it
                     }
-                    is AddressVerificationResult.Diverged -> Unit
+                    is AddressVerificationResult.Diverged -> _uiState.updateEditing {
+                        if (isSessionCurrent() && it.draft.address.fingerprint() == fingerprint) {
+                            it.copy(
+                                addressVerification = AddressVerificationState.Diverged(
+                                    result.distanceMeters,
+                                ),
+                            )
+                        } else it
+                    }
                     is AddressVerificationResult.Failure -> _uiState.updateEditing {
-                        it.copy(addressVerification = AddressVerificationState.Failure(result.reason))
+                        if (isSessionCurrent() && it.draft.address.fingerprint() == fingerprint) {
+                            it.copy(
+                                addressVerification = AddressVerificationState.Failure(result.reason),
+                            )
+                        } else it
                     }
                 }
             } finally { verificationJob = null }
         }
     }
 
-    fun onOfferFieldChanged(localId: Long, field: OfferField, value: String) = updateEditing { content ->
-        content.copy(
-            draft = content.draft.updateOffer(localId) { offer ->
-                when (field) {
-                    OfferField.PRICE -> offer.copy(priceInput = value.take(18))
-                    OfferField.DURATION -> offer.copy(
-                        durationInput = value.filter(Char::isDigit).take(5),
-                    )
-                    OfferField.DESCRIPTION -> offer.copy(description = value)
-                    OfferField.CATEGORY, OfferField.SERVICE -> offer
+    private fun applyPostalCodeResult(
+        attemptId: Long,
+        postalCode: String,
+        result: PostalCodeLookupResult.Found,
+    ) {
+        _uiState.updateEditing { content ->
+            if (!content.matchesPostalCodeAttempt(attemptId, postalCode) || !isSessionCurrent()) {
+                return@updateEditing content
+            }
+
+            val response = result.address
+            val applied = buildSet {
+                if (response.street != null) add(CepAddressField.STREET)
+                if (response.complement != null) add(CepAddressField.COMPLEMENT)
+                if (response.neighborhood != null) add(CepAddressField.NEIGHBORHOOD)
+                add(CepAddressField.CITY)
+                add(CepAddressField.STATE)
+            }
+            val updatedAddress = content.draft.address.copy(
+                street = response.street ?: content.draft.address.street,
+                complement = response.complement ?: content.draft.address.complement,
+                neighborhood = response.neighborhood ?: content.draft.address.neighborhood,
+                city = response.city,
+                state = response.state,
+            )
+            val updatedDraft = content.draft.copy(address = updatedAddress)
+            val incompleteField = listOf(
+                ProviderField.Street to updatedAddress.street,
+                ProviderField.Neighborhood to updatedAddress.neighborhood,
+                ProviderField.City to updatedAddress.city,
+                ProviderField.State to updatedAddress.state,
+            ).firstOrNull { (_, value) -> value.isBlank() }?.first
+            val focusField = incompleteField ?: ProviderField.Number
+            val validation = validate(updatedDraft, AddressVerificationState.Unverified, content)
+            val fieldsToRefresh = CEP_DERIVED_FIELDS + ProviderField.PostalCode
+            val errors = content.errors.toMutableMap().apply {
+                fieldsToRefresh.forEach { field ->
+                    val error = validation.errors[field]
+                    if (error == null) remove(field) else put(field, error)
                 }
-            },
-            errors = content.errors - ProviderField.Offer(localId, field),
+            }
+            focusRequestId += 1
+            content.copy(
+                draft = updatedDraft,
+                postalCodeLookup = PostalCodeLookupState.Found(
+                    attemptId,
+                    postalCode,
+                    applied,
+                ),
+                cepAutofillProvenance = CepAutofillProvenance(postalCode, applied),
+                addressVerification = AddressVerificationState.Unverified,
+                errors = errors,
+                focusRequest = ProviderFocusRequest(focusRequestId, focusField),
+            )
+        }
+    }
+
+    private fun applyPostalCodeNotFound(attemptId: Long, postalCode: String) {
+        _uiState.updateEditing { content ->
+            if (!content.matchesPostalCodeAttempt(attemptId, postalCode) || !isSessionCurrent()) {
+                return@updateEditing content
+            }
+            focusRequestId += 1
+            content.copy(
+                postalCodeLookup = PostalCodeLookupState.NotFound(attemptId, postalCode),
+                errors = content.errors + (
+                    ProviderField.PostalCode to ProviderFieldError.POSTAL_CODE_NOT_FOUND
+                    ),
+                focusRequest = ProviderFocusRequest(focusRequestId, ProviderField.PostalCode),
+            )
+        }
+    }
+
+    private fun applyPostalCodeFailure(
+        attemptId: Long,
+        postalCode: String,
+        result: PostalCodeLookupResult.Failure,
+    ) {
+        _uiState.updateEditing { content ->
+            if (!content.matchesPostalCodeAttempt(attemptId, postalCode) || !isSessionCurrent()) {
+                return@updateEditing content
+            }
+            content.copy(
+                postalCodeLookup = PostalCodeLookupState.Failure(
+                    attemptId,
+                    postalCode,
+                    result.reason,
+                ),
+            )
+        }
+    }
+
+    fun onOfferFieldChanged(localId: Long, field: OfferField, value: String) = updateEditing { content ->
+        val target = ProviderField.Offer(localId, field)
+        val updatedDraft = content.draft.updateOffer(localId) { offer ->
+            when (field) {
+                OfferField.PRICE -> offer.copy(priceInput = value.take(18))
+                OfferField.DURATION -> offer.copy(
+                    durationInput = value.filter(Char::isDigit).take(5),
+                )
+                OfferField.DESCRIPTION -> offer.copy(description = value)
+                OfferField.CATEGORY, OfferField.SERVICE -> offer
+            }
+        }
+        content.copy(
+            draft = updatedDraft,
+            errors = revalidatePresentedField(
+                content,
+                updatedDraft,
+                content.addressVerification,
+                target,
+            ),
             submission = ProviderSubmissionState.Idle,
         )
     }
 
     fun onCategorySelected(localId: Long, categoryId: String) {
         updateEditing { content ->
+            val updatedDraft = content.draft.updateOffer(localId) {
+                it.copy(categoryId = categoryId, serviceId = null)
+            }
+            val categoryField = ProviderField.Offer(localId, OfferField.CATEGORY)
+            val serviceField = ProviderField.Offer(localId, OfferField.SERVICE)
+            var errors = content.errors - categoryField
+            if (serviceField in errors) {
+                val serviceError = ProviderRegistrationValidation.validateField(
+                    updatedDraft,
+                    content.availableServices(),
+                    content.addressVerification,
+                    serviceField,
+                )
+                errors = if (serviceError == null) errors - serviceField
+                else errors + (serviceField to serviceError)
+            }
             content.copy(
-                draft = content.draft.updateOffer(localId) {
-                    it.copy(categoryId = categoryId, serviceId = null)
-                },
-                errors = content.errors - ProviderField.Offer(localId, OfferField.CATEGORY) -
-                    ProviderField.Offer(localId, OfferField.SERVICE),
+                draft = updatedDraft,
+                errors = errors,
                 submission = ProviderSubmissionState.Idle,
             )
         }
@@ -145,19 +369,33 @@ class ProviderRegistrationViewModel(
     }
 
     fun onServiceSelected(localId: Long, serviceId: String) = updateEditing { content ->
+        val updatedDraft = content.draft.updateOffer(localId) { it.copy(serviceId = serviceId) }
+        val target = ProviderField.Offer(localId, OfferField.SERVICE)
         content.copy(
-            draft = content.draft.updateOffer(localId) { it.copy(serviceId = serviceId) },
-            errors = content.errors - ProviderField.Offer(localId, OfferField.SERVICE),
+            draft = updatedDraft,
+            errors = revalidatePresentedField(
+                content,
+                updatedDraft,
+                content.addressVerification,
+                target,
+            ),
             submission = ProviderSubmissionState.Idle,
         )
     }
 
     fun onFreeChanged(localId: Long, isFree: Boolean) = updateEditing { content ->
+        val updatedDraft = content.draft.updateOffer(localId) {
+            it.copy(isFree = isFree, priceInput = if (isFree) "" else it.priceInput)
+        }
+        val target = ProviderField.Offer(localId, OfferField.PRICE)
         content.copy(
-            draft = content.draft.updateOffer(localId) {
-                it.copy(isFree = isFree, priceInput = if (isFree) "" else it.priceInput)
-            },
-            errors = content.errors - ProviderField.Offer(localId, OfferField.PRICE),
+            draft = updatedDraft,
+            errors = revalidatePresentedField(
+                content,
+                updatedDraft,
+                content.addressVerification,
+                target,
+            ),
             submission = ProviderSubmissionState.Idle,
         )
     }
@@ -173,13 +411,25 @@ class ProviderRegistrationViewModel(
     }
 
     fun removeOffer(localId: Long) = updateEditing { content ->
+        val updatedDraft = content.draft.copy(
+            offers = content.draft.offers.filterNot { it.localId == localId },
+        )
+        var errors = content.errors.filterKeys {
+            it !is ProviderField.Offer || it.localId != localId
+        }
+        if (ProviderField.Offers in errors) {
+            val offersError = ProviderRegistrationValidation.validateField(
+                updatedDraft,
+                content.availableServices(),
+                content.addressVerification,
+                ProviderField.Offers,
+            )
+            errors = if (offersError == null) errors - ProviderField.Offers
+            else errors + (ProviderField.Offers to offersError)
+        }
         content.copy(
-            draft = content.draft.copy(
-                offers = content.draft.offers.filterNot { it.localId == localId },
-            ),
-            errors = content.errors.filterKeys {
-                it !is ProviderField.Offer || it.localId != localId
-            },
+            draft = updatedDraft,
+            errors = errors,
             submission = ProviderSubmissionState.Idle,
         )
     }
@@ -191,15 +441,21 @@ class ProviderRegistrationViewModel(
     fun submit() {
         val editing = (_uiState.value as? ProviderRegistrationUiState.Editing)?.content ?: return
         if (editing.submission == ProviderSubmissionState.Submitting || submitJob != null) return
-        val services = editing.servicesByCategory.values.flatMap { state ->
-            (state as? LoadState.Content)?.value.orEmpty()
-        }
+        if (editing.postalCodeLookup is PostalCodeLookupState.Loading) return
+        val services = editing.availableServices()
         val validation = ProviderRegistrationValidation.validate(
             editing.draft, services, editing.addressVerification,
         )
-        val registration = validation.registration
+        val matchingNotFound = (editing.postalCodeLookup as? PostalCodeLookupState.NotFound)
+            ?.postalCode == editing.draft.address.postalCode
+        val allErrors = if (matchingNotFound) {
+            validation.errors + (
+                ProviderField.PostalCode to ProviderFieldError.POSTAL_CODE_NOT_FOUND
+                )
+        } else validation.errors
+        val registration = validation.registration?.takeIf { !matchingNotFound }
         if (registration == null) {
-            val formErrors = validation.errors - ProviderField.LocationVerification
+            val formErrors = allErrors - ProviderField.LocationVerification
             if (formErrors.isNotEmpty()) {
                 requestFocus(formErrors.keys.first(), formErrors)
             } else {
@@ -211,6 +467,7 @@ class ProviderRegistrationViewModel(
     }
 
     private fun geocodeAndSubmit(editing: ProviderEditingContent) {
+        val fingerprint = editing.draft.address.fingerprint()
         _uiState.updateEditing {
             it.copy(
                 errors = emptyMap(),
@@ -223,10 +480,15 @@ class ProviderRegistrationViewModel(
                 when (val geocode = addressVerificationRepository.verify(editing.draft.address)) {
                     is AddressVerificationResult.Verified -> {
                         _uiState.updateEditing {
-                            it.copy(addressVerification = geocode.state)
+                            if (isSessionCurrent() && it.draft.address.fingerprint() == fingerprint) {
+                                it.copy(addressVerification = geocode.state)
+                            } else it
                         }
                         val current = (_uiState.value as? ProviderRegistrationUiState.Editing)
                             ?.content ?: return@launch
+                        if (!isSessionCurrent() || current.draft.address.fingerprint() != fingerprint) {
+                            return@launch
+                        }
                         val services = current.servicesByCategory.values.flatMap { state ->
                             (state as? LoadState.Content)?.value.orEmpty()
                         }
@@ -249,7 +511,16 @@ class ProviderRegistrationViewModel(
                             submission = ProviderSubmissionState.Failure(geocode.reason),
                         )
                     }
-                    is AddressVerificationResult.Diverged -> Unit
+                    is AddressVerificationResult.Diverged -> _uiState.updateEditing {
+                        if (isSessionCurrent() && it.draft.address.fingerprint() == fingerprint) {
+                            it.copy(
+                                addressVerification = AddressVerificationState.Diverged(
+                                    geocode.distanceMeters,
+                                ),
+                                submission = ProviderSubmissionState.Idle,
+                            )
+                        } else it
+                    }
                 }
             } finally {
                 submitJob = null
@@ -287,9 +558,14 @@ class ProviderRegistrationViewModel(
 
     fun discardDraft() {
         val current = (_uiState.value as? ProviderRegistrationUiState.Editing)?.content ?: return
+        cancelPostalCodeLookup()
+        cancelAddressVerification()
         _uiState.value = ProviderRegistrationUiState.Editing(
             current.copy(
                 draft = current.baselineDraft,
+                postalCodeLookup = PostalCodeLookupState.Idle,
+                cepAutofillProvenance = null,
+                addressVerification = AddressVerificationState.Unverified,
                 errors = emptyMap(),
                 submission = ProviderSubmissionState.Idle,
             ),
@@ -407,6 +683,8 @@ class ProviderRegistrationViewModel(
     private fun expireSession() {
         bootstrapJob?.cancel()
         submitJob?.cancel()
+        cancelPostalCodeLookup()
+        cancelAddressVerification()
         bootstrapJob = null
         submitJob = null
         _uiState.value = ProviderRegistrationUiState.SessionExpired
@@ -424,6 +702,87 @@ class ProviderRegistrationViewModel(
         transform: (ProviderEditingContent) -> ProviderEditingContent,
     ) = _uiState.updateEditing(transform)
 
+    private fun validate(
+        draft: ProviderRegistrationDraft,
+        verification: AddressVerificationState,
+        content: ProviderEditingContent,
+    ) = ProviderRegistrationValidation.validate(
+        draft = draft,
+        availableServices = content.availableServices(),
+        addressVerification = verification,
+    )
+
+    private fun revalidatePresentedField(
+        content: ProviderEditingContent,
+        draft: ProviderRegistrationDraft,
+        verification: AddressVerificationState,
+        field: ProviderField,
+        clearPostalNotFound: Boolean = false,
+    ): Map<ProviderField, ProviderFieldError> {
+        if (field !in content.errors) return content.errors
+        if (clearPostalNotFound && field == ProviderField.PostalCode) {
+            return content.errors - field
+        }
+        if (field == ProviderField.PostalCode &&
+            content.errors[field] == ProviderFieldError.POSTAL_CODE_NOT_FOUND
+        ) {
+            return content.errors
+        }
+        val currentError = ProviderRegistrationValidation.validateField(
+            draft,
+            content.availableServices(),
+            verification,
+            field,
+        )
+        return if (currentError == null) content.errors - field
+        else content.errors + (field to currentError)
+    }
+
+    private fun ProviderEditingContent.availableServices() = servicesByCategory.values.flatMap {
+        state -> (state as? LoadState.Content)?.value.orEmpty()
+    }
+
+    private fun ProviderEditingContent.matchesPostalCodeAttempt(
+        attemptId: Long,
+        postalCode: String,
+    ): Boolean {
+        val loading = postalCodeLookup as? PostalCodeLookupState.Loading ?: return false
+        return loading.attemptId == attemptId && loading.postalCode == postalCode &&
+            draft.address.postalCode == postalCode
+    }
+
+    private fun cancelPostalCodeLookup() {
+        postalCodeLookupJob?.cancel()
+        postalCodeLookupJob = null
+    }
+
+    private fun cancelAddressVerification() {
+        verificationJob?.cancel()
+        verificationJob = null
+    }
+
+    private fun ProviderRegistrationDraft.clearCepDerivedFields(
+        fields: Set<CepAddressField>,
+    ): ProviderRegistrationDraft = copy(
+        address = address.copy(
+            street = if (CepAddressField.STREET in fields) "" else address.street,
+            complement = if (CepAddressField.COMPLEMENT in fields) "" else address.complement,
+            neighborhood = if (CepAddressField.NEIGHBORHOOD in fields) "" else address.neighborhood,
+            city = if (CepAddressField.CITY in fields) "" else address.city,
+            state = if (CepAddressField.STATE in fields) "" else address.state,
+        ),
+    )
+
+    private fun AddressDraft.fingerprint() = AddressFingerprint(
+        street = street.trim(),
+        number = number.trim(),
+        neighborhood = neighborhood.trim(),
+        postalCode = ProviderRegistrationValidation.normalizePostalCode(postalCode),
+        city = city.trim(),
+        state = state.trim().uppercase(Locale.ROOT),
+        complement = complement.trim(),
+    )
+
     private fun ProviderRegistrationDraft.withField(
         field: ProviderField,
         value: String,
@@ -439,7 +798,9 @@ class ProviderRegistrationViewModel(
         ProviderField.Complement -> copy(address = address.copy(complement = value))
         ProviderField.Neighborhood -> copy(address = address.copy(neighborhood = value))
         ProviderField.City -> copy(address = address.copy(city = value))
-        ProviderField.State -> copy(address = address.copy(state = value.uppercase().take(2)))
+        ProviderField.State -> copy(
+            address = address.copy(state = value.uppercase(Locale.ROOT).take(2)),
+        )
         ProviderField.Latitude, ProviderField.Longitude, ProviderField.LocationMode,
         ProviderField.LocationVerification, ProviderField.Offers, is ProviderField.Offer -> this
     }
@@ -461,6 +822,7 @@ class ProviderRegistrationViewModel(
             account: ProviderOnboardingSession,
             repository: ProviderRegistrationRepository,
             addressVerificationRepository: ProviderAddressVerificationRepository,
+            viaCepAddressLookupRepository: ViaCepAddressLookupRepository,
             sessionRepository: SessionRepository,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -471,6 +833,7 @@ class ProviderRegistrationViewModel(
                     initialEmail = account.authEmail,
                     repository = repository,
                     addressVerificationRepository = addressVerificationRepository,
+                    viaCepAddressLookupRepository = viaCepAddressLookupRepository,
                     sessionRepository = sessionRepository,
                 ) as T
             }
@@ -481,5 +844,23 @@ class ProviderRegistrationViewModel(
             ProviderField.Complement, ProviderField.Neighborhood, ProviderField.City,
             ProviderField.State,
         )
+        private val CEP_DERIVED_FIELDS = setOf(
+            ProviderField.Street,
+            ProviderField.Complement,
+            ProviderField.Neighborhood,
+            ProviderField.City,
+            ProviderField.State,
+        )
+        private const val POSTAL_CODE_LENGTH = 8
     }
 }
+
+private data class AddressFingerprint(
+    val street: String,
+    val number: String,
+    val neighborhood: String,
+    val postalCode: String,
+    val city: String,
+    val state: String,
+    val complement: String,
+)

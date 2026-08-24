@@ -29,9 +29,7 @@ fun ProviderTrackingRoute(viewModel: ProviderTrackingViewModel) {
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { permissions ->
-        val notificationsAllowed = Build.VERSION.SDK_INT < 33 ||
-            permissions[Manifest.permission.POST_NOTIFICATIONS] == true
-        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true && notificationsAllowed) {
+        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
             viewModel.start()
         }
     }
@@ -45,7 +43,7 @@ fun ProviderTrackingRoute(viewModel: ProviderTrackingViewModel) {
                 when (state) {
                     ProviderTrackingState.Stopped -> stringResource(R.string.tracking_stopped)
                     ProviderTrackingState.Starting -> stringResource(R.string.tracking_starting)
-                    is ProviderTrackingState.Active -> stringResource(R.string.tracking_live)
+                    is ProviderTrackingState.Publishing -> stringResource(R.string.tracking_live)
                     is ProviderTrackingState.Degraded -> stringResource(R.string.tracking_degraded)
                     ProviderTrackingState.Stopping -> stringResource(R.string.tracking_stopping)
                 },
@@ -55,7 +53,6 @@ fun ProviderTrackingRoute(viewModel: ProviderTrackingViewModel) {
                     val permissions = buildList {
                         add(Manifest.permission.ACCESS_COARSE_LOCATION)
                         add(Manifest.permission.ACCESS_FINE_LOCATION)
-                        if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
                     }.toTypedArray()
                     launcher.launch(permissions)
                 },

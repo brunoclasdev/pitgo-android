@@ -12,12 +12,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-enum class OnboardingDestination { VEHICLE_FORM, HOME }
-
 sealed interface VehicleOnboardingUiState {
     data object Ready : VehicleOnboardingUiState
     data object Resolving : VehicleOnboardingUiState
-    data class Completed(val destination: OnboardingDestination) : VehicleOnboardingUiState
+    data object Completed : VehicleOnboardingUiState
     data object Failure : VehicleOnboardingUiState
 }
 
@@ -28,10 +26,9 @@ class VehicleOnboardingViewModel(
     private val _uiState = MutableStateFlow<VehicleOnboardingUiState>(VehicleOnboardingUiState.Ready)
     val uiState: StateFlow<VehicleOnboardingUiState> = _uiState.asStateFlow()
 
-    fun registerVehicle() = resolve(OnboardingDestination.VEHICLE_FORM)
-    fun skipForNow() = resolve(OnboardingDestination.HOME)
+    fun skipForNow() = resolve()
 
-    private fun resolve(destination: OnboardingDestination) {
+    private fun resolve() {
         if (_uiState.value == VehicleOnboardingUiState.Resolving) return
         val account = (sessionRepository.state.value as? AppSessionState.Authenticated.Client)?.account
             ?: return
@@ -39,7 +36,7 @@ class VehicleOnboardingViewModel(
         viewModelScope.launch {
             try {
                 onboardingRepository.resolve(account.userId)
-                _uiState.value = VehicleOnboardingUiState.Completed(destination)
+                _uiState.value = VehicleOnboardingUiState.Completed
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: Throwable) {

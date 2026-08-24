@@ -12,10 +12,13 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -33,19 +36,54 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.account.model.AccountSnapshot
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
+import com.trustarx.pitgo.core.preferences.AppearanceMode
 import com.trustarx.pitgo.core.ui.BottomItemId
 import com.trustarx.pitgo.core.ui.PitGoBottomNavigation
 import com.trustarx.pitgo.core.ui.PitGoBottomNavigationItems
+import com.trustarx.pitgo.core.vehicle.model.Vehicle
+import com.trustarx.pitgo.features.clientaddress.model.ClientAddress
+import com.trustarx.pitgo.features.profile.viewmodel.ProfileUiState
+import com.trustarx.pitgo.features.profile.viewmodel.ProfileViewModel
 
 @Composable
-fun ProfileScreen(
+fun ProfileRoute(
+    viewModel: ProfileViewModel,
     account: AccountSnapshot,
     legacyProviderMigrationAvailable: Boolean,
     onMigrateProvider: () -> Unit,
+    onOpenAddress: () -> Unit,
+    onOpenGarage: () -> Unit,
+    onBottomItemClick: (BottomItemId) -> Unit,
+    onLogout: () -> Unit,
+) {
+    val profileState by viewModel.state.collectAsStateWithLifecycle()
+    ProfileScreen(
+        account = account,
+        profileState = profileState,
+        legacyProviderMigrationAvailable = legacyProviderMigrationAvailable,
+        onMigrateProvider = onMigrateProvider,
+        onOpenAddress = onOpenAddress,
+        onOpenGarage = onOpenGarage,
+        onAppearanceSelected = viewModel::setAppearanceMode,
+        onBottomItemClick = onBottomItemClick,
+        onLogout = onLogout,
+    )
+}
+
+@Composable
+private fun ProfileScreen(
+    account: AccountSnapshot,
+    profileState: ProfileUiState,
+    legacyProviderMigrationAvailable: Boolean,
+    onMigrateProvider: () -> Unit,
+    onOpenAddress: () -> Unit,
+    onOpenGarage: () -> Unit,
+    onAppearanceSelected: (AppearanceMode) -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -78,6 +116,11 @@ fun ProfileScreen(
             )
             Text(account.profile.displayName, style = MaterialTheme.typography.titleLarge)
             Text(account.authEmail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            ProfileAddressCard(profileState.address, profileState.addressLoading, onOpenAddress)
+            ProfileVehicleCard(account.primaryVehicle, onOpenGarage)
+            ProfileAppearanceCard(profileState.appearanceMode, onAppearanceSelected)
+
             if (legacyProviderMigrationAvailable) {
                 OutlinedButton(
                     onClick = onMigrateProvider,
@@ -119,4 +162,69 @@ fun ProfileScreen(
             },
         )
     }
+}
+
+@Composable
+private fun ProfileAddressCard(address: ClientAddress?, loading: Boolean, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().sizeIn(minHeight = PitGoSize.MinimumTouchTarget),
+    ) {
+        Column(Modifier.padding(PitGoSpacing.Medium)) {
+            Text(stringResource(R.string.profile_address_label), style = MaterialTheme.typography.titleMedium)
+            Text(
+                when {
+                    loading -> stringResource(R.string.client_address_loading)
+                    address != null -> stringResource(
+                        R.string.home_address_summary, address.street, address.number, address.city,
+                    )
+                    else -> stringResource(R.string.home_address_empty)
+                },
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileVehicleCard(vehicle: Vehicle?, onOpenGarage: () -> Unit) {
+    Card(
+        onClick = onOpenGarage,
+        modifier = Modifier.fillMaxWidth().sizeIn(minHeight = PitGoSize.MinimumTouchTarget),
+    ) {
+        Column(Modifier.padding(PitGoSpacing.Medium)) {
+            Text(stringResource(R.string.profile_vehicle_label), style = MaterialTheme.typography.titleMedium)
+            Text(
+                vehicle?.displayName ?: stringResource(R.string.home_no_vehicle_title),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileAppearanceCard(mode: AppearanceMode, onSelected: (AppearanceMode) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
+        Text(stringResource(R.string.profile_appearance_label), style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
+            AppearanceChip(AppearanceMode.LIGHT, mode, R.string.profile_appearance_light, onSelected)
+            AppearanceChip(AppearanceMode.DARK, mode, R.string.profile_appearance_dark, onSelected)
+            AppearanceChip(AppearanceMode.SYSTEM, mode, R.string.profile_appearance_system, onSelected)
+        }
+    }
+}
+
+@Composable
+private fun AppearanceChip(
+    option: AppearanceMode,
+    current: AppearanceMode,
+    labelRes: Int,
+    onSelected: (AppearanceMode) -> Unit,
+) {
+    FilterChip(
+        selected = option == current,
+        onClick = { onSelected(option) },
+        label = { Text(stringResource(labelRes)) },
+        modifier = Modifier.sizeIn(minHeight = PitGoSize.MinimumTouchTarget),
+    )
 }

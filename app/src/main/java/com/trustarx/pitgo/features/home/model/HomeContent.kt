@@ -6,6 +6,7 @@ import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.account.model.Profile
 import com.trustarx.pitgo.core.catalog.model.HomeService
 import com.trustarx.pitgo.core.vehicle.model.Vehicle
+import com.trustarx.pitgo.features.clientaddress.model.ClientAddress
 
 data class DiagnosticPrompt(
     @param:StringRes val titleRes: Int,
@@ -25,10 +26,12 @@ sealed interface HomeUiState {
         val profile: Profile,
         val vehicle: Vehicle,
         val services: List<HomeService>,
+        val address: ClientAddress? = null,
     ) : HomeUiState
     data class NoVehicle(
         val profile: Profile,
         val services: List<HomeService>,
+        val address: ClientAddress? = null,
     ) : HomeUiState
     data object Failure : HomeUiState
 }

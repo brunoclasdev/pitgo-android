@@ -41,6 +41,9 @@ object ProviderRegistrationValidation {
         val normalizedPhone = normalizePhone(company.phone)
         val normalizedCnpj = normalizeCnpj(company.cnpj)
 
+        if (draft.locationMode == null) {
+            errors[ProviderField.LocationMode] = ProviderFieldError.REQUIRED
+        }
         requiredOrLength(normalizedName, 150, ProviderField.Name, errors)
         optionalLength(normalizedDescription, 2000, ProviderField.Description, errors)
         when {
@@ -83,9 +86,6 @@ object ProviderRegistrationValidation {
                 errors[ProviderField.State] = ProviderFieldError.INVALID_STATE
         }
 
-        if (draft.locationMode == null) {
-            errors[ProviderField.LocationMode] = ProviderFieldError.REQUIRED
-        }
         val verifiedAddress = addressVerification as? AddressVerificationState.Verified
         if (verifiedAddress == null || verifiedAddress.expiresAtEpochMillis <= System.currentTimeMillis()) {
             errors[ProviderField.LocationVerification] = ProviderFieldError.REQUIRED
@@ -170,6 +170,24 @@ object ProviderRegistrationValidation {
             errors = emptyMap(),
             firstInvalidField = null,
         )
+    }
+
+    fun validateField(
+        draft: ProviderRegistrationDraft,
+        availableServices: Collection<CatalogService>,
+        addressVerification: AddressVerificationState,
+        field: ProviderField,
+    ): ProviderFieldError? = validate(draft, availableServices, addressVerification).errors[field]
+
+    fun maximumLength(field: ProviderField): Int? = when (field) {
+        ProviderField.Name -> 150
+        ProviderField.Description -> 2_000
+        ProviderField.Email -> 254
+        ProviderField.Street, ProviderField.Complement -> 160
+        ProviderField.Number -> 40
+        ProviderField.Neighborhood, ProviderField.City -> 100
+        is ProviderField.Offer -> if (field.field == OfferField.DESCRIPTION) 1_000 else null
+        else -> null
     }
 
     private fun requiredOrLength(

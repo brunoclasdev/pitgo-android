@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.trustarx.pitgo.core.auth.model.AppSessionState
 import com.trustarx.pitgo.core.auth.repository.SessionRepository
+import com.trustarx.pitgo.core.preferences.VehicleOnboardingRepository
+import com.trustarx.pitgo.core.vehicle.model.Vehicle
 import com.trustarx.pitgo.core.vehicle.model.VehicleFailure
 import com.trustarx.pitgo.core.vehicle.model.VehicleField
 import com.trustarx.pitgo.core.vehicle.model.VehicleFieldError
@@ -18,10 +20,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 enum class VehicleFormFailureReason {
-    OFFLINE, TIMEOUT, SESSION_EXPIRED, SERVICE, CONTRACT, UNKNOWN,
+    OFFLINE, TIMEOUT, SESSION_EXPIRED, SERVICE, OPERATION_UNAVAILABLE, CONTRACT, UNKNOWN,
 }
 
 sealed interface VehicleFormOperation {
@@ -29,7 +33,7 @@ sealed interface VehicleFormOperation {
     data object Editing : VehicleFormOperation
     data object Submitting : VehicleFormOperation
     data class Failure(val reason: VehicleFormFailureReason) : VehicleFormOperation
-    data object Success : VehicleFormOperation
+    data class Success(val vehicle: Vehicle) : VehicleFormOperation
 }
 
 data class VehicleFormUiState(
@@ -55,8 +59,8 @@ data class VehicleFormUiState(
     val operation: VehicleFormOperation = VehicleFormOperation.Loading,
 ) {
     val isProcessing: Boolean
-        get() = operation == VehicleFormOperation.Loading ||
-            operation == VehicleFormOperation.Submitting
+        get() = operation is VehicleFormOperation.Loading ||
+            operation is VehicleFormOperation.Submitting
     val hasDraft: Boolean
         get() = listOf(
             brand, model, version, manufactureYear, modelYear, plate, renavam, chassis,
@@ -68,14 +72,20 @@ class VehicleFormViewModel(
     private val origin: VehicleFormOrigin,
     private val vehicleRepository: VehicleRepository,
     private val sessionRepository: SessionRepository,
+    private val onboardingRepository: VehicleOnboardingRepository,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(VehicleFormUiState(origin = origin))
     val uiState: StateFlow<VehicleFormUiState> = _uiState.asStateFlow()
+    private val expectedUserId =
+        (sessionRepository.state.value as? AppSessionState.Authenticated.Client)?.account?.userId
+    private var submitJob: Job? = null
 
     init {
         viewModelScope.launch {
             sessionRepository.state.collectLatest { state ->
-                if (state !is AppSessionState.Authenticated.Client) clearForExpiredSession()
+                if (state !is AppSessionState.Authenticated.Client || state.account.userId != expectedUserId) {
+                    clearForExpiredSession()
+                }
             }
         }
         loadVehicleCount()
@@ -83,16 +93,24 @@ class VehicleFormViewModel(
 
     fun onFieldChanged(field: VehicleField, value: String) {
         _uiState.update { current ->
-            if (current.isProcessing || current.operation == VehicleFormOperation.Success) current
-            else current.withField(field, normalizeInput(field, value)).copy(
-                errors = current.errors - field,
-                operation = VehicleFormOperation.Editing,
-            )
+            if (current.isProcessing || current.operation is VehicleFormOperation.Success) {
+                return@update current
+            }
+            val normalized = normalizeInput(field, value)
+            val updated = current.withField(field, normalized)
+            val errors = if (field in current.errors) {
+                VehicleValidation.validateField(field, normalized)?.let { error ->
+                    current.errors + (field to error)
+                } ?: (current.errors - field)
+            } else {
+                current.errors
+            }
+            updated.copy(errors = errors, operation = VehicleFormOperation.Editing)
         }
     }
 
     fun onMakePrimaryChanged(value: Boolean) = _uiState.update {
-        if (it.isProcessing) it else it.copy(
+        if (it.isProcessing || it.operation is VehicleFormOperation.Success) it else it.copy(
             makePrimary = value,
             operation = VehicleFormOperation.Editing,
         )
@@ -100,7 +118,10 @@ class VehicleFormViewModel(
 
     fun submit() {
         val current = _uiState.value
-        if (current.isProcessing || current.operation == VehicleFormOperation.Success) return
+        if (current.isProcessing || current.operation is VehicleFormOperation.Success ||
+            submitJob?.isActive == true
+        ) return
+        val userId = expectedUserId ?: return clearForExpiredSession()
         val validation = VehicleValidation.validate(
             current.brand, current.model, current.version, current.manufactureYear,
             current.modelYear, current.plate, current.renavam, current.chassis, current.color,
@@ -120,20 +141,17 @@ class VehicleFormViewModel(
             return
         }
         _uiState.update { it.copy(errors = emptyMap(), operation = VehicleFormOperation.Submitting) }
-        viewModelScope.launch {
-            when (val result = vehicleRepository.createVehicle(draft)) {
-                is VehicleMutationResult.Success -> _uiState.update {
-                    it.copy(operation = VehicleFormOperation.Success)
+        submitJob = viewModelScope.launch {
+            try {
+                when (val result = vehicleRepository.createVehicle(userId, draft)) {
+                    is VehicleMutationResult.Success -> applySuccess(userId, result.vehicle)
+                    is VehicleMutationResult.FieldFailure -> applyFieldFailure(userId, result)
+                    is VehicleMutationResult.Failure -> if (isExpectedClient(userId)) {
+                        applyFailure(result.reason)
+                    }
                 }
-                is VehicleMutationResult.FieldUnavailable -> _uiState.update {
-                    it.copy(
-                        errors = mapOf(result.field to VehicleFieldError.UNAVAILABLE),
-                        focusField = result.field,
-                        focusRequestId = it.focusRequestId + 1,
-                        operation = VehicleFormOperation.Editing,
-                    )
-                }
-                is VehicleMutationResult.Failure -> applyFailure(result.reason)
+            } finally {
+                submitJob = null
             }
         }
     }
@@ -149,16 +167,53 @@ class VehicleFormViewModel(
     private fun loadVehicleCount() {
         val account = (sessionRepository.state.value as? AppSessionState.Authenticated.Client)?.account
             ?: return clearForExpiredSession()
+        if (account.userId != expectedUserId) return clearForExpiredSession()
         viewModelScope.launch {
             when (val result = vehicleRepository.listActiveVehicles(account.userId)) {
-                is VehicleListResult.Success -> _uiState.update {
-                    it.copy(
-                        existingVehicleCount = result.vehicles.size,
-                        operation = VehicleFormOperation.Editing,
-                    )
+                is VehicleListResult.Success -> if (isExpectedClient(account.userId)) {
+                    _uiState.update {
+                        it.copy(
+                            existingVehicleCount = result.vehicles.size,
+                            operation = VehicleFormOperation.Editing,
+                        )
+                    }
                 }
-                is VehicleListResult.Failure -> applyFailure(result.reason)
+                is VehicleListResult.Failure -> if (isExpectedClient(account.userId)) {
+                    applyFailure(result.reason)
+                }
             }
+        }
+    }
+
+    private suspend fun applySuccess(userId: String, vehicle: Vehicle) {
+        if (!isExpectedClient(userId)) return
+        if (vehicle.isPrimary) sessionRepository.applyPrimaryVehicle(vehicle)
+        if (origin == VehicleFormOrigin.ONBOARDING) {
+            try {
+                onboardingRepository.resolve(userId)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Throwable) {
+                // The authoritative primary vehicle lets the next session bootstrap recover.
+            }
+        }
+        if (isExpectedClient(userId)) {
+            _uiState.update { it.copy(operation = VehicleFormOperation.Success(vehicle)) }
+        }
+    }
+
+    private fun applyFieldFailure(
+        userId: String,
+        result: VehicleMutationResult.FieldFailure,
+    ) {
+        if (!isExpectedClient(userId)) return
+        _uiState.update {
+            it.copy(
+                errors = it.errors + (result.field to result.error),
+                focusField = result.field,
+                focusRequestId = it.focusRequestId + 1,
+                operation = VehicleFormOperation.Editing,
+            )
         }
     }
 
@@ -173,11 +228,17 @@ class VehicleFormViewModel(
     }
 
     private fun clearForExpiredSession() {
+        submitJob?.cancel()
+        submitJob = null
         _uiState.value = VehicleFormUiState(
             origin = origin,
             operation = VehicleFormOperation.Failure(VehicleFormFailureReason.SESSION_EXPIRED),
         )
     }
+
+    private fun isExpectedClient(userId: String): Boolean =
+        (sessionRepository.state.value as? AppSessionState.Authenticated.Client)
+            ?.account?.userId == userId && userId == expectedUserId
 
     private fun normalizeInput(field: VehicleField, value: String): String = when (field) {
         VehicleField.PLATE -> VehicleValidation.normalizePlate(value)
@@ -211,6 +272,7 @@ class VehicleFormViewModel(
         VehicleFailure.Timeout -> VehicleFormFailureReason.TIMEOUT
         VehicleFailure.SessionExpired -> VehicleFormFailureReason.SESSION_EXPIRED
         VehicleFailure.ServiceUnavailable -> VehicleFormFailureReason.SERVICE
+        VehicleFailure.RpcUnavailable -> VehicleFormFailureReason.OPERATION_UNAVAILABLE
         VehicleFailure.Contract, VehicleFailure.VehicleUnavailable -> VehicleFormFailureReason.CONTRACT
         VehicleFailure.Unknown -> VehicleFormFailureReason.UNKNOWN
     }
@@ -220,11 +282,17 @@ class VehicleFormViewModel(
             origin: VehicleFormOrigin,
             vehicleRepository: VehicleRepository,
             sessionRepository: SessionRepository,
+            onboardingRepository: VehicleOnboardingRepository,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 require(modelClass.isAssignableFrom(VehicleFormViewModel::class.java))
-                return VehicleFormViewModel(origin, vehicleRepository, sessionRepository) as T
+                return VehicleFormViewModel(
+                    origin,
+                    vehicleRepository,
+                    sessionRepository,
+                    onboardingRepository,
+                ) as T
             }
         }
     }

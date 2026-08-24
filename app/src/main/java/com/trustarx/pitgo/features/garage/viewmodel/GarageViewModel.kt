@@ -53,19 +53,25 @@ class GarageViewModel(
 
     fun setPrimary(vehicleId: String) {
         val current = _uiState.value as? GarageUiState.Content ?: return
+        val account = (sessionRepository.state.value as? AppSessionState.Authenticated.Client)
+            ?.account ?: run {
+            _uiState.value = GarageUiState.Failure(GarageFailureReason.SESSION_EXPIRED)
+            return
+        }
         if (current.changingPrimaryVehicleId != null ||
             current.vehicles.firstOrNull { it.id == vehicleId }?.isPrimary == true
         ) return
         _uiState.value = current.copy(changingPrimaryVehicleId = vehicleId)
         viewModelScope.launch {
-            when (val result = vehicleRepository.setPrimaryVehicle(vehicleId)) {
+            when (val result = vehicleRepository.setPrimaryVehicle(account.userId, vehicleId)) {
                 is VehicleMutationResult.Success -> {
+                    sessionRepository.applyPrimaryVehicle(result.vehicle)
                     val updated = current.vehicles.map { vehicle ->
                         vehicle.copy(isPrimary = vehicle.id == result.vehicle.id)
                     }
                     _uiState.value = GarageUiState.Content(updated)
                 }
-                is VehicleMutationResult.FieldUnavailable ->
+                is VehicleMutationResult.FieldFailure ->
                     _uiState.value = GarageUiState.Failure(GarageFailureReason.UNKNOWN)
                 is VehicleMutationResult.Failure ->
                     _uiState.value = GarageUiState.Failure(result.reason.toGarageReason())
@@ -78,6 +84,7 @@ class GarageViewModel(
         VehicleFailure.Timeout -> GarageFailureReason.TIMEOUT
         VehicleFailure.SessionExpired -> GarageFailureReason.SESSION_EXPIRED
         VehicleFailure.ServiceUnavailable -> GarageFailureReason.SERVICE
+        VehicleFailure.RpcUnavailable -> GarageFailureReason.SERVICE
         VehicleFailure.Contract,
         VehicleFailure.VehicleUnavailable,
         VehicleFailure.Unknown,

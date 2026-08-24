@@ -13,22 +13,36 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 class ServiceMapRepository(private val client: SupabaseClient) {
+    suspend fun listInitial(serviceId: String): ProviderDiscoveryResult {
+        if (!isUuid(serviceId)) return ProviderDiscoveryResult.InvalidInput
+        return query("list_service_provider_locations", buildJsonObject {
+            put("p_service_id", serviceId)
+            put("p_limit", 200)
+        })
+    }
+
     suspend fun discover(
         serviceId: String,
         center: MapCenter,
         radiusMeters: Int = 25_000,
     ): ProviderDiscoveryResult {
         if (!center.isValid || !isUuid(serviceId)) return ProviderDiscoveryResult.InvalidInput
-        return try {
-        val rows = client.postgrest.rpc("discover_service_providers", buildJsonObject {
+        return query("discover_service_providers", buildJsonObject {
             put("p_service_id", serviceId)
             put("p_center_lat", center.latitude)
             put("p_center_long", center.longitude)
             put("p_radius_meters", radiusMeters.coerceIn(1, 200_000))
             put("p_limit", 200)
-        }).decodeList<PublicProviderDto>()
+        })
+    }
+
+    private suspend fun query(
+        function: String,
+        params: kotlinx.serialization.json.JsonObject,
+    ): ProviderDiscoveryResult = try {
+        val rows = client.postgrest.rpc(function, params).decodeList<PublicProviderDto>()
         ProviderDiscoveryResult.Success(rows.mapNotNull(PublicProviderDto::toDomainOrNull))
-    } catch (cancel: CancellationException) { throw cancel }
+      } catch (cancel: CancellationException) { throw cancel }
       catch (_: HttpRequestTimeoutException) { ProviderDiscoveryResult.Timeout }
       catch (_: HttpRequestException) { ProviderDiscoveryResult.Offline }
       catch (error: PostgrestRestException) {
@@ -38,7 +52,6 @@ class ServiceMapRepository(private val client: SupabaseClient) {
               ProviderDiscoveryResult.ServiceUnavailable
           } else ProviderDiscoveryResult.Failure
       } catch (_: Throwable) { ProviderDiscoveryResult.Failure }
-    }
 
     private fun isUuid(value: String): Boolean = runCatching {
         java.util.UUID.fromString(value).toString().equals(value, ignoreCase = true)

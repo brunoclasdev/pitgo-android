@@ -21,10 +21,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -48,6 +52,8 @@ import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentProvider
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentTrackingUiState
 import com.trustarx.pitgo.features.appointmenttracking.model.TrackingDataState
 import com.trustarx.pitgo.features.appointmenttracking.viewmodel.AppointmentTrackingViewModel
+import java.text.NumberFormat
+import java.util.Locale
 
 @Composable
 fun AppointmentTrackingRoute(
@@ -71,6 +77,7 @@ fun AppointmentTrackingRoute(
         onViewportIdle = viewModel::onViewportIdle,
         onSurfaceState = viewModel::updateSurfaceState,
         onRetryStyle = viewModel::retryStyle,
+        onCancel = viewModel::cancel,
     )
 }
 
@@ -84,7 +91,10 @@ private fun AppointmentTrackingScreen(
     onViewportIdle: (com.trustarx.pitgo.core.map.model.MapViewport) -> Unit,
     onSurfaceState: (com.trustarx.pitgo.core.map.model.MapSurfaceState) -> Unit,
     onRetryStyle: () -> Unit,
+    onCancel: (String) -> Unit,
 ) {
+    var showCancel by remember { mutableStateOf(false) }
+    var reason by remember { mutableStateOf("") }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -102,7 +112,11 @@ private fun AppointmentTrackingScreen(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             val location = state.visibleLocation
-            if (location != null) {
+            val hasClientLocation = state.clientLocation?.isValid == true
+            // The provider's position may still be pending (e.g. right after acceptance); the
+            // client's own position, once known, is shown on its own rather than blanking the
+            // whole map — see spec 014 US2 acceptance scenario 3.
+            if (location != null || hasClientLocation) {
                 MapLibreMapHost(
                     configuration = PitGoManagedMapStyle.configuration,
                     renderModel = MapRenderModel(state.markers),
@@ -128,6 +142,21 @@ private fun AppointmentTrackingScreen(
                 verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
             ) {
                 TrackingStatus(state.data)
+                state.dispatch?.appointment?.let { appointment ->
+                    Surface(shape = MaterialTheme.shapes.large) {
+                        Column(Modifier.fillMaxWidth().padding(PitGoSpacing.Medium)) {
+                            Text(state.dispatch.serviceName, style = MaterialTheme.typography.titleMedium)
+                            Text(stringResource(
+                                R.string.mobile_dispatch_price_frozen,
+                                NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")).format(appointment.quotedPrice),
+                            ))
+                            Text(appointment.status.name)
+                            TextButton(onClick = { showCancel = true }, enabled = !state.cancelling) {
+                                Text(stringResource(R.string.mobile_dispatch_cancel))
+                            }
+                        }
+                    }
+                }
                 MapSurfaceWarning(state, onRetryStyle)
                 if (location != null) {
                     Surface(
@@ -155,9 +184,22 @@ private fun AppointmentTrackingScreen(
                 }
             }
 
-            if (location != null) MapAttribution(Modifier.align(Alignment.BottomStart))
+            if (location != null || hasClientLocation) MapAttribution(Modifier.align(Alignment.BottomStart))
         }
     }
+    if (showCancel) AlertDialog(
+        onDismissRequest = { showCancel = false },
+        title = { Text(stringResource(R.string.mobile_dispatch_cancel_title)) },
+        text = { OutlinedTextField(
+            value = reason, onValueChange = { reason = it }, minLines = 3,
+            label = { Text(stringResource(R.string.mobile_dispatch_cancel_reason)) },
+            isError = reason.isBlank(),
+        ) },
+        confirmButton = { Button(
+            onClick = { onCancel(reason); showCancel = false }, enabled = reason.isNotBlank(),
+        ) { Text(stringResource(R.string.mobile_dispatch_cancel_confirm)) } },
+        dismissButton = { TextButton({ showCancel = false }) { Text(stringResource(R.string.action_back)) } },
+    )
 }
 
 @Composable

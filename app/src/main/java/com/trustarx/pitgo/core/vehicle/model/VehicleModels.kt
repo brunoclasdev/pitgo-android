@@ -75,6 +75,7 @@ sealed interface VehicleFailure {
     data object Timeout : VehicleFailure
     data object SessionExpired : VehicleFailure
     data object ServiceUnavailable : VehicleFailure
+    data object RpcUnavailable : VehicleFailure
     data object Contract : VehicleFailure
     data object VehicleUnavailable : VehicleFailure
     data object Unknown : VehicleFailure
@@ -82,7 +83,10 @@ sealed interface VehicleFailure {
 
 sealed interface VehicleMutationResult {
     data class Success(val vehicle: Vehicle) : VehicleMutationResult
-    data class FieldUnavailable(val field: VehicleField) : VehicleMutationResult
+    data class FieldFailure(
+        val field: VehicleField,
+        val error: VehicleFieldError,
+    ) : VehicleMutationResult
     data class Failure(val reason: VehicleFailure) : VehicleMutationResult
 }
 

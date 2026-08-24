@@ -24,11 +24,12 @@ class AppointmentMapStyleController : MapLibreStyleController {
     override val clickableLayerIds: Array<String> = emptyArray()
 
     override fun install(context: Context, style: Style) {
-        listOf(LIVE_LAYER, STALE_LAYER).forEach(style::removeLayer)
+        listOf(LIVE_LAYER, STALE_LAYER, CLIENT_LAYER).forEach(style::removeLayer)
         style.removeSource(SOURCE_ID)
-        listOf(LIVE_IMAGE, STALE_IMAGE).forEach(style::removeImage)
+        listOf(LIVE_IMAGE, STALE_IMAGE, CLIENT_IMAGE).forEach(style::removeImage)
         context.getDrawable(R.drawable.ic_map_live)?.let { style.addImage(LIVE_IMAGE, it) }
         context.getDrawable(R.drawable.ic_map_stale)?.let { style.addImage(STALE_IMAGE, it) }
+        context.getDrawable(R.drawable.ic_map_client_vehicle)?.let { style.addImage(CLIENT_IMAGE, it) }
         style.addSource(
             GeoJsonSource(
                 SOURCE_ID,
@@ -38,6 +39,7 @@ class AppointmentMapStyleController : MapLibreStyleController {
         )
         style.addLayer(markerLayer(LIVE_LAYER, LIVE_IMAGE, MapMarkerKind.LIVE))
         style.addLayer(markerLayer(STALE_LAYER, STALE_IMAGE, MapMarkerKind.STALE))
+        style.addLayer(markerLayer(CLIENT_LAYER, CLIENT_IMAGE, MapMarkerKind.CLIENT_LOCATION))
     }
 
     override fun update(style: Style, model: MapRenderModel) {
@@ -68,8 +70,10 @@ class AppointmentMapStyleController : MapLibreStyleController {
         const val SOURCE_ID = "appointment-location-source"
         const val LIVE_LAYER = "appointment-location-live-layer"
         const val STALE_LAYER = "appointment-location-stale-layer"
+        const val CLIENT_LAYER = "appointment-location-client-layer"
         const val LIVE_IMAGE = "appointment-location-live-image"
         const val STALE_IMAGE = "appointment-location-stale-image"
+        const val CLIENT_IMAGE = "appointment-location-client-image"
         const val PROPERTY_KIND = "kind"
     }
 }

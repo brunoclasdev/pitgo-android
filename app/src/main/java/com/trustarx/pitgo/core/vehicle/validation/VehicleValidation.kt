@@ -31,6 +31,39 @@ object VehicleValidation {
         .trim()
         .uppercase(Locale.ROOT)
 
+    fun maximumYear(): Int = Year.now().value + 1
+
+    fun validateField(
+        field: VehicleField,
+        value: String,
+        maximumYear: Int = maximumYear(),
+    ): VehicleFieldError? = when (field) {
+        VehicleField.BRAND,
+        VehicleField.MODEL,
+        -> VehicleFieldError.REQUIRED.takeIf { value.trim().isEmpty() }
+        VehicleField.PLATE -> normalizePlate(value).takeIf(String::isNotEmpty)?.let { plate ->
+            VehicleFieldError.INVALID_FORMAT.takeUnless {
+                legacyPlate.matches(plate) || mercosurPlate.matches(plate)
+            }
+        }
+        VehicleField.RENAVAM -> normalizeRenavam(value).takeIf(String::isNotEmpty)?.let { renavam ->
+            VehicleFieldError.INVALID_FORMAT.takeUnless { renavamPattern.matches(renavam) }
+        }
+        VehicleField.CHASSIS -> normalizeChassis(value).takeIf(String::isNotEmpty)?.let { chassis ->
+            VehicleFieldError.INVALID_FORMAT.takeUnless { chassisPattern.matches(chassis) }
+        }
+        VehicleField.MANUFACTURE_YEAR,
+        VehicleField.MODEL_YEAR,
+        -> validateOptionalInteger(value, 1900..maximumYear)
+        VehicleField.MILEAGE -> validateOptionalNonNegativeInteger(value)
+        VehicleField.VERSION,
+        VehicleField.COLOR,
+        VehicleField.FUEL_TYPE,
+        VehicleField.TRANSMISSION,
+        VehicleField.ENGINE,
+        -> null
+    }
+
     @Suppress("LongParameterList")
     fun validate(
         brand: String,
@@ -56,36 +89,28 @@ object VehicleValidation {
         val manufactureYearValue = manufactureYear.trim().toIntOrNull()
         val modelYearValue = modelYear.trim().toIntOrNull()
         val mileageValue = mileage.trim().toIntOrNull()
-        val maximumYear = Year.now().value + 1
+        val maximumYear = maximumYear()
         val errors = linkedMapOf<VehicleField, VehicleFieldError>()
 
-        if (normalizedBrand.isBlank()) errors[VehicleField.BRAND] = VehicleFieldError.REQUIRED
-        if (normalizedModel.isBlank()) errors[VehicleField.MODEL] = VehicleFieldError.REQUIRED
-        if (manufactureYear.isNotBlank() && manufactureYearValue == null) {
-            errors[VehicleField.MANUFACTURE_YEAR] = VehicleFieldError.INVALID_FORMAT
-        } else if (manufactureYearValue != null && manufactureYearValue !in 1900..maximumYear) {
-            errors[VehicleField.MANUFACTURE_YEAR] = VehicleFieldError.OUT_OF_RANGE
-        }
-        if (modelYear.isNotBlank() && modelYearValue == null) {
-            errors[VehicleField.MODEL_YEAR] = VehicleFieldError.INVALID_FORMAT
-        } else if (modelYearValue != null && modelYearValue !in 1900..maximumYear) {
-            errors[VehicleField.MODEL_YEAR] = VehicleFieldError.OUT_OF_RANGE
-        }
-        if (normalizedPlate != null &&
-            !legacyPlate.matches(normalizedPlate) && !mercosurPlate.matches(normalizedPlate)
-        ) {
-            errors[VehicleField.PLATE] = VehicleFieldError.INVALID_FORMAT
-        }
-        if (normalizedRenavam != null && !renavamPattern.matches(normalizedRenavam)) {
-            errors[VehicleField.RENAVAM] = VehicleFieldError.INVALID_FORMAT
-        }
-        if (normalizedChassis != null && !chassisPattern.matches(normalizedChassis)) {
-            errors[VehicleField.CHASSIS] = VehicleFieldError.INVALID_FORMAT
-        }
-        if (mileage.isNotBlank() && mileageValue == null) {
-            errors[VehicleField.MILEAGE] = VehicleFieldError.INVALID_FORMAT
-        } else if (mileageValue != null && mileageValue < 0) {
-            errors[VehicleField.MILEAGE] = VehicleFieldError.OUT_OF_RANGE
+        val rawValues = mapOf(
+            VehicleField.BRAND to brand,
+            VehicleField.MODEL to model,
+            VehicleField.VERSION to version,
+            VehicleField.MANUFACTURE_YEAR to manufactureYear,
+            VehicleField.MODEL_YEAR to modelYear,
+            VehicleField.PLATE to plate,
+            VehicleField.RENAVAM to renavam,
+            VehicleField.CHASSIS to chassis,
+            VehicleField.COLOR to color,
+            VehicleField.FUEL_TYPE to fuelType,
+            VehicleField.TRANSMISSION to transmission,
+            VehicleField.ENGINE to engine,
+            VehicleField.MILEAGE to mileage,
+        )
+        VehicleField.entries.forEach { field ->
+            validateField(field, rawValues.getValue(field), maximumYear)?.let { error ->
+                errors[field] = error
+            }
         }
 
         if (errors.isNotEmpty()) return VehicleValidationResult(null, errors)
@@ -109,5 +134,22 @@ object VehicleValidation {
             ),
             errors = emptyMap(),
         )
+    }
+
+    private fun validateOptionalInteger(
+        value: String,
+        validRange: IntRange,
+    ): VehicleFieldError? {
+        val normalized = value.trim()
+        if (normalized.isEmpty()) return null
+        val number = normalized.toIntOrNull() ?: return VehicleFieldError.INVALID_FORMAT
+        return VehicleFieldError.OUT_OF_RANGE.takeUnless { number in validRange }
+    }
+
+    private fun validateOptionalNonNegativeInteger(value: String): VehicleFieldError? {
+        val normalized = value.trim()
+        if (normalized.isEmpty()) return null
+        val number = normalized.toIntOrNull() ?: return VehicleFieldError.INVALID_FORMAT
+        return VehicleFieldError.OUT_OF_RANGE.takeIf { number < 0 }
     }
 }

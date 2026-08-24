@@ -292,7 +292,6 @@ dependencies {
     implementation(libs.supabase.realtime)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.maplibre.android.opengl)
-    implementation(libs.google.play.services.location)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.coil.compose)

@@ -1,17 +1,25 @@
 package com.trustarx.pitgo.features.appointmenttracking.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.trustarx.pitgo.core.location.model.ClientLocationPurpose
+import com.trustarx.pitgo.core.location.model.DeviceLocationResult
+import com.trustarx.pitgo.core.location.repository.DeviceLocationRepository
 import com.trustarx.pitgo.core.map.model.MapSurfaceState
 import com.trustarx.pitgo.core.map.model.MapViewport
 import com.trustarx.pitgo.core.map.model.MapViewportCommand
+import com.trustarx.pitgo.core.map.model.framingViewport
+import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentClientLocation
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentLocationEvent
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentProviderLocation
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentTrackingUiState
 import com.trustarx.pitgo.features.appointmenttracking.model.LocationRevision
 import com.trustarx.pitgo.features.appointmenttracking.model.TrackingDataState
 import com.trustarx.pitgo.features.appointmenttracking.repository.AppointmentTrackingRepository
+import com.trustarx.pitgo.features.mobiledispatch.repository.MobileDispatchRepository
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -20,10 +28,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.time.Instant
 
 class AppointmentTrackingViewModel(
     private val appointmentId: String,
     private val repository: AppointmentTrackingRepository,
+    private val dispatchRepository: MobileDispatchRepository,
+    private val deviceLocationRepository: DeviceLocationRepository,
+    private val isClient: Boolean,
 ) : ViewModel() {
     private val _state = MutableStateFlow(AppointmentTrackingUiState())
     val state: StateFlow<AppointmentTrackingUiState> = _state.asStateFlow()
@@ -37,6 +49,17 @@ class AppointmentTrackingViewModel(
         if (observeJob != null) return
         terminal = false
         observeJob = viewModelScope.launch {
+            when (val dispatch = dispatchRepository.restore()) {
+                is MobileDispatchResult.Success -> _state.value = _state.value.copy(dispatch = dispatch.snapshot)
+                else -> Unit
+            }
+            // Only the client publishes their own position (publish_client_location is a
+            // client-only RPC). A provider viewing this same shared screen used to call this
+            // unconditionally, which always failed with "Client required" (42501) after wasting
+            // a GPS acquisition + up to 3 retries in parallel with the provider's own
+            // ProviderLocationTrackingService — a real contributor to inconsistent provider
+            // location updates.
+            if (isClient) launch { publishOwnLocation() }
             try {
                 coroutineScope {
                     launch {
@@ -63,6 +86,7 @@ class AppointmentTrackingViewModel(
         latest = null
         acceptedRevision = null
         terminal = false
+        deviceLocationRepository.endVisibleUse(ClientLocationPurpose.APPOINTMENT_TRACKING)
         _state.value = AppointmentTrackingUiState()
     }
 
@@ -82,26 +106,91 @@ class AppointmentTrackingViewModel(
 
     fun setFollowProvider(enabled: Boolean) {
         _state.value = _state.value.copy(followProvider = enabled)
-        if (enabled) latest?.let(::moveCameraTo)
+        if (enabled) latest?.let { moveCameraTo(it, _state.value.clientLocation) }
+    }
+
+    fun cancel(reason: String) {
+        if (reason.isBlank() || _state.value.cancelling) return
+        val appointment = _state.value.dispatch?.appointment ?: return
+        _state.value = _state.value.copy(cancelling = true)
+        viewModelScope.launch {
+            when (val result = dispatchRepository.cancel(appointment.id, reason, appointment.revision)) {
+                is MobileDispatchResult.Success -> _state.value = _state.value.copy(
+                    dispatch = result.snapshot,
+                    cancelling = false,
+                )
+                else -> _state.value = _state.value.copy(cancelling = false)
+            }
+        }
+    }
+
+    /**
+     * One-shot capture of the client's own position, published to the backend so the provider's
+     * map can also see it (data-model.md #3). Fired once per onVisible() — i.e. once per screen
+     * open/reopen — never a continuous background stream (decision of /speckit-clarify).
+     *
+     * A raw-GPS cold fix (no Play Services fused provider, see AndroidLocationDataSource) can
+     * easily take longer than a few seconds indoors or with Network provider disabled, so a
+     * single short attempt was failing silently and leaving the client marker stuck on whatever
+     * was last published (never, on a fresh appointment). Retries with a generous per-attempt
+     * timeout instead of giving up after one 5s window, and never lets a failure here take down
+     * the sibling coroutine that renders the provider's location.
+     */
+    private suspend fun publishOwnLocation() {
+        deviceLocationRepository.beginVisibleUse(ClientLocationPurpose.APPOINTMENT_TRACKING)
+        repeat(OWN_LOCATION_ATTEMPTS) { attempt ->
+            try {
+                val fix = deviceLocationRepository.currentClientFix(timeoutMillis = OWN_LOCATION_TIMEOUT_MS)
+                if (fix is DeviceLocationResult.Success) {
+                    applyClientLocation(AppointmentClientLocation(fix.fix.latitude, fix.fix.longitude))
+                    repository.publishClientLocation(
+                        appointmentId = appointmentId,
+                        latitude = fix.fix.latitude,
+                        longitude = fix.fix.longitude,
+                        accuracyMeters = fix.fix.accuracyMeters.toDouble(),
+                        capturedAt = Instant.ofEpochMilli(fix.fix.capturedAtEpochMillis),
+                    )
+                    return
+                }
+                Log.w(TAG, "publishOwnLocation attempt ${attempt + 1}/$OWN_LOCATION_ATTEMPTS failed: $fix")
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (t: Throwable) {
+                Log.w(TAG, "publishOwnLocation attempt ${attempt + 1}/$OWN_LOCATION_ATTEMPTS threw", t)
+            }
+            if (attempt < OWN_LOCATION_ATTEMPTS - 1) delay(OWN_LOCATION_RETRY_DELAY_MS)
+        }
+    }
+
+    /** Updates the client marker and, when the provider isn't known yet, centers on it alone. */
+    private fun applyClientLocation(clientLocation: AppointmentClientLocation) {
+        _state.value = _state.value.copy(clientLocation = clientLocation)
+        val providerLocation = latest
+        if (providerLocation != null) {
+            if (_state.value.followProvider) moveCameraTo(providerLocation, clientLocation)
+        } else {
+            centerOnClientOnly(clientLocation)
+        }
+    }
+
+    private fun centerOnClientOnly(clientLocation: AppointmentClientLocation) {
+        cameraRevision += 1
+        val target = MapViewport(clientLocation.coordinate, CLIENT_ONLY_ZOOM)
+        _state.value = _state.value.copy(
+            viewport = target,
+            cameraCommand = MapViewportCommand(target, cameraRevision),
+        )
     }
 
     private fun handle(event: AppointmentLocationEvent) {
         if (terminal) return
         when (event) {
             is AppointmentLocationEvent.Snapshot -> {
-                val location = event.location
+                event.clientLocation?.let(::applyClientLocation)
+                val location = event.providerLocation
                 if (location == null) {
                     if (acceptedRevision == null) updateData(TrackingDataState.Empty)
                 } else accept(location)
-            }
-            is AppointmentLocationEvent.Upsert -> accept(event.location)
-            is AppointmentLocationEvent.Removed -> {
-                val accepted = acceptedRevision
-                if (accepted == null || event.revision >= accepted) {
-                    acceptedRevision = event.revision
-                    latest = null
-                    updateData(TrackingDataState.Empty)
-                }
             }
             is AppointmentLocationEvent.Ended -> {
                 terminal = true
@@ -125,7 +214,7 @@ class AppointmentTrackingViewModel(
         acceptedRevision = location.revision
         latest = location
         publishFreshness(location)
-        if (_state.value.followProvider) moveCameraTo(location)
+        if (_state.value.followProvider) moveCameraTo(location, _state.value.clientLocation)
     }
 
     private fun publishFreshness(location: AppointmentProviderLocation) {
@@ -136,9 +225,11 @@ class AppointmentTrackingViewModel(
         )
     }
 
-    private fun moveCameraTo(location: AppointmentProviderLocation) {
+    private fun moveCameraTo(location: AppointmentProviderLocation, clientLocation: AppointmentClientLocation?) {
         cameraRevision += 1
-        val target = MapViewport(location.coordinate, 16.0)
+        val target = if (clientLocation != null && clientLocation.isValid) {
+            framingViewport(location.coordinate, clientLocation.coordinate)
+        } else MapViewport(location.coordinate, 16.0)
         _state.value = _state.value.copy(
             viewport = target,
             cameraCommand = MapViewportCommand(target, cameraRevision),
@@ -150,13 +241,26 @@ class AppointmentTrackingViewModel(
     }
 
     companion object {
+        private const val TAG = "AppointmentTracking"
         private const val STALE_AFTER_MS = 30_000L
+        private const val CLIENT_ONLY_ZOOM = 15.0
+        private const val OWN_LOCATION_ATTEMPTS = 3
+        private const val OWN_LOCATION_TIMEOUT_MS = 20_000L
+        private const val OWN_LOCATION_RETRY_DELAY_MS = 2_000L
 
-        fun factory(appointmentId: String, repository: AppointmentTrackingRepository) =
+        fun factory(
+            appointmentId: String,
+            repository: AppointmentTrackingRepository,
+            dispatchRepository: MobileDispatchRepository,
+            deviceLocationRepository: DeviceLocationRepository,
+            isClient: Boolean,
+        ) =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    AppointmentTrackingViewModel(appointmentId, repository) as T
+                    AppointmentTrackingViewModel(
+                        appointmentId, repository, dispatchRepository, deviceLocationRepository, isClient,
+                    ) as T
             }
     }
 }

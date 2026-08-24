@@ -9,7 +9,6 @@ navigationCompose = "2.9.8"
 supabase = "3.2.6"
 ktor = "3.3.1"
 mapLibre = "13.5.0"
-playServicesLocation = "21.4.0"
 desugarJdkLibs = "2.1.5"
 kotlinSerialization = "2.2.10"
 serializationJson = "1.9.0"
@@ -35,7 +34,6 @@ supabase-functions = { group = "io.github.jan-tennert.supabase", name = "functio
 supabase-realtime = { group = "io.github.jan-tennert.supabase", name = "realtime-kt", version.ref = "supabase" }
 ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
 maplibre-android-opengl = { group = "org.maplibre.gl", name = "android-sdk-opengl", version.ref = "mapLibre" }
-google-play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugarJdkLibs" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serializationJson" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "dataStore" }

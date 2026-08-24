@@ -13,14 +13,13 @@ class ProviderTrackingStateRepository(private val context: Context) {
     private val _state = MutableStateFlow<ProviderTrackingState>(ProviderTrackingState.Stopped)
     val state: StateFlow<ProviderTrackingState> = _state.asStateFlow()
 
-    fun start(appointmentId: String) {
+    fun start() {
         if (_state.value !is ProviderTrackingState.Stopped) return
         _state.value = ProviderTrackingState.Starting
         ContextCompat.startForegroundService(
             context,
             Intent(context, ProviderLocationTrackingService::class.java)
-                .setAction(ProviderLocationTrackingService.ACTION_START)
-                .putExtra(ProviderLocationTrackingService.EXTRA_APPOINTMENT_ID, appointmentId),
+                .setAction(ProviderLocationTrackingService.ACTION_START),
         )
     }
 

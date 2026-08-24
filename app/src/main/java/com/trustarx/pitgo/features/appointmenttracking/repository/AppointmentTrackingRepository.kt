@@ -1,8 +1,9 @@
 package com.trustarx.pitgo.features.appointmenttracking.repository
 
+import com.trustarx.pitgo.core.common.time.parseSupabaseInstant
+import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentClientLocation
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentLocationEvent
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentProviderLocation
-import com.trustarx.pitgo.features.appointmenttracking.model.LocationRevision
 import com.trustarx.pitgo.features.appointmenttracking.model.TerminalAppointmentStatus
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.exceptions.HttpRequestException
@@ -44,9 +45,14 @@ class AppointmentTrackingRepository(private val client: SupabaseClient) {
             val delete = channel.broadcastFlow<JsonObject>("DELETE")
             val ended = channel.broadcastFlow<JsonObject>("ENDED")
 
-            launch { insert.collect { payload -> parseUpsert(payload)?.let { send(it) } } }
-            launch { update.collect { payload -> parseUpsert(payload)?.let { send(it) } } }
-            launch { delete.collect { payload -> parseRemoved(payload)?.let { send(it) } } }
+            // Both provider_current_locations and client_current_locations broadcast to this same
+            // channel with their own row shape; rather than parsing each shape from the raw
+            // payload, any insert/update/delete on either table just re-fetches the authoritative
+            // combined snapshot via RPC (same "broadcast wakes the repository up" philosophy used
+            // for mobile dispatch — see specs/013 realtime contract).
+            launch { insert.collect { send(snapshotSafely(appointmentId)) } }
+            launch { update.collect { send(snapshotSafely(appointmentId)) } }
+            launch { delete.collect { send(snapshotSafely(appointmentId)) } }
             launch { ended.collect { payload -> parseEnded(payload)?.let { send(it) } } }
             launch {
                 channel.status
@@ -79,6 +85,33 @@ class AppointmentTrackingRepository(private val client: SupabaseClient) {
         }
     }
 
+    /**
+     * Intentionally lets failures propagate (no runCatching here): the caller
+     * (AppointmentTrackingViewModel.publishOwnLocation) retries on exception, so swallowing errors
+     * here used to mean a failed publish looked identical to a successful one — the client marker
+     * moved in the local UI (updated before this call) while the backend, and therefore the
+     * provider's map, silently kept stale/empty data forever.
+     */
+    suspend fun publishClientLocation(
+        appointmentId: String,
+        latitude: Double,
+        longitude: Double,
+        accuracyMeters: Double,
+        capturedAt: Instant,
+    ) {
+        if (!isUuid(appointmentId)) return
+        client.postgrest.rpc(
+            "publish_client_location",
+            buildJsonObject {
+                put("p_appointment_id", appointmentId)
+                put("p_latitude", latitude)
+                put("p_longitude", longitude)
+                put("p_accuracy_m", accuracyMeters)
+                put("p_captured_at", capturedAt.toString())
+            },
+        )
+    }
+
     private suspend fun snapshotSafely(appointmentId: String): AppointmentLocationEvent = try {
         snapshot(appointmentId)
     } catch (cancel: CancellationException) {
@@ -101,20 +134,29 @@ class AppointmentTrackingRepository(private val client: SupabaseClient) {
             buildJsonObject { put("p_appointment_id", appointmentId) },
         ).decodeAs<LocationSnapshotDto>()
         return when (dto.state) {
-            "EMPTY" -> AppointmentLocationEvent.Snapshot(null)
+            "EMPTY" -> AppointmentLocationEvent.Snapshot(null, fetchClientLocation(appointmentId))
             "ENDED" -> AppointmentLocationEvent.Ended(
                 TerminalAppointmentStatus.valueOf(requireNotNull(dto.status))
             )
-            "LIVE", "STALE" -> AppointmentLocationEvent.Snapshot(dto.toDomain())
+            "LIVE", "STALE" -> AppointmentLocationEvent.Snapshot(
+                dto.toDomain(),
+                fetchClientLocation(appointmentId),
+            )
             else -> AppointmentLocationEvent.Failure
         }
     }
 
-    private fun parseUpsert(payload: JsonObject): AppointmentLocationEvent.Upsert? =
-        record(payload, preferOld = false)?.toLocationOrNull()?.let(AppointmentLocationEvent::Upsert)
-
-    private fun parseRemoved(payload: JsonObject): AppointmentLocationEvent.Removed? =
-        record(payload, preferOld = true)?.toRevisionOrNull()?.let(AppointmentLocationEvent::Removed)
+    private suspend fun fetchClientLocation(appointmentId: String): AppointmentClientLocation? {
+        val dto = runCatching {
+            client.postgrest.rpc(
+                "get_appointment_client_location",
+                buildJsonObject { put("p_appointment_id", appointmentId) },
+            ).decodeAs<ClientLocationSnapshotDto>()
+        }.getOrNull() ?: return null
+        if (dto.outcome != "FOUND" || dto.location == null) return null
+        val location = AppointmentClientLocation(dto.location.latitude, dto.location.longitude)
+        return location.takeIf(AppointmentClientLocation::isValid)
+    }
 
     private fun parseEnded(payload: JsonObject): AppointmentLocationEvent.Ended? {
         val status = sequenceOf(payload, payload["payload"] as? JsonObject)
@@ -126,38 +168,6 @@ class AppointmentTrackingRepository(private val client: SupabaseClient) {
             .getOrNull()
             ?.let(AppointmentLocationEvent::Ended)
     }
-
-    private fun record(payload: JsonObject, preferOld: Boolean): JsonObject? {
-        val keys = if (preferOld) listOf("old", "record", "payload")
-        else listOf("record", "new", "payload")
-        return keys.firstNotNullOfOrNull { key ->
-            runCatching { payload[key]?.jsonObject }.getOrNull()
-        }
-    }
-
-    private fun JsonObject.toLocationOrNull(): AppointmentProviderLocation? = runCatching {
-        AppointmentProviderLocation(
-            latitude = getValue("latitude").jsonPrimitive.content.toDouble(),
-            longitude = getValue("longitude").jsonPrimitive.content.toDouble(),
-            accuracyMeters = getValue("accuracy_m").jsonPrimitive.content.toDouble(),
-            capturedAtEpochMillis = Instant.parse(
-                getValue("captured_at").jsonPrimitive.content,
-            ).toEpochMilli(),
-            publishedAtEpochMillis = Instant.parse(
-                getValue("published_at").jsonPrimitive.content,
-            ).toEpochMilli(),
-            version = getValue("version").jsonPrimitive.content.toLong(),
-        ).takeIf(AppointmentProviderLocation::isValid)
-    }.getOrNull()
-
-    private fun JsonObject.toRevisionOrNull(): LocationRevision? = runCatching {
-        LocationRevision(
-            publishedAtEpochMillis = Instant.parse(
-                getValue("published_at").jsonPrimitive.content,
-            ).toEpochMilli(),
-            version = getValue("version").jsonPrimitive.content.toLong(),
-        )
-    }.getOrNull()
 
     private fun isUuid(value: String): Boolean = runCatching {
         java.util.UUID.fromString(value).toString().equals(value, ignoreCase = true)
@@ -179,8 +189,20 @@ private data class LocationSnapshotDto(
         latitude = requireNotNull(latitude),
         longitude = requireNotNull(longitude),
         accuracyMeters = requireNotNull(accuracyMeters),
-        capturedAtEpochMillis = Instant.parse(requireNotNull(capturedAt)).toEpochMilli(),
-        publishedAtEpochMillis = Instant.parse(requireNotNull(publishedAt)).toEpochMilli(),
+        capturedAtEpochMillis = parseSupabaseInstant(requireNotNull(capturedAt)).toEpochMilli(),
+        publishedAtEpochMillis = parseSupabaseInstant(requireNotNull(publishedAt)).toEpochMilli(),
         version = requireNotNull(version),
     ).also { require(it.isValid) }
 }
+
+@Serializable
+private data class ClientLocationSnapshotDto(
+    val outcome: String,
+    val location: ClientLocationDto? = null,
+)
+
+@Serializable
+private data class ClientLocationDto(
+    val latitude: Double,
+    val longitude: Double,
+)

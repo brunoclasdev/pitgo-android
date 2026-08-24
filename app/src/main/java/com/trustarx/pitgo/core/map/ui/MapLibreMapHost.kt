@@ -111,7 +111,21 @@ fun MapLibreMapHost(
                 holder.bind(mapView)
             }
         },
-        update = { holder.applyLatest() },
+        update = {
+            // Keep the dynamic inputs inside AndroidView.update as well. Capturing only
+            // the stable holder can let Compose skip the native-view update even though
+            // the viewport or markers changed.
+            holder.update(
+                model = renderModel,
+                viewport = viewport,
+                cameraCommand = cameraCommand,
+                styleReloadRevision = styleReloadRevision,
+                online = online,
+                controller = styleController,
+                clickRadiusPx = clickRadiusPx,
+            )
+            holder.applyLatest()
+        },
         onRelease = { mapView ->
             if (boundView === mapView) boundView = null
             holder.release(mapView)
@@ -308,6 +322,18 @@ private class MapLibreHostHolder(
             style = loaded
             controller?.install(context, loaded)
             controller?.update(loaded, latestModel)
+            // Loading a remote style may apply its own default camera after an earlier
+            // viewport command. Restore the latest app-owned viewport so providers do
+            // not remain outside the visible area on the first render or after retry.
+            val target = latestCommand?.viewport ?: latestViewport
+            if (target.center.isValid) {
+                currentMap.moveCamera(
+                    CameraUpdateFactory.newLatLngZoom(
+                        LatLng(target.center.latitude, target.center.longitude),
+                        target.zoom,
+                    )
+                )
+            }
             publishStyle(MapStyleState.Ready(revision))
             publishResources(if (online) MapResourceState.Ready else MapResourceState.Offline)
         }

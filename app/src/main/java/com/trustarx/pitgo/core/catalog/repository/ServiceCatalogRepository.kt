@@ -5,6 +5,7 @@ import com.trustarx.pitgo.core.catalog.model.CatalogItemResult
 import com.trustarx.pitgo.core.catalog.model.CatalogService
 import com.trustarx.pitgo.core.catalog.model.HomeService
 import com.trustarx.pitgo.core.catalog.model.ServiceCategory
+import com.trustarx.pitgo.core.catalog.model.ServiceDispatchKind
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.exceptions.HttpRequestException
 import io.github.jan.supabase.postgrest.exception.PostgrestRestException
@@ -33,7 +34,7 @@ class ServiceCatalogRepository(private val client: SupabaseClient) {
             filter { eq("category_id", categoryId) }
             order("name", Order.ASCENDING); range(start, start + PAGE_SIZE - 1)
         }.decodeList<ServiceDto>() },
-        map = { CatalogService(it.id, it.categoryId, it.name, it.description) },
+        map = { CatalogService(it.id, it.categoryId, it.name, it.description, it.dispatchKind.toDispatchKind()) },
     )
 
     suspend fun homeServices(): CatalogLoadResult<HomeService> = try {
@@ -42,6 +43,7 @@ class ServiceCatalogRepository(private val client: SupabaseClient) {
             HomeService(
                 it.serviceId, it.name, it.description, it.categoryName,
                 it.minimumPrice?.jsonPrimitive?.content,
+                it.dispatchKind.toDispatchKind(),
             )
         })
     } catch (cancel: CancellationException) { throw cancel }
@@ -102,6 +104,7 @@ class ServiceCatalogRepository(private val client: SupabaseClient) {
 @Serializable private data class ServiceDto(
     val id: String, @SerialName("category_id") val categoryId: String,
     val name: String, val description: String? = null,
+    @SerialName("dispatch_kind") val dispatchKind: String = "BROWSE",
 )
 @Serializable private data class HomeServiceDto(
     @SerialName("service_id") val serviceId: String,
@@ -109,4 +112,8 @@ class ServiceCatalogRepository(private val client: SupabaseClient) {
     val description: String? = null,
     @SerialName("category_name") val categoryName: String,
     @SerialName("minimum_price") val minimumPrice: JsonElement? = null,
+    @SerialName("dispatch_kind") val dispatchKind: String = "BROWSE",
 )
+
+private fun String.toDispatchKind(): ServiceDispatchKind =
+    runCatching { ServiceDispatchKind.valueOf(this) }.getOrDefault(ServiceDispatchKind.BROWSE)

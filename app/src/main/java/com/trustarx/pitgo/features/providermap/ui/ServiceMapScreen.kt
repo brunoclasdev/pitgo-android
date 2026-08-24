@@ -1,6 +1,7 @@
 package com.trustarx.pitgo.features.providermap.ui
 
 import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +39,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -72,6 +75,7 @@ fun ServiceMapRoute(
     onSessionExpired: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { permissions ->
@@ -82,6 +86,16 @@ fun ServiceMapRoute(
     }
     LifecycleStartEffect(viewModel) {
         onStopOrDispose { viewModel.clearTransientLocation() }
+    }
+    LaunchedEffect(viewModel) {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) viewModel.onLocationPermissionResult(true)
     }
     val content = state as? ServiceMapUiState.Content
     LaunchedEffect(content?.dataState) {
@@ -405,7 +419,9 @@ private fun ProviderSummary(provider: PublicProvider, modifier: Modifier = Modif
                 } else R.string.service_map_provider_mode_mobile
             )
         )
-        Text(stringResource(R.string.service_map_distance, provider.distanceMeters.toInt()))
+        provider.distanceMeters?.let { distance ->
+            Text(stringResource(R.string.service_map_distance, distance.toInt()))
+        }
         provider.minimumPrice?.let { Text(stringResource(R.string.service_map_price, it)) }
     }
 }

@@ -8,6 +8,8 @@ import com.trustarx.pitgo.core.auth.data.SupabaseAuthDataSource
 import com.trustarx.pitgo.core.auth.model.AppSessionState
 import com.trustarx.pitgo.core.auth.model.ProfileBlockedReason
 import com.trustarx.pitgo.core.auth.model.UnauthenticatedReason
+import com.trustarx.pitgo.core.vehicle.model.Vehicle
+import com.trustarx.pitgo.core.account.model.ProviderSnapshot
 import io.github.jan.supabase.auth.status.SessionStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -33,11 +36,12 @@ sealed interface SessionLoginResult {
 class SessionRepository(
     private val authDataSource: SupabaseAuthDataSource,
     private val accountRepository: AccountContextRepository,
-    private val beforeSignOut: suspend () -> Unit = {},
+    private val beforeSignOut: suspend (ProviderSnapshot?) -> Unit = {},
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val bootstrapMutex = Mutex()
     private val _state = MutableStateFlow<AppSessionState>(AppSessionState.Initializing)
+    @Volatile private var initialized = false
     val state: StateFlow<AppSessionState> = _state.asStateFlow()
 
     init {
@@ -60,18 +64,44 @@ class SessionRepository(
         }
     }
 
-    suspend fun initialize() = bootstrapMutex.withLock {
+    suspend fun initialize() = ensureInitialized()
+
+    suspend fun ensureInitialized() = bootstrapMutex.withLock {
+        if (initialized) return@withLock
         _state.value = AppSessionState.Initializing
         authDataSource.awaitInitialization()
-        if (authDataSource.currentIdentityOrNull() == null) {
-            _state.value = AppSessionState.Unauthenticated()
-        } else {
-            verifyAndLoad()
-        }
+        if (authDataSource.currentIdentityOrNull() == null) _state.value = AppSessionState.Unauthenticated()
+        else verifyAndLoad()
+        initialized = true
     }
 
     suspend fun retry() = bootstrapMutex.withLock { verifyAndLoad() }
     suspend fun refresh() = bootstrapMutex.withLock { verifyAndLoad() }
+
+    fun applyPrimaryVehicle(vehicle: Vehicle): Boolean {
+        var applied = false
+        _state.update { current ->
+            val client = current as? AppSessionState.Authenticated.Client ?: return@update current
+            if (vehicle.userId != client.account.userId || !vehicle.active || !vehicle.isPrimary) {
+                return@update current
+            }
+            applied = true
+            client.copy(account = client.account.copy(primaryVehicle = vehicle))
+        }
+        return applied
+    }
+
+    fun applyProviderSnapshot(provider: ProviderSnapshot): Boolean {
+        var applied = false
+        _state.update { current ->
+            val ready = current as? AppSessionState.Authenticated.ProviderReady ?: return@update current
+            if (provider.userId != ready.userId || provider.providerId != ready.account.providerId ||
+                !provider.isConsistent()) return@update current
+            applied = true
+            ready.copy(account = provider)
+        }
+        return applied
+    }
 
     suspend fun signIn(email: String, password: String): SessionLoginResult =
         bootstrapMutex.withLock {
@@ -101,7 +131,8 @@ class SessionRepository(
         }
 
     suspend fun signOut() {
-        beforeSignOut()
+        val provider = (_state.value as? AppSessionState.Authenticated.ProviderReady)?.account
+        beforeSignOut(provider)
         _state.value = AppSessionState.Unauthenticated(UnauthenticatedReason.SIGNED_OUT)
         authDataSource.clearLocalSession()
     }

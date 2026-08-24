@@ -40,6 +40,8 @@ class ProviderMapStyleController : MapLibreStyleController {
         GROUP_LAYER,
         SELECTED_LAYER,
         PROVIDER_LAYER,
+        MOBILE_SELECTED_LAYER,
+        MOBILE_LAYER,
         SELECTED_DOT_LAYER,
         PROVIDER_DOT_LAYER,
     )
@@ -55,6 +57,15 @@ class ProviderMapStyleController : MapLibreStyleController {
         context.getDrawable(R.drawable.ic_map_provider_group)?.let {
             style.addImage(IMAGE_GROUP, it)
         }
+        context.getDrawable(R.drawable.ic_map_mobile_provider)?.let {
+            style.addImage(IMAGE_MOBILE, it)
+        }
+        context.getDrawable(R.drawable.ic_map_mobile_provider_selected)?.let {
+            style.addImage(IMAGE_MOBILE_SELECTED, it)
+        }
+        context.getDrawable(R.drawable.ic_map_client_location)?.let {
+            style.addImage(IMAGE_CLIENT_LOCATION, it)
+        }
         style.addSource(
             GeoJsonSource(
                 SOURCE_ID,
@@ -64,6 +75,9 @@ class ProviderMapStyleController : MapLibreStyleController {
                     .withClusterRadius(50)
                     .withClusterMaxZoom(CLUSTER_MAX_ZOOM),
             )
+        )
+        style.addSource(
+            GeoJsonSource(USER_SOURCE_ID, FeatureCollection.fromFeatures(emptyList()))
         )
         style.addLayer(
             CircleLayer(CLUSTER_LAYER, SOURCE_ID)
@@ -118,13 +132,25 @@ class ProviderMapStyleController : MapLibreStyleController {
         )
         style.addLayer(markerLayer(PROVIDER_LAYER, IMAGE_PROVIDER, MapMarkerKind.ADDRESS, false))
         style.addLayer(markerLayer(SELECTED_LAYER, IMAGE_SELECTED, MapMarkerKind.ADDRESS, true))
+        style.addLayer(markerLayer(MOBILE_LAYER, IMAGE_MOBILE, MapMarkerKind.MOBILE_PROVIDER, false))
+        style.addLayer(markerLayer(MOBILE_SELECTED_LAYER, IMAGE_MOBILE_SELECTED, MapMarkerKind.MOBILE_PROVIDER, true))
         style.addLayer(markerLayer(GROUP_LAYER, IMAGE_GROUP, MapMarkerKind.COINCIDENT_GROUP, null))
+        style.addLayer(
+            SymbolLayer(USER_LAYER, USER_SOURCE_ID)
+                .withProperties(
+                    iconImage(IMAGE_CLIENT_LOCATION),
+                    iconSize(1f),
+                    iconAllowOverlap(true),
+                    iconIgnorePlacement(true),
+                )
+        )
     }
 
     override fun update(style: Style, model: MapRenderModel) {
         val source = style.getSourceAs<GeoJsonSource>(SOURCE_ID) ?: return
         val features = model.markers
             .asSequence()
+            .filter { it.kind != MapMarkerKind.CLIENT_LOCATION }
             .filter { it.coordinate.isValid }
             .map { marker ->
                 Feature.fromGeometry(
@@ -140,6 +166,19 @@ class ProviderMapStyleController : MapLibreStyleController {
             }
             .toList()
         source.setGeoJson(FeatureCollection.fromFeatures(features))
+        val userFeatures = model.markers
+            .asSequence()
+            .filter { it.kind == MapMarkerKind.CLIENT_LOCATION && it.coordinate.isValid }
+            .map { marker ->
+                Feature.fromGeometry(
+                    Point.fromLngLat(marker.coordinate.longitude, marker.coordinate.latitude),
+                    null,
+                    marker.id,
+                )
+            }
+            .toList()
+        style.getSourceAs<GeoJsonSource>(USER_SOURCE_ID)
+            ?.setGeoJson(FeatureCollection.fromFeatures(userFeatures))
     }
 
     override fun selection(features: List<Feature>): MapFeatureSelection {
@@ -181,32 +220,51 @@ class ProviderMapStyleController : MapLibreStyleController {
 
     private fun removeRuntimeArtifacts(style: Style) {
         listOf(
+            USER_LAYER,
             CLUSTER_COUNT_LAYER,
             CLUSTER_LAYER,
             GROUP_LAYER,
             SELECTED_LAYER,
             PROVIDER_LAYER,
+            MOBILE_SELECTED_LAYER,
+            MOBILE_LAYER,
             SELECTED_DOT_LAYER,
             PROVIDER_DOT_LAYER,
         )
             .forEach(style::removeLayer)
+        style.removeSource(USER_SOURCE_ID)
         style.removeSource(SOURCE_ID)
-        listOf(IMAGE_PROVIDER, IMAGE_SELECTED, IMAGE_GROUP).forEach(style::removeImage)
+        listOf(
+            IMAGE_PROVIDER,
+            IMAGE_SELECTED,
+            IMAGE_GROUP,
+            IMAGE_MOBILE,
+            IMAGE_MOBILE_SELECTED,
+            IMAGE_CLIENT_LOCATION,
+        )
+            .forEach(style::removeImage)
     }
 
     companion object {
         const val CLUSTER_MAX_ZOOM = 15
         private const val SOURCE_ID = "provider-address-source"
+        private const val USER_SOURCE_ID = "client-location-source"
         private const val CLUSTER_LAYER = "provider-cluster-layer"
         private const val CLUSTER_COUNT_LAYER = "provider-cluster-count-layer"
         private const val PROVIDER_LAYER = "provider-address-layer"
         private const val SELECTED_LAYER = "provider-address-selected-layer"
         private const val GROUP_LAYER = "provider-address-group-layer"
+        private const val MOBILE_LAYER = "provider-mobile-layer"
+        private const val MOBILE_SELECTED_LAYER = "provider-mobile-selected-layer"
+        private const val USER_LAYER = "client-location-layer"
         private const val PROVIDER_DOT_LAYER = "provider-address-dot-layer"
         private const val SELECTED_DOT_LAYER = "provider-address-selected-dot-layer"
         private const val IMAGE_PROVIDER = "provider-address-image"
         private const val IMAGE_SELECTED = "provider-address-selected-image"
         private const val IMAGE_GROUP = "provider-address-group-image"
+        private const val IMAGE_MOBILE = "provider-mobile-image"
+        private const val IMAGE_MOBILE_SELECTED = "provider-mobile-selected-image"
+        private const val IMAGE_CLIENT_LOCATION = "client-location-image"
         private const val PROPERTY_ID = "id"
         private const val PROPERTY_KIND = "kind"
         private const val PROPERTY_SELECTED = "selected"

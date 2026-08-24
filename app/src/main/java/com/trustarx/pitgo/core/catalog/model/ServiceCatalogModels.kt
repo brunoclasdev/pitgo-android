@@ -11,7 +11,10 @@ data class CatalogService(
     val categoryId: String,
     val name: String,
     val description: String?,
+    val dispatchKind: ServiceDispatchKind = ServiceDispatchKind.BROWSE,
 )
+
+enum class ServiceDispatchKind { BROWSE, MOBILE_SEQUENTIAL }
 
 data class HomeService(
     val id: String,
@@ -19,6 +22,7 @@ data class HomeService(
     val description: String?,
     val categoryName: String,
     val minimumPrice: String?,
+    val dispatchKind: ServiceDispatchKind = ServiceDispatchKind.BROWSE,
 )
 
 sealed interface CatalogLoadResult<out T> {
