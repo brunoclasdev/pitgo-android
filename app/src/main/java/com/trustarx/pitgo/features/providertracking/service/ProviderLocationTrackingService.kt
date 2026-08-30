@@ -237,7 +237,22 @@ class ProviderLocationTrackingService : Service() {
         )
     }
 
-    override fun onDestroy() { scope.cancel(); super.onDestroy() }
+    /**
+     * Reproduced live: the OS can destroy just this Service component (battery restrictions,
+     * Samsung's own "sleeping apps" layer on top of the standard Android API — the deviceidle
+     * whitelist alone wasn't enough) while leaving the rest of the app process, including the
+     * Activity, running. Every other stop path (stopTracking, degradeAndStop) already updates
+     * providerTrackingStateRepository, but an OS-initiated destroy bypasses both, leaving the
+     * repository reporting a stale "Publishing" state forever even though nothing is running
+     * anymore — which also defeats any watchdog that trusts that state to decide whether to
+     * restart. Reflect Stopped here unconditionally so the repository's state is never a lie
+     * about whether this service is actually alive, regardless of why onDestroy() ran.
+     */
+    override fun onDestroy() {
+        container.providerTrackingStateRepository.update(ProviderTrackingState.Stopped)
+        scope.cancel()
+        super.onDestroy()
+    }
 
     companion object {
         const val ACTION_START = "com.trustarx.pitgo.action.START_PROVIDER_TRACKING"

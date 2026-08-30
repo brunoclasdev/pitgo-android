@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import com.trustarx.pitgo.core.account.model.ProviderLocationMode
 import androidx.compose.foundation.isSystemInDarkTheme
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -75,6 +76,8 @@ import com.trustarx.pitgo.features.mobiledispatch.viewmodel.DispatchResumeViewMo
 import com.trustarx.pitgo.features.mobiledispatch.viewmodel.DispatchResumeState
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus
 
+private const val TRACKING_WATCHDOG_INTERVAL_MS = 30_000L
+
 @Composable
 fun PitGoNavHost(container: PitGoAppContainer) {
     val navController = rememberNavController()
@@ -120,16 +123,24 @@ fun PitGoNavHost(container: PitGoAppContainer) {
     // straight to ProviderRequest/AppointmentTracking (the very next effect below) without ever
     // composing the Dashboard route. That left the foreground tracking service dead — server-side
     // still shows available/MOBILE, but nothing publishes — until the provider happened to visit
-    // the Dashboard tab manually. Hoisted here so it fires once per session regardless of which
-    // screen the provider actually lands on. start() is idempotent (no-ops once already running),
-    // so this is safe to run alongside the Dashboard's own call.
-    var trackingResumedForUserId by remember { mutableStateOf<String?>(null) }
+    // the Dashboard tab manually. Hoisted here so it fires regardless of which screen the provider
+    // lands on.
+    //
+    // A one-shot check on session start isn't enough either: reproduced live with two devices
+    // fully patched (deviceidle whitelist granted, ProviderLocationTrackingService.onDestroy() now
+    // reflects Stopped) — the OS (Samsung's own "sleeping apps" layer, on top of the standard
+    // Android battery API) can still kill just the Service component mid-session while the rest of
+    // the app process, including this composition, keeps running untouched. Nothing else ever
+    // notices that death. Looping with a periodic re-check turns this into a real watchdog:
+    // start() is idempotent when the service is genuinely still alive (no-ops), and now that
+    // onDestroy() always reports Stopped, a real death is reliably picked up within one interval.
     LaunchedEffect(sessionState) {
-        val ready = sessionState as? AppSessionState.Authenticated.ProviderReady ?: return@LaunchedEffect
-        if (trackingResumedForUserId == ready.userId) return@LaunchedEffect
-        trackingResumedForUserId = ready.userId
-        if (ready.account.available && ready.account.locationMode == ProviderLocationMode.MOBILE) {
-            container.providerTrackingStateRepository.start()
+        while (true) {
+            val ready = sessionState as? AppSessionState.Authenticated.ProviderReady ?: return@LaunchedEffect
+            if (ready.account.available && ready.account.locationMode == ProviderLocationMode.MOBILE) {
+                container.providerTrackingStateRepository.start()
+            }
+            delay(TRACKING_WATCHDOG_INTERVAL_MS)
         }
     }
 

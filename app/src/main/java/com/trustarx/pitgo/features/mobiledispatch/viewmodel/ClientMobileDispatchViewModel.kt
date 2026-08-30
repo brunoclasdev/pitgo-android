@@ -33,6 +33,7 @@ class ClientMobileDispatchViewModel(
     private val operation = AtomicLong()
     private var actionJob: Job? = null
     private var streamJob: Job? = null
+    private var pollJob: Job? = null
     private var clockJob: Job? = null
     private var searchId = UUID.randomUUID().toString()
 
@@ -119,37 +120,94 @@ class ClientMobileDispatchViewModel(
                 }
                 observe(snapshot.searchId)
                 startClock()
+                startPolling()
             }
         }
     }
 
+    /**
+     * Realtime is not fully trustworthy as the sole source of truth here: a WebSocket can end up
+     * in a "zombie" state (still reports SUBSCRIBED, never errors, just stops delivering
+     * messages) after enough backgrounding/network changes — reproduced live: the provider
+     * accepted and started the appointment server-side, broadcasts fired correctly, but the
+     * client stayed frozen on "Aguardando resposta" for several minutes because nothing ever told
+     * it to look again (observe()'s retry-on-failure loop never triggers, since the flow never
+     * actually fails). This periodic restore() is a resilience fallback, independent of whatever
+     * state the realtime channel thinks it's in — same "poke, then re-fetch authoritative state"
+     * philosophy used elsewhere, just on a timer instead of a broadcast.
+     */
+    private fun startPolling() {
+        if (pollJob?.isActive == true) return
+        pollJob = viewModelScope.launch {
+            while (true) {
+                delay(POLL_INTERVAL_MS)
+                if (_state.value !is ClientMobileDispatchUiState.Content) return@launch
+                val result = repository.restore()
+                if (result is MobileDispatchResult.Success) {
+                    val current = (_state.value as? ClientMobileDispatchUiState.Content)?.snapshot
+                    if (current == null || result.snapshot.revision > current.revision) {
+                        apply(result)
+                    }
+                }
+                // Transient failures are ignored here — the next poll retries, and observe()'s
+                // own retry loop handles realtime-specific failure reporting (e.g. session expiry).
+            }
+        }
+    }
+
+    /**
+     * repository.observeSearch()'s underlying channelFlow sends one Failure event and then
+     * COMPLETES on any transient error (network blip, realtime disconnect while backgrounded,
+     * etc.) — see MobileDispatchRepository.observe(). Without a retry, one hiccup left the client
+     * permanently stuck on whatever screen it last rendered (e.g. the search/waiting screen) even
+     * after the provider accepted server-side, since nothing was listening anymore to notice.
+     * Keeps resubscribing until the search reaches a terminal state or the session expires.
+     */
     private fun observe(id: String) {
         if (streamJob?.isActive == true) return
         streamJob = viewModelScope.launch {
-            repository.observeSearch(id).collect { event ->
-                when (event) {
-                    is com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchEvent.Snapshot ->
-                        event.value?.let { incoming ->
-                            val current = (_state.value as? ClientMobileDispatchUiState.Content)?.snapshot
-                            if (current == null || incoming.revision > current.revision) {
-                                apply(MobileDispatchResult.Success(incoming))
-                            }
+            while (true) {
+                try {
+                    repository.observeSearch(id).collect { event ->
+                        when (event) {
+                            is com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchEvent.Snapshot ->
+                                event.value?.let { incoming ->
+                                    val current = (_state.value as? ClientMobileDispatchUiState.Content)?.snapshot
+                                    if (current == null || incoming.revision > current.revision) {
+                                        apply(MobileDispatchResult.Success(incoming))
+                                    }
+                                }
+                            is com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchEvent.Failure ->
+                                if (event.reason == MobileDispatchFailure.SESSION_EXPIRED) {
+                                    _state.value = ClientMobileDispatchUiState.SessionExpired
+                                }
                         }
-                    is com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchEvent.Failure ->
-                        if (event.reason == MobileDispatchFailure.SESSION_EXPIRED) {
-                            _state.value = ClientMobileDispatchUiState.SessionExpired
-                        }
+                    }
+                } catch (cancel: kotlinx.coroutines.CancellationException) {
+                    throw cancel
+                } catch (_: Throwable) {
+                    // observeSearch() already classifies and emits failures as events; this only
+                    // guards against an unexpected throw reaching us.
                 }
+                if (_state.value == ClientMobileDispatchUiState.SessionExpired) return@launch
+                if (_state.value !is ClientMobileDispatchUiState.Content) return@launch
+                kotlinx.coroutines.delay(SEARCH_RESUBSCRIBE_DELAY_MS)
             }
         }
     }
 
     private fun startClock() {
+        android.util.Log.d("ClientDispatchClockDBG", "startClock called, clockJob active=${clockJob?.isActive}")
         if (clockJob?.isActive == true) return
         clockJob = viewModelScope.launch {
+            android.util.Log.d("ClientDispatchClockDBG", "clock loop launched")
             while (true) {
                 val content = _state.value as? ClientMobileDispatchUiState.Content
                 val deadline = content?.snapshot?.appointment?.responseDeadlineEpochMillis
+                android.util.Log.d(
+                    "ClientDispatchClockDBG",
+                    "tick: state=${_state.value::class.simpleName} status=${content?.snapshot?.status} deadline=$deadline",
+                )
                 if (content != null && deadline != null) {
                     val offset = content.snapshot.serverNowEpochMillis - System.currentTimeMillis()
                     val seconds = ceil((deadline - (System.currentTimeMillis() + offset)) / 1000.0)
@@ -163,6 +221,9 @@ class ClientMobileDispatchViewModel(
     }
 
     companion object {
+        private const val SEARCH_RESUBSCRIBE_DELAY_MS = 3_000L
+        private const val POLL_INTERVAL_MS = 5_000L
+
         fun factory(
             serviceId: String,
             repository: MobileDispatchRepository,

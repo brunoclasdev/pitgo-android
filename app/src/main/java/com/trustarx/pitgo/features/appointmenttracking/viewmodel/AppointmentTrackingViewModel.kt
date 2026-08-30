@@ -60,22 +60,31 @@ class AppointmentTrackingViewModel(
             // ProviderLocationTrackingService — a real contributor to inconsistent provider
             // location updates.
             if (isClient) launch { publishOwnLocation() }
-            try {
-                coroutineScope {
-                    launch {
-                        while (true) {
-                            delay(1_000)
-                            if (!terminal && _state.value.data !is TrackingDataState.Offline &&
-                                _state.value.data !is TrackingDataState.Failure
-                            ) latest?.let(::publishFreshness)
+            // repository.observe()'s underlying channelFlow sends one Failure/Offline event and
+            // then COMPLETES on any transient error (network blip, realtime disconnect while
+            // backgrounded, etc.) — see AppointmentTrackingRepository.observe(). Without a retry,
+            // one hiccup permanently froze this screen on its last known state, since nothing was
+            // listening anymore for the appointment actually finishing or the provider's position
+            // updating. Keeps resubscribing until the appointment reaches a terminal state.
+            while (!terminal) {
+                try {
+                    coroutineScope {
+                        launch {
+                            while (true) {
+                                delay(1_000)
+                                if (!terminal && _state.value.data !is TrackingDataState.Offline &&
+                                    _state.value.data !is TrackingDataState.Failure
+                                ) latest?.let(::publishFreshness)
+                            }
                         }
+                        repository.observe(appointmentId).collect(::handle)
                     }
-                    repository.observe(appointmentId).collect(::handle)
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Throwable) {
+                    if (!terminal) updateData(TrackingDataState.Failure(latest))
                 }
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (_: Throwable) {
-                if (!terminal) updateData(TrackingDataState.Failure(latest))
+                if (!terminal) delay(OBSERVE_RESUBSCRIBE_DELAY_MS)
             }
         }
     }
@@ -247,6 +256,7 @@ class AppointmentTrackingViewModel(
         private const val OWN_LOCATION_ATTEMPTS = 3
         private const val OWN_LOCATION_TIMEOUT_MS = 20_000L
         private const val OWN_LOCATION_RETRY_DELAY_MS = 2_000L
+        private const val OBSERVE_RESUBSCRIBE_DELAY_MS = 3_000L
 
         fun factory(
             appointmentId: String,
