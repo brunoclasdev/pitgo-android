@@ -55,6 +55,7 @@ class RequestServiceViewModel(
                 CatalogItemResult.Timeout,
                 CatalogItemResult.SessionExpired,
                 CatalogItemResult.ServiceUnavailable,
+                CatalogItemResult.UpdateRequired,
                 CatalogItemResult.Unknown,
                 -> RequestServiceUiState.Failure
             }

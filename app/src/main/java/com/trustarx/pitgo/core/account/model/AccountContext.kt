@@ -24,13 +24,14 @@ data class ProviderSnapshot(
     val locationMode: ProviderLocationMode?,
     val active: Boolean,
     val available: Boolean,
+    val pendingLocationMode: ProviderLocationMode? = null,
 ) {
     fun isConsistent(): Boolean = userId.isNotBlank() && providerId.isNotBlank() &&
         name.isNotBlank() && email.equals(authEmail, ignoreCase = true) && phone.isNotBlank() &&
         active
 }
 
-enum class ProviderLocationMode { FIXED, MOBILE }
+enum class ProviderLocationMode { FIXED, MOBILE, PITTEC }
 
 data class ProviderOnboardingSession(
     val userId: String,

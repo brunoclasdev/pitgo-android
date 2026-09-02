@@ -27,6 +27,7 @@ internal data class ProviderAccountDto(
     val email: String,
     val phone: String,
     @SerialName("location_mode") val locationMode: String? = null,
+    @SerialName("pending_location_mode") val pendingLocationMode: String? = null,
     val active: Boolean = true,
     val available: Boolean = false,
 )
@@ -45,6 +46,9 @@ internal fun ProviderAccountDto.toDomainOrNull(authEmail: String): ProviderSnaps
     val normalizedEmail = email.trim().lowercase()
     val normalizedPhone = phone.trim()
     val mode = locationMode?.let { enumValueOrNull<ProviderLocationMode>(it) }
+    val pendingMode = pendingLocationMode?.let { enumValueOrNull<ProviderLocationMode>(it) }
+    if (locationMode != null && mode == null) return null
+    if (pendingLocationMode != null && pendingMode == null) return null
     if (id.isBlank() || accountId.isBlank() || normalizedName.isBlank() ||
         normalizedEmail.isBlank() || normalizedPhone.isBlank()
     ) return null
@@ -58,6 +62,7 @@ internal fun ProviderAccountDto.toDomainOrNull(authEmail: String): ProviderSnaps
         locationMode = mode,
         active = active,
         available = available,
+        pendingLocationMode = pendingMode,
     )
 }
 

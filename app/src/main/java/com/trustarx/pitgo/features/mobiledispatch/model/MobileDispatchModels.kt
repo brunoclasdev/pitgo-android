@@ -13,6 +13,20 @@ enum class MobileDispatchStatus {
     CANCELLED, COMPLETED, EXHAUSTED,
 }
 
+/**
+ * Provider-side offers can come from either dispatch kind through this shared transport (see
+ * PitTecRepository for the client-only, dedicated PitTec contract). Defaults to MOBILE_SEQUENTIAL
+ * so legacy `private.dispatch_snapshot()` responses — which never include this field — keep
+ * working unchanged.
+ */
+enum class MobileDispatchKind { MOBILE_SEQUENTIAL, PITTEC_AUTO_SEQUENTIAL }
+
+/** Approximate, decision-safe offer metadata PitTec exposes to the currently offered provider. */
+data class PitTecOfferSummary(
+    val approximateDistanceMeters: Int,
+    val region: String,
+)
+
 enum class MobileAppointmentStatus {
     PENDING, ACCEPTED, IN_PROGRESS, COMPLETED, CANCELLED, PROVIDER_REJECTED, EXPIRED,
 }
@@ -58,6 +72,8 @@ data class MobileDispatchSnapshot(
     val allowedActions: Set<MobileDispatchAction>,
     val candidate: MobileCandidate?,
     val appointment: MobileAppointment?,
+    val dispatchKind: MobileDispatchKind = MobileDispatchKind.MOBILE_SEQUENTIAL,
+    val offer: PitTecOfferSummary? = null,
 ) {
     fun isValid() = searchId.isUuid() && serviceId.isUuid() && serviceName.isNotBlank() &&
         radiusMeters in setOf(10_000, 25_000, 50_000) && revision > 0 &&

@@ -14,7 +14,7 @@ data class CatalogService(
     val dispatchKind: ServiceDispatchKind = ServiceDispatchKind.BROWSE,
 )
 
-enum class ServiceDispatchKind { BROWSE, MOBILE_SEQUENTIAL }
+enum class ServiceDispatchKind { BROWSE, MOBILE_SEQUENTIAL, PITTEC_AUTO_SEQUENTIAL }
 
 data class HomeService(
     val id: String,
@@ -31,6 +31,7 @@ sealed interface CatalogLoadResult<out T> {
     data object Timeout : CatalogLoadResult<Nothing>
     data object SessionExpired : CatalogLoadResult<Nothing>
     data object ServiceUnavailable : CatalogLoadResult<Nothing>
+    data object UpdateRequired : CatalogLoadResult<Nothing>
     data object Unknown : CatalogLoadResult<Nothing>
 }
 
@@ -41,5 +42,6 @@ sealed interface CatalogItemResult<out T> {
     data object Timeout : CatalogItemResult<Nothing>
     data object SessionExpired : CatalogItemResult<Nothing>
     data object ServiceUnavailable : CatalogItemResult<Nothing>
+    data object UpdateRequired : CatalogItemResult<Nothing>
     data object Unknown : CatalogItemResult<Nothing>
 }

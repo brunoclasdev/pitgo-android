@@ -59,6 +59,7 @@ class ServiceCatalogRepository(private val client: SupabaseClient) {
             CatalogLoadResult.Timeout -> CatalogItemResult.Timeout
             CatalogLoadResult.SessionExpired -> CatalogItemResult.SessionExpired
             CatalogLoadResult.ServiceUnavailable -> CatalogItemResult.ServiceUnavailable
+            CatalogLoadResult.UpdateRequired -> CatalogItemResult.UpdateRequired
             CatalogLoadResult.Unknown -> CatalogItemResult.Unknown
         }
     }
@@ -80,6 +81,7 @@ class ServiceCatalogRepository(private val client: SupabaseClient) {
       catch (error: Throwable) { classify(error) }
 
     private fun classify(error: Throwable): CatalogLoadResult<Nothing> = when (error) {
+        is UnsupportedDispatchKindException -> CatalogLoadResult.UpdateRequired
         is HttpRequestTimeoutException -> CatalogLoadResult.Timeout
         is HttpRequestException -> CatalogLoadResult.Offline
         is PostgrestRestException -> when {
@@ -116,4 +118,7 @@ class ServiceCatalogRepository(private val client: SupabaseClient) {
 )
 
 private fun String.toDispatchKind(): ServiceDispatchKind =
-    runCatching { ServiceDispatchKind.valueOf(this) }.getOrDefault(ServiceDispatchKind.BROWSE)
+    ServiceDispatchKind.entries.firstOrNull { it.name == this }
+        ?: throw UnsupportedDispatchKindException()
+
+private class UnsupportedDispatchKindException : IllegalArgumentException()

@@ -49,7 +49,7 @@ class ProviderIncomingRequestViewModel(
         }
     }
 
-    fun refresh() = submit(null) { repository.restore() }
+    fun refresh() = submit(null) { repository.restoreProviderAny() }
     fun accept() = appointmentAction(PendingDispatchAction.ACCEPT) { id, rev -> repository.respond(id, true, rev) }
     fun decline() = appointmentAction(PendingDispatchAction.DECLINE) { id, rev -> repository.respond(id, false, rev) }
     fun startService() = appointmentAction(PendingDispatchAction.START) { id, rev -> repository.startAppointment(id, rev) }

@@ -43,3 +43,6 @@ verify_jwt = true
 
 [functions.refresh-provider-geocodes]
 verify_jwt = false
+
+[functions.pittec-route]
+verify_jwt = true

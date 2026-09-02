@@ -33,6 +33,7 @@ import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchKind
 import com.trustarx.pitgo.features.mobiledispatch.model.PendingDispatchAction
 import com.trustarx.pitgo.features.mobiledispatch.model.ProviderIncomingUiState
 import com.trustarx.pitgo.features.mobiledispatch.model.ProviderMapState
@@ -86,11 +87,25 @@ private fun ProviderIncomingRequestScreen(
                 ProviderIncomingUiState.SessionExpired -> Text(stringResource(R.string.session_verifying))
                 is ProviderIncomingUiState.Failure -> Text(stringResource(R.string.mobile_dispatch_unavailable))
                 is ProviderIncomingUiState.Request -> {
+                    val isPitTec = state.snapshot.dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL
                     val candidate = state.snapshot.candidate
+                    val offer = state.snapshot.offer
                     val appointment = state.snapshot.appointment
                     Text(state.snapshot.serviceName, style = MaterialTheme.typography.headlineSmall)
-                    Text(candidate?.locality.orEmpty())
-                    Text(NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")).format(appointment?.quotedPrice))
+                    if (isPitTec) {
+                        Text(offer?.region.orEmpty())
+                        offer?.let {
+                            Text(
+                                stringResource(
+                                    R.string.mobile_dispatch_distance,
+                                    it.approximateDistanceMeters / 1000.0,
+                                ),
+                            )
+                        }
+                    } else {
+                        Text(candidate?.locality.orEmpty())
+                        Text(NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")).format(appointment?.quotedPrice))
+                    }
                     state.remainingSeconds?.let { Text(stringResource(R.string.mobile_dispatch_seconds, it)) }
                     Button(onAccept, Modifier.fillMaxWidth().heightIn(min = PitGoSize.PrimaryActionMinHeight), enabled = state.pending == null) {
                         ButtonLabel(
@@ -106,21 +121,29 @@ private fun ProviderIncomingRequestScreen(
                     }
                 }
                 is ProviderIncomingUiState.Active -> {
+                    val isPitTec = state.snapshot.dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL
                     val appointment = state.snapshot.appointment
                     Text(state.snapshot.serviceName, style = MaterialTheme.typography.headlineSmall)
-                    Text(stringResource(R.string.mobile_dispatch_price_frozen,
-                        NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")).format(appointment?.quotedPrice)))
+                    if (!isPitTec) {
+                        Text(stringResource(R.string.mobile_dispatch_price_frozen,
+                            NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")).format(appointment?.quotedPrice)))
+                    }
                     ProviderAppointmentMap(mapState, onFollowMapChanged)
                     if (appointment?.status == MobileAppointmentStatus.ACCEPTED) {
                         Button(onStart, Modifier.fillMaxWidth(), enabled = state.pending == null) {
                             ButtonLabel(
-                                stringResource(R.string.mobile_dispatch_start_service),
+                                stringResource(
+                                    if (isPitTec) R.string.pittec_arrive
+                                    else R.string.mobile_dispatch_start_service,
+                                ),
                                 state.pending?.kind == PendingDispatchAction.START,
                             )
                         }
                     }
                     appointment?.let { Button({ onTrack(it.id) }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.mobile_dispatch_open_tracking)) } }
-                    Button(onComplete, Modifier.fillMaxWidth(), enabled = state.pending == null) {
+                    val canComplete = state.pending == null &&
+                        (!isPitTec || appointment?.status == MobileAppointmentStatus.IN_PROGRESS)
+                    Button(onComplete, Modifier.fillMaxWidth(), enabled = canComplete) {
                         ButtonLabel(
                             stringResource(R.string.mobile_dispatch_complete),
                             state.pending?.kind == PendingDispatchAction.COMPLETE,

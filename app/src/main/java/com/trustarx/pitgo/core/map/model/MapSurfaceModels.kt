@@ -63,6 +63,8 @@ enum class MapMarkerKind {
     LIVE,
     STALE,
     COINCIDENT_GROUP,
+    /** Anonymized, server-approximated PitTec position shown before a request is accepted. */
+    PITTEC_APPROXIMATE,
 }
 
 data class MapMarkerSpec(

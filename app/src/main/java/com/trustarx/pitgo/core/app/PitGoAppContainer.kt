@@ -27,6 +27,7 @@ import com.trustarx.pitgo.features.providermap.repository.ServiceMapRepository
 import com.trustarx.pitgo.features.signup.repository.SupabaseSignUpRepository
 import com.trustarx.pitgo.features.clientaddress.repository.ClientAddressRepository
 import com.trustarx.pitgo.features.mobiledispatch.repository.MobileDispatchRepository
+import com.trustarx.pitgo.features.pittec.repository.PitTecRepository
 import com.trustarx.pitgo.core.preferences.ProviderTrackingPreferences
 
 class PitGoAppContainer(context: Context) {
@@ -51,6 +52,7 @@ class PitGoAppContainer(context: Context) {
     val serviceMapRepository = ServiceMapRepository(supabase)
     val providerDashboardRepository = ProviderDashboardRepository(supabase)
     val mobileDispatchRepository = MobileDispatchRepository(supabase)
+    val pitTecRepository = PitTecRepository(supabase)
     val clientAddressRepository = ClientAddressRepository(supabase)
     val deviceLocationRepository = DeviceLocationRepository(AndroidLocationDataSource(context))
     val onboardingRepository = VehicleOnboardingRepository(context)

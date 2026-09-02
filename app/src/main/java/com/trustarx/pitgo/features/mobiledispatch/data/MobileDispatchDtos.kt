@@ -6,8 +6,10 @@ import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointment
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileCandidate
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchAction
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchKind
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchSnapshot
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchStatus
+import com.trustarx.pitgo.features.mobiledispatch.model.PitTecOfferSummary
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -21,6 +23,7 @@ internal data class MobileDispatchEnvelopeDto(
     @SerialName("search_id") val searchId: String? = null,
     @SerialName("service_id") val serviceId: String? = null,
     @SerialName("service_name") val serviceName: String? = null,
+    @SerialName("dispatch_kind") val dispatchKind: String? = null,
     val status: String? = null,
     @SerialName("radius_meters") val radiusMeters: Int? = null,
     val revision: Long? = null,
@@ -28,10 +31,11 @@ internal data class MobileDispatchEnvelopeDto(
     @SerialName("allowed_actions") val allowedActions: List<String> = emptyList(),
     val candidate: MobileCandidateDto? = null,
     val appointment: MobileAppointmentDto? = null,
+    val offer: PitTecOfferSummaryDto? = null,
 ) {
     fun domainOrNull(): MobileDispatchSnapshot? = (snapshot ?: MobileDispatchSnapshotDto(
-        searchId, serviceId, serviceName, status, radiusMeters, revision, serverNow,
-        allowedActions, candidate, appointment,
+        searchId, serviceId, serviceName, dispatchKind, status, radiusMeters, revision, serverNow,
+        allowedActions, candidate, appointment, offer,
     )).toDomainOrNull()
 }
 
@@ -40,6 +44,7 @@ internal data class MobileDispatchSnapshotDto(
     @SerialName("search_id") val searchId: String? = null,
     @SerialName("service_id") val serviceId: String? = null,
     @SerialName("service_name") val serviceName: String? = null,
+    @SerialName("dispatch_kind") val dispatchKind: String? = null,
     val status: String? = null,
     @SerialName("radius_meters") val radiusMeters: Int? = null,
     val revision: Long? = null,
@@ -47,6 +52,7 @@ internal data class MobileDispatchSnapshotDto(
     @SerialName("allowed_actions") val allowedActions: List<String> = emptyList(),
     val candidate: MobileCandidateDto? = null,
     val appointment: MobileAppointmentDto? = null,
+    val offer: PitTecOfferSummaryDto? = null,
 ) {
     fun toDomainOrNull(): MobileDispatchSnapshot? = runCatching {
         MobileDispatchSnapshot(
@@ -62,9 +68,21 @@ internal data class MobileDispatchSnapshotDto(
             }.toSet(),
             candidate = candidate?.toDomain(),
             appointment = appointment?.toDomain(),
+            dispatchKind = dispatchKind
+                ?.let { runCatching { MobileDispatchKind.valueOf(it) }.getOrNull() }
+                ?: MobileDispatchKind.MOBILE_SEQUENTIAL,
+            offer = offer?.toDomain(),
         ).takeIf(MobileDispatchSnapshot::isValid)
     }.getOrNull()
 
+}
+
+@Serializable
+internal data class PitTecOfferSummaryDto(
+    @SerialName("approximate_distance_meters") val approximateDistanceMeters: Int,
+    val region: String,
+) {
+    fun toDomain() = PitTecOfferSummary(approximateDistanceMeters, region)
 }
 
 @Serializable
@@ -89,8 +107,10 @@ internal data class MobileCandidateDto(
 internal data class MobileAppointmentDto(
     @SerialName("appointment_id") val id: String,
     val status: String,
-    @SerialName("quoted_price") val quotedPrice: JsonElement,
-    @SerialName("is_free") val isFree: Boolean,
+    // Absent for PitTec: `private.pittec_dispatch_snapshot()` never includes a price — the PitTec
+    // request UI never shows one (see data-model.md `provider_services`).
+    @SerialName("quoted_price") val quotedPrice: JsonElement? = null,
+    @SerialName("is_free") val isFree: Boolean = false,
     @SerialName("response_deadline") val responseDeadline: String? = null,
     val revision: Long,
     @SerialName("cancelled_by") val cancelledBy: String? = null,
@@ -98,7 +118,7 @@ internal data class MobileAppointmentDto(
     fun toDomain() = MobileAppointment(
         id = id,
         status = MobileAppointmentStatus.valueOf(status),
-        quotedPrice = BigDecimal(quotedPrice.jsonPrimitive.content),
+        quotedPrice = quotedPrice?.jsonPrimitive?.content?.let(::BigDecimal) ?: BigDecimal.ZERO,
         isFree = isFree,
         responseDeadlineEpochMillis = responseDeadline?.let { parseSupabaseInstant(it).toEpochMilli() },
         revision = revision,

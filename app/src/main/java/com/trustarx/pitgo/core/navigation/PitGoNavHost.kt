@@ -75,6 +75,12 @@ import com.trustarx.pitgo.features.mobiledispatch.viewmodel.ProviderIncomingRequ
 import com.trustarx.pitgo.features.mobiledispatch.viewmodel.DispatchResumeViewModel
 import com.trustarx.pitgo.features.mobiledispatch.viewmodel.DispatchResumeState
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus
+import com.trustarx.pitgo.features.pittec.model.PitTecAppointmentStatus
+import com.trustarx.pitgo.features.pittec.model.PitTecDispatchStatus
+import com.trustarx.pitgo.features.pittec.ui.PitTecRoute
+import com.trustarx.pitgo.features.pittec.viewmodel.PitTecResumeState
+import com.trustarx.pitgo.features.pittec.viewmodel.PitTecResumeViewModel
+import com.trustarx.pitgo.features.pittec.viewmodel.PitTecViewModel
 
 private const val TRACKING_WATCHDOG_INTERVAL_MS = 30_000L
 
@@ -91,6 +97,10 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         ),
     )
     val dispatchResumeState by dispatchResumeViewModel.state.collectAsStateWithLifecycle()
+    val pitTecResumeViewModel: PitTecResumeViewModel = viewModel(
+        factory = PitTecResumeViewModel.factory(container.sessionRepository, container.pitTecRepository),
+    )
+    val pitTecResumeState by pitTecResumeViewModel.state.collectAsStateWithLifecycle()
     val migrationStage by container.providerMigrationCoordinator.stage.collectAsStateWithLifecycle()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
@@ -115,6 +125,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         PitGoRoutes.MobileDispatchNew,
         PitGoRoutes.MobileDispatch,
         PitGoRoutes.ProviderRequest,
+        PitGoRoutes.PitTec,
     )
     SystemBarIconAppearance(usesAppSurface && !isSystemInDarkTheme())
 
@@ -238,6 +249,30 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                 navController.navigate(PitGoRoutes.providerRequest(it.id)) { launchSingleTop = true }
             }
             else -> Unit
+        }
+    }
+
+    // Client-only PitTec counterpart to the block above — kept in its own effect/guard so it never
+    // competes with a legacy MOBILE_SEQUENTIAL resume for the same client (US2 mandates at most one
+    // active PitTec search per client, which the backend already enforces independently).
+    var lastPitTecAutoNavigated by remember { mutableStateOf<Pair<String, Long>?>(null) }
+    LaunchedEffect(pitTecResumeState, sessionState, currentRoute) {
+        val active = pitTecResumeState as? PitTecResumeState.Active ?: return@LaunchedEffect
+        if (sessionState !is AppSessionState.Authenticated.Client) return@LaunchedEffect
+        val related = currentRoute in setOf(PitGoRoutes.PitTec, PitGoRoutes.AppointmentTracking)
+        if (related) return@LaunchedEffect
+        val appointment = active.snapshot.appointment
+        val target = appointment?.let { it.id to it.revision } ?: (active.snapshot.searchId to active.snapshot.revision)
+        if (target == lastPitTecAutoNavigated) return@LaunchedEffect
+        lastPitTecAutoNavigated = target
+        if (appointment != null && appointment.status in
+            setOf(PitTecAppointmentStatus.ACCEPTED, PitTecAppointmentStatus.IN_PROGRESS)
+        ) {
+            navController.navigate(PitGoRoutes.appointmentTracking(appointment.id)) { launchSingleTop = true }
+        } else if (active.snapshot.status in
+            setOf(PitTecDispatchStatus.SEARCHING, PitTecDispatchStatus.AWAITING_PROVIDER)
+        ) {
+            navController.navigate(PitGoRoutes.pitTec(active.snapshot.serviceId)) { launchSingleTop = true }
         }
     }
 
@@ -405,9 +440,11 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     selectedService?.let { service ->
                         if (!navigationPending) {
                             navigationPending = true
-                            val destination = if (service.dispatchKind == ServiceDispatchKind.MOBILE_SEQUENTIAL) {
-                                PitGoRoutes.mobileDispatchNew(service.id)
-                            } else PitGoRoutes.serviceMap(service.id)
+                            val destination = when (service.dispatchKind) {
+                                ServiceDispatchKind.MOBILE_SEQUENTIAL -> PitGoRoutes.mobileDispatchNew(service.id)
+                                ServiceDispatchKind.PITTEC_AUTO_SEQUENTIAL -> PitGoRoutes.pitTec(service.id)
+                                ServiceDispatchKind.BROWSE -> PitGoRoutes.serviceMap(service.id)
+                            }
                             navController.navigate(destination) {
                                 launchSingleTop = true
                             }
@@ -647,6 +684,30 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                             PitGoRoutes.requestService(selectedServiceId, providerId),
                         ) { launchSingleTop = true }
                     },
+                    onSessionExpired = sessionViewModel::refresh,
+                )
+            }
+        }
+
+        composable(
+            route = PitGoRoutes.PitTec,
+            arguments = listOf(navArgument(PitGoRoutes.PitTecServiceArg) { type = NavType.StringType }),
+        ) { entry ->
+            val serviceId = entry.arguments?.getString(PitGoRoutes.PitTecServiceArg).orEmpty()
+            if (sessionState is AppSessionState.Authenticated.Client && serviceId.isNotBlank()) {
+                val pitTecViewModel: PitTecViewModel = viewModel(
+                    key = serviceId,
+                    factory = PitTecViewModel.factory(
+                        serviceId,
+                        container.pitTecRepository,
+                        container.deviceLocationRepository,
+                        container.connectivityObserver,
+                    ),
+                )
+                PitTecRoute(
+                    viewModel = pitTecViewModel,
+                    onBack = { navController.popBackStack() },
+                    onAccepted = { navController.navigate(PitGoRoutes.appointmentTracking(it)) { launchSingleTop = true } },
                     onSessionExpired = sessionViewModel::refresh,
                 )
             }

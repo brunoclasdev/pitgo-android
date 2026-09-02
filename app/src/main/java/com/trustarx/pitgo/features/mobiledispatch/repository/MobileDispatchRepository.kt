@@ -32,6 +32,20 @@ import java.time.Instant
 class MobileDispatchRepository(private val client: SupabaseClient) {
     suspend fun restore(): MobileDispatchResult = call("get_my_active_mobile_dispatch")
 
+    /** Dedicated PitTec contract (see contracts/pittec-rpcs.md) so it never mixes with MOBILE_SEQUENTIAL rows. */
+    suspend fun restorePitTec(): MobileDispatchResult = call("get_my_active_pittec_dispatch")
+
+    /**
+     * A provider's effective modality is exclusive (FIXED/MOBILE/PITTEC), so at most one of the
+     * two restores below ever returns an active dispatch — this lets provider-side callers stay
+     * agnostic of which dispatch kind is currently offering/assigned to them.
+     */
+    suspend fun restoreProviderAny(): MobileDispatchResult = when (val mobile = restore()) {
+        is MobileDispatchResult.Success -> mobile
+        MobileDispatchResult.None -> restorePitTec()
+        is MobileDispatchResult.Failure -> mobile
+    }
+
     suspend fun start(command: MobileDispatchStartCommand): MobileDispatchResult {
         if (!command.searchId.isUuid() || !command.serviceId.isUuid() ||
             !command.fix.isHighQuality(System.currentTimeMillis())) {

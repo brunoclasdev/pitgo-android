@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.trustarx.pitgo.core.auth.model.AppSessionState
 import com.trustarx.pitgo.core.auth.repository.SessionRepository
-import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchEvent
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchResult
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchSnapshot
 import com.trustarx.pitgo.features.mobiledispatch.repository.MobileDispatchRepository
@@ -60,7 +59,7 @@ class DispatchResumeViewModel(
                         launch {
                             while (true) {
                                 delay(PROVIDER_POLL_INTERVAL_MS)
-                                when (val result = repository.restore()) {
+                                when (val result = repository.restoreProviderAny()) {
                                     is MobileDispatchResult.Success ->
                                         _state.value = DispatchResumeState.Active(authenticated.userId, result.snapshot)
                                     MobileDispatchResult.None -> _state.value = DispatchResumeState.None
@@ -70,15 +69,19 @@ class DispatchResumeViewModel(
                         }
                         while (true) {
                             try {
-                                repository.observeProvider(providerId).collect { event ->
-                                    if (event is MobileDispatchEvent.Snapshot) {
-                                        _state.value = event.value
-                                            ?.let { DispatchResumeState.Active(authenticated.userId, it) }
-                                            ?: DispatchResumeState.None
+                                // observeProvider()'s own restore() result is ignored here — it is
+                                // always MOBILE_SEQUENTIAL-only, which would wrongly report `None`
+                                // for a provider currently offering/assigned a PitTec appointment.
+                                // The topic itself already covers both dispatch kinds (shared
+                                // `appointments`/`service_searches` triggers), so any event is just
+                                // used as a wake-up to re-derive authoritative state below.
+                                repository.observeProvider(providerId).collect {
+                                    when (val result = repository.restoreProviderAny()) {
+                                        is MobileDispatchResult.Success ->
+                                            _state.value = DispatchResumeState.Active(authenticated.userId, result.snapshot)
+                                        MobileDispatchResult.None -> _state.value = DispatchResumeState.None
+                                        else -> Unit
                                     }
-                                    // Failure events are transient (offline/reconnect); keep the
-                                    // last known state and let the flow's own completion trigger a
-                                    // resubscribe.
                                 }
                             } catch (cancel: CancellationException) {
                                 throw cancel
