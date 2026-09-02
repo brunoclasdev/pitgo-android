@@ -24,7 +24,9 @@ import com.trustarx.pitgo.features.providertracking.model.ProviderTrackingState
 import com.trustarx.pitgo.features.providertracking.model.ProviderTrackingTarget
 import com.trustarx.pitgo.features.providertracking.model.PublishLocationResult
 import com.trustarx.pitgo.features.providertracking.model.TrackingStopReason
+import com.trustarx.pitgo.features.providertracking.notification.ProviderIncomingRequestNotifier
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchKind
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -32,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -43,7 +46,10 @@ class ProviderLocationTrackingService : Service() {
     private var watchdogJob: Job? = null
     private var lastPublishedAt: Long? = null
     private var lastPreciseFixAt: Long? = null
+    private var incomingRequestJob: Job? = null
+    private var lastNotifiedOffer: Pair<String, Long>? = null
     private val container get() = (application as PitGoApplication).container
+    private val incomingRequestNotifier by lazy { ProviderIncomingRequestNotifier(applicationContext) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -85,6 +91,13 @@ class ProviderLocationTrackingService : Service() {
                         return@launch
                     }
                 }
+            }
+            // Guincho/MOBILE has no equivalent alert in this delivery (no FCM, see research.md #6)
+            // — only an available PitTec needs this background offer-watching subroutine, and it
+            // lives inside this same job so it is cancelled/restarted alongside location tracking.
+            incomingRequestJob?.cancel()
+            if (session.account.locationMode == ProviderLocationMode.PITTEC) {
+                incomingRequestJob = launch { runIncomingRequestAlerts(session.account.providerId) }
             }
             try {
                 container.deviceLocationRepository.preciseUpdates().conflate().collect { fix ->
@@ -136,6 +149,52 @@ class ProviderLocationTrackingService : Service() {
         }
     }
 
+    /**
+     * Polls every 5 s (contract default) and re-derives, on every wake-up, whether there is a
+     * still-`PENDING` PitTec offer for this provider — the same "broadcast/poll just wakes the
+     * repository up, RPC snapshot is authoritative" pattern used everywhere else in this app (see
+     * contracts/pittec-realtime-notifications.md `Source of truth and recovery`). Deduplicates on
+     * `(appointmentId, revision)` so reconnects/polls never replay an already-shown alert, and
+     * cancels the notification the moment the offer is no longer the active PENDING one.
+     */
+    private suspend fun runIncomingRequestAlerts(providerId: String) = coroutineScope {
+        suspend fun refresh() {
+            val result = container.mobileDispatchRepository.restoreAnyDispatchKind()
+            val snapshot = (result as? MobileDispatchResult.Success)?.snapshot
+            val appointment = snapshot?.appointment
+            val isPendingPitTecOffer = appointment != null &&
+                appointment.status == MobileAppointmentStatus.PENDING &&
+                snapshot.dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL
+            if (isPendingPitTecOffer) {
+                val key = appointment!!.id to appointment.revision
+                if (key != lastNotifiedOffer) {
+                    if (lastNotifiedOffer?.first != appointment.id) lastNotifiedOffer?.let { incomingRequestNotifier.cancel(it.first) }
+                    if (incomingRequestNotifier.isReady()) {
+                        val remainingSeconds = ((appointment.responseDeadlineEpochMillis ?: 0L) -
+                            System.currentTimeMillis()) / 1000
+                        incomingRequestNotifier.notifyIncoming(appointment.id, remainingSeconds)
+                    }
+                    lastNotifiedOffer = key
+                }
+            } else {
+                lastNotifiedOffer?.let { incomingRequestNotifier.cancel(it.first) }
+                lastNotifiedOffer = null
+            }
+        }
+        launch { while (true) { delay(5_000); refresh() } }
+        while (true) {
+            try {
+                container.mobileDispatchRepository.observeProvider(providerId).collect { refresh() }
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (_: Throwable) {
+                // observeProvider() already classifies/emits failures as events; this only
+                // guards against an unexpected throw reaching us.
+            }
+            delay(3_000)
+        }
+    }
+
     private fun stopTracking(updateAvailability: Boolean) {
         if (container.providerTrackingStateRepository.state.value !is ProviderTrackingState.Stopped) {
             container.providerTrackingStateRepository.update(ProviderTrackingState.Stopping)
@@ -143,6 +202,9 @@ class ProviderLocationTrackingService : Service() {
         val tracker = trackerId
         trackingJob?.cancel(); trackingJob = null
         watchdogJob?.cancel(); watchdogJob = null
+        incomingRequestJob?.cancel(); incomingRequestJob = null
+        lastNotifiedOffer?.let { incomingRequestNotifier.cancel(it.first) }
+        lastNotifiedOffer = null
         scope.launch {
             if (updateAvailability) {
                 // Checks both dispatch kinds — a PitTec appointment is invisible to
@@ -186,6 +248,9 @@ class ProviderLocationTrackingService : Service() {
         val tracker = trackerId
         trackingJob?.cancel(); trackingJob = null
         watchdogJob?.cancel(); watchdogJob = null
+        incomingRequestJob?.cancel(); incomingRequestJob = null
+        lastNotifiedOffer?.let { incomingRequestNotifier.cancel(it.first) }
+        lastNotifiedOffer = null
         scope.launch {
             val current = container.sessionRepository.state.value as? AppSessionState.Authenticated.ProviderReady
             if (current != null) {
