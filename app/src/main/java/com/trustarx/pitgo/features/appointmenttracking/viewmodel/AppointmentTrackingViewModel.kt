@@ -18,6 +18,8 @@ import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentTracking
 import com.trustarx.pitgo.features.appointmenttracking.model.LocationRevision
 import com.trustarx.pitgo.features.appointmenttracking.model.TrackingDataState
 import com.trustarx.pitgo.features.appointmenttracking.repository.AppointmentTrackingRepository
+import com.trustarx.pitgo.core.routing.model.RouteResult
+import com.trustarx.pitgo.core.routing.repository.PitTecRouteRepository
 import com.trustarx.pitgo.features.mobiledispatch.repository.MobileDispatchRepository
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchResult
 import kotlinx.coroutines.CancellationException
@@ -34,14 +36,17 @@ class AppointmentTrackingViewModel(
     private val appointmentId: String,
     private val repository: AppointmentTrackingRepository,
     private val dispatchRepository: MobileDispatchRepository,
+    private val routeRepository: PitTecRouteRepository,
     private val deviceLocationRepository: DeviceLocationRepository,
     private val isClient: Boolean,
 ) : ViewModel() {
     private val _state = MutableStateFlow(AppointmentTrackingUiState())
     val state: StateFlow<AppointmentTrackingUiState> = _state.asStateFlow()
     private var observeJob: Job? = null
+    private var routeJob: Job? = null
     private var latest: AppointmentProviderLocation? = null
     private var acceptedRevision: LocationRevision? = null
+    private var lastRoutedRevision: Long = 0L
     private var terminal = false
     private var cameraRevision = 0L
 
@@ -49,7 +54,10 @@ class AppointmentTrackingViewModel(
         if (observeJob != null) return
         terminal = false
         observeJob = viewModelScope.launch {
-            when (val dispatch = dispatchRepository.restore()) {
+            // A PitTec appointment is invisible to `restore()` (MOBILE_SEQUENTIAL-only, see
+            // contracts/pittec-rpcs.md), so this tries PitTec too — a caller's effective
+            // modality/service is exclusive, so at most one ever resolves.
+            when (val dispatch = dispatchRepository.restoreAnyDispatchKind()) {
                 is MobileDispatchResult.Success -> _state.value = _state.value.copy(dispatch = dispatch.snapshot)
                 else -> Unit
             }
@@ -92,11 +100,44 @@ class AppointmentTrackingViewModel(
     fun onHidden() {
         observeJob?.cancel()
         observeJob = null
+        routeJob?.cancel()
+        routeJob = null
         latest = null
         acceptedRevision = null
+        lastRoutedRevision = 0L
         terminal = false
         deviceLocationRepository.endVisibleUse(ClientLocationPurpose.APPOINTMENT_TRACKING)
         _state.value = AppointmentTrackingUiState()
+    }
+
+    /** Provider-only "Cheguei" — mirrors the ACCEPTED "Iniciar atendimento" RPC for Mobile. */
+    fun arrive() {
+        val appointment = _state.value.dispatch?.appointment ?: return
+        if (_state.value.arriving) return
+        _state.value = _state.value.copy(arriving = true)
+        viewModelScope.launch {
+            when (val result = dispatchRepository.startAppointment(appointment.id, appointment.revision)) {
+                is MobileDispatchResult.Success -> _state.value = _state.value.copy(
+                    dispatch = result.snapshot, arriving = false,
+                )
+                else -> _state.value = _state.value.copy(arriving = false)
+            }
+        }
+    }
+
+    /** Provider-only completion, valid only once IN_PROGRESS for PitTec. */
+    fun complete() {
+        val appointment = _state.value.dispatch?.appointment ?: return
+        if (_state.value.completing) return
+        _state.value = _state.value.copy(completing = true)
+        viewModelScope.launch {
+            when (val result = dispatchRepository.complete(appointment.id, appointment.revision)) {
+                is MobileDispatchResult.Success -> _state.value = _state.value.copy(
+                    dispatch = result.snapshot, completing = false,
+                )
+                else -> _state.value = _state.value.copy(completing = false)
+            }
+        }
     }
 
     fun updateSurfaceState(surfaceState: MapSurfaceState) {
@@ -204,11 +245,15 @@ class AppointmentTrackingViewModel(
             is AppointmentLocationEvent.Ended -> {
                 terminal = true
                 latest = null
+                routeJob?.cancel()
+                _state.value = _state.value.copy(route = null)
                 updateData(TrackingDataState.Ended)
             }
             AppointmentLocationEvent.SessionExpired -> {
                 terminal = true
                 latest = null
+                routeJob?.cancel()
+                _state.value = _state.value.copy(route = null)
                 updateData(TrackingDataState.SessionExpired)
             }
             AppointmentLocationEvent.Offline -> updateData(TrackingDataState.Offline(latest))
@@ -224,6 +269,23 @@ class AppointmentTrackingViewModel(
         latest = location
         publishFreshness(location)
         if (_state.value.followProvider) moveCameraTo(location, _state.value.clientLocation)
+        if (_state.value.isPitTec) refreshRoute(location.version)
+    }
+
+    /**
+     * One in-flight request per appointment (PitTecRouteRepository itself conflates concurrent
+     * calls); this only avoids issuing a redundant call for a revision already requested. A
+     * failed refresh never clears a previously valid route — see pittec-routing-ui.md `Fallback`.
+     */
+    private fun refreshRoute(providerLocationRevision: Long) {
+        if (providerLocationRevision <= lastRoutedRevision || routeJob?.isActive == true) return
+        lastRoutedRevision = providerLocationRevision
+        routeJob = viewModelScope.launch {
+            when (val result = routeRepository.refresh(appointmentId, providerLocationRevision)) {
+                is RouteResult.Success -> _state.value = _state.value.copy(route = result.snapshot)
+                is RouteResult.Failure -> Unit
+            }
+        }
     }
 
     private fun publishFreshness(location: AppointmentProviderLocation) {
@@ -262,6 +324,7 @@ class AppointmentTrackingViewModel(
             appointmentId: String,
             repository: AppointmentTrackingRepository,
             dispatchRepository: MobileDispatchRepository,
+            routeRepository: PitTecRouteRepository,
             deviceLocationRepository: DeviceLocationRepository,
             isClient: Boolean,
         ) =
@@ -269,7 +332,8 @@ class AppointmentTrackingViewModel(
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
                     AppointmentTrackingViewModel(
-                        appointmentId, repository, dispatchRepository, deviceLocationRepository, isClient,
+                        appointmentId, repository, dispatchRepository, routeRepository,
+                        deviceLocationRepository, isClient,
                     ) as T
             }
     }

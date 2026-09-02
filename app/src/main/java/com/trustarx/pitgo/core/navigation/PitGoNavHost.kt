@@ -148,7 +148,9 @@ fun PitGoNavHost(container: PitGoAppContainer) {
     LaunchedEffect(sessionState) {
         while (true) {
             val ready = sessionState as? AppSessionState.Authenticated.ProviderReady ?: return@LaunchedEffect
-            if (ready.account.available && ready.account.locationMode == ProviderLocationMode.MOBILE) {
+            if (ready.account.available &&
+                ready.account.locationMode in setOf(ProviderLocationMode.MOBILE, ProviderLocationMode.PITTEC)
+            ) {
                 container.providerTrackingStateRepository.start()
             }
             delay(TRACKING_WATCHDOG_INTERVAL_MS)
@@ -647,15 +649,18 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         ) { entry ->
             val appointmentId = entry.arguments?.getString(PitGoRoutes.AppointmentIdArg).orEmpty()
             if (sessionState is AppSessionState.Authenticated && appointmentId.isNotBlank()) {
+                val isClientSession = sessionState is AppSessionState.Authenticated.Client
                 val trackingViewModel: AppointmentTrackingViewModel = viewModel(
                     factory = AppointmentTrackingViewModel.factory(
                         appointmentId, container.appointmentTrackingRepository,
-                        container.mobileDispatchRepository, container.deviceLocationRepository,
-                        isClient = sessionState is AppSessionState.Authenticated.Client,
+                        container.mobileDispatchRepository, container.pitTecRouteRepository,
+                        container.deviceLocationRepository,
+                        isClient = isClientSession,
                     ),
                 )
                 AppointmentTrackingRoute(
                     viewModel = trackingViewModel,
+                    isClient = isClientSession,
                     onBack = { navController.popBackStack() },
                     onSessionExpired = sessionViewModel::refresh,
                 )

@@ -24,7 +24,7 @@ sealed interface PitTecResumeState {
  * kept fully separate so a PitTec search/appointment is never restored through the legacy
  * MOBILE_SEQUENTIAL contract (see contracts/pittec-rpcs.md `get_my_active_pittec_dispatch`). The
  * provider-side offer resume already goes through the shared, dispatch-kind-agnostic
- * `MobileDispatchRepository.restoreProviderAny()` used by DispatchResumeViewModel.
+ * `MobileDispatchRepository.restoreAnyDispatchKind()` used by DispatchResumeViewModel.
  */
 class PitTecResumeViewModel(
     sessionRepository: SessionRepository,

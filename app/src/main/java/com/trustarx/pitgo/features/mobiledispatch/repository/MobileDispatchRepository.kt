@@ -40,7 +40,7 @@ class MobileDispatchRepository(private val client: SupabaseClient) {
      * two restores below ever returns an active dispatch — this lets provider-side callers stay
      * agnostic of which dispatch kind is currently offering/assigned to them.
      */
-    suspend fun restoreProviderAny(): MobileDispatchResult = when (val mobile = restore()) {
+    suspend fun restoreAnyDispatchKind(): MobileDispatchResult = when (val mobile = restore()) {
         is MobileDispatchResult.Success -> mobile
         MobileDispatchResult.None -> restorePitTec()
         is MobileDispatchResult.Failure -> mobile

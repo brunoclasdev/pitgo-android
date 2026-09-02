@@ -52,12 +52,14 @@ import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentProvider
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentTrackingUiState
 import com.trustarx.pitgo.features.appointmenttracking.model.TrackingDataState
 import com.trustarx.pitgo.features.appointmenttracking.viewmodel.AppointmentTrackingViewModel
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus
 import java.text.NumberFormat
 import java.util.Locale
 
 @Composable
 fun AppointmentTrackingRoute(
     viewModel: AppointmentTrackingViewModel,
+    isClient: Boolean,
     onBack: () -> Unit,
     onSessionExpired: () -> Unit,
 ) {
@@ -71,6 +73,7 @@ fun AppointmentTrackingRoute(
     }
     AppointmentTrackingScreen(
         state = state,
+        isClient = isClient,
         styleController = remember { AppointmentMapStyleController() },
         onBack = onBack,
         onFollowChanged = viewModel::setFollowProvider,
@@ -78,6 +81,8 @@ fun AppointmentTrackingRoute(
         onSurfaceState = viewModel::updateSurfaceState,
         onRetryStyle = viewModel::retryStyle,
         onCancel = viewModel::cancel,
+        onArrive = viewModel::arrive,
+        onComplete = viewModel::complete,
     )
 }
 
@@ -85,6 +90,7 @@ fun AppointmentTrackingRoute(
 @Composable
 private fun AppointmentTrackingScreen(
     state: AppointmentTrackingUiState,
+    isClient: Boolean,
     styleController: AppointmentMapStyleController,
     onBack: () -> Unit,
     onFollowChanged: (Boolean) -> Unit,
@@ -92,6 +98,8 @@ private fun AppointmentTrackingScreen(
     onSurfaceState: (com.trustarx.pitgo.core.map.model.MapSurfaceState) -> Unit,
     onRetryStyle: () -> Unit,
     onCancel: (String) -> Unit,
+    onArrive: () -> Unit,
+    onComplete: () -> Unit,
 ) {
     var showCancel by remember { mutableStateOf(false) }
     var reason by remember { mutableStateOf("") }
@@ -119,7 +127,7 @@ private fun AppointmentTrackingScreen(
             if (location != null || hasClientLocation) {
                 MapLibreMapHost(
                     configuration = PitGoManagedMapStyle.configuration,
-                    renderModel = MapRenderModel(state.markers),
+                    renderModel = MapRenderModel(state.markers, state.routePolyline),
                     viewport = state.viewport,
                     cameraCommand = state.cameraCommand,
                     styleReloadRevision = state.styleReloadRevision,
@@ -146,13 +154,30 @@ private fun AppointmentTrackingScreen(
                     Surface(shape = MaterialTheme.shapes.large) {
                         Column(Modifier.fillMaxWidth().padding(PitGoSpacing.Medium)) {
                             Text(state.dispatch.serviceName, style = MaterialTheme.typography.titleMedium)
-                            Text(stringResource(
-                                R.string.mobile_dispatch_price_frozen,
-                                NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")).format(appointment.quotedPrice),
-                            ))
-                            Text(appointment.status.name)
+                            if (state.isPitTec) {
+                                Text(
+                                    stringResource(
+                                        if (appointment.status == MobileAppointmentStatus.IN_PROGRESS) {
+                                            R.string.pittec_arrived
+                                        } else R.string.pittec_on_the_way
+                                    ),
+                                )
+                                PitTecDistanceLine(state)
+                            } else {
+                                Text(stringResource(
+                                    R.string.mobile_dispatch_price_frozen,
+                                    NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")).format(appointment.quotedPrice),
+                                ))
+                                Text(appointment.status.name)
+                            }
+                            if (!isClient && state.isPitTec) {
+                                PitTecProviderActions(state, onArrive, onComplete)
+                            }
                             TextButton(onClick = { showCancel = true }, enabled = !state.cancelling) {
-                                Text(stringResource(R.string.mobile_dispatch_cancel))
+                                Text(stringResource(
+                                    if (state.isPitTec) R.string.pittec_cancel_service
+                                    else R.string.mobile_dispatch_cancel,
+                                ))
                             }
                         }
                     }
@@ -200,6 +225,45 @@ private fun AppointmentTrackingScreen(
         ) { Text(stringResource(R.string.mobile_dispatch_cancel_confirm)) } },
         dismissButton = { TextButton({ showCancel = false }) { Text(stringResource(R.string.action_back)) } },
     )
+}
+
+/** Routed distance when available, otherwise the local haversine estimate — never both. */
+@Composable
+private fun PitTecDistanceLine(state: AppointmentTrackingUiState) {
+    val meters = state.route?.distanceMeters?.toDouble() ?: state.haversineDistanceMeters
+    if (meters == null) {
+        Text(stringResource(R.string.pittec_route_unavailable))
+        return
+    }
+    val distanceText = if (meters < 1000) {
+        stringResource(R.string.service_map_distance, meters.toInt())
+    } else {
+        stringResource(R.string.mobile_dispatch_distance, meters / 1000.0)
+    }
+    Text(stringResource(R.string.pittec_route_distance, distanceText))
+    if (state.route == null) Text(stringResource(R.string.pittec_route_estimated))
+}
+
+@Composable
+private fun PitTecProviderActions(
+    state: AppointmentTrackingUiState,
+    onArrive: () -> Unit,
+    onComplete: () -> Unit,
+) {
+    val appointment = state.dispatch?.appointment ?: return
+    when (appointment.status) {
+        MobileAppointmentStatus.ACCEPTED -> Button(
+            onClick = onArrive,
+            enabled = !state.arriving,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(stringResource(R.string.pittec_arrive)) }
+        MobileAppointmentStatus.IN_PROGRESS -> Button(
+            onClick = onComplete,
+            enabled = !state.completing,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(stringResource(R.string.pittec_complete)) }
+        else -> Unit
+    }
 }
 
 @Composable

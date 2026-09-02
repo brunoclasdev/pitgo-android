@@ -59,7 +59,7 @@ class DispatchResumeViewModel(
                         launch {
                             while (true) {
                                 delay(PROVIDER_POLL_INTERVAL_MS)
-                                when (val result = repository.restoreProviderAny()) {
+                                when (val result = repository.restoreAnyDispatchKind()) {
                                     is MobileDispatchResult.Success ->
                                         _state.value = DispatchResumeState.Active(authenticated.userId, result.snapshot)
                                     MobileDispatchResult.None -> _state.value = DispatchResumeState.None
@@ -76,7 +76,7 @@ class DispatchResumeViewModel(
                                 // `appointments`/`service_searches` triggers), so any event is just
                                 // used as a wake-up to re-derive authoritative state below.
                                 repository.observeProvider(providerId).collect {
-                                    when (val result = repository.restoreProviderAny()) {
+                                    when (val result = repository.restoreAnyDispatchKind()) {
                                         is MobileDispatchResult.Success ->
                                             _state.value = DispatchResumeState.Active(authenticated.userId, result.snapshot)
                                         MobileDispatchResult.None -> _state.value = DispatchResumeState.None

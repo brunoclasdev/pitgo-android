@@ -67,7 +67,7 @@ class ProviderLocationTrackingService : Service() {
         trackingJob = scope.launch {
             container.sessionRepository.ensureInitialized()
             val session = container.sessionRepository.state.value as? AppSessionState.Authenticated.ProviderReady
-            if (session?.account?.locationMode != ProviderLocationMode.MOBILE || !session.account.available) {
+            if (session?.account?.locationMode !in TRACKABLE_MODES || session?.account?.available != true) {
                 degradeAndStop(TrackingStopReason.INELIGIBLE)
                 return@launch
             }
@@ -91,7 +91,7 @@ class ProviderLocationTrackingService : Service() {
                     lastPreciseFixAt = System.currentTimeMillis()
                     val current = container.sessionRepository.state.value
                         as? AppSessionState.Authenticated.ProviderReady
-                    if (current?.userId != session.userId || current.account.locationMode != ProviderLocationMode.MOBILE ||
+                    if (current?.userId != session.userId || current.account.locationMode !in TRACKABLE_MODES ||
                         !current.account.available) {
                         degradeAndStop(TrackingStopReason.SESSION_EXPIRED)
                         return@collect
@@ -145,7 +145,10 @@ class ProviderLocationTrackingService : Service() {
         watchdogJob?.cancel(); watchdogJob = null
         scope.launch {
             if (updateAvailability) {
-                val dispatch = container.mobileDispatchRepository.restore()
+                // Checks both dispatch kinds — a PitTec appointment is invisible to
+                // `restore()` alone (see contracts/pittec-rpcs.md) and would otherwise let a
+                // stop request kill location publication mid-appointment.
+                val dispatch = container.mobileDispatchRepository.restoreAnyDispatchKind()
                 val activeAppointment = (dispatch as? MobileDispatchResult.Success)?.snapshot?.appointment
                 if (activeAppointment?.status in setOf(MobileAppointmentStatus.ACCEPTED, MobileAppointmentStatus.IN_PROGRESS)) {
                     startActivity(Intent(this@ProviderLocationTrackingService, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -259,5 +262,8 @@ class ProviderLocationTrackingService : Service() {
         const val ACTION_STOP = "com.trustarx.pitgo.action.STOP_PROVIDER_TRACKING"
         private const val CHANNEL_ID = "provider_location_tracking"
         private const val NOTIFICATION_ID = 7001
+
+        /** Both modalities publish exact movement into an accepted appointment the same way. */
+        private val TRACKABLE_MODES = setOf(ProviderLocationMode.MOBILE, ProviderLocationMode.PITTEC)
     }
 }

@@ -65,6 +65,8 @@ enum class MapMarkerKind {
     COINCIDENT_GROUP,
     /** Anonymized, server-approximated PitTec position shown before a request is accepted. */
     PITTEC_APPROXIMATE,
+    /** Exact, accepted PitTec technician position — visually distinct from a Guincho's LIVE marker. */
+    PITTEC_LIVE,
 }
 
 data class MapMarkerSpec(
@@ -109,6 +111,16 @@ data class MapSurfaceState(
     val resources: MapResourceState = MapResourceState.Waiting,
 )
 
+/** Solid for a routed path, dashed for a haversine direct-line fallback (never color alone). */
+enum class MapRouteStyle { SOLID, DASHED }
+
+data class MapRoutePolyline(
+    val id: String,
+    val points: List<MapCoordinate>,
+    val style: MapRouteStyle,
+)
+
 data class MapRenderModel(
     val markers: List<MapMarkerSpec> = emptyList(),
+    val route: MapRoutePolyline? = null,
 )
