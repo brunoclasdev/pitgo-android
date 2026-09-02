@@ -618,6 +618,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         container.providerTrackingStateRepository,
                         container.mobileDispatchRepository,
                         container.deviceLocationRepository,
+                        container.providerIncomingRequestNotifier,
                     ),
                 )
                 ProviderDashboardRoute(

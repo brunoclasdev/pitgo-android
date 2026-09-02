@@ -74,11 +74,12 @@ fun ProviderDashboardRoute(
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { }
+    var pendingMode by remember { mutableStateOf(ProviderLocationMode.MOBILE) }
     val locationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
         if (result[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
-            viewModel.enableMobileAvailability()
+            viewModel.enableTrackedAvailability(pendingMode)
             if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else viewModel.onPrecisePermissionDenied()
     }
@@ -86,7 +87,9 @@ fun ProviderDashboardRoute(
         state, onLogout,
         onAvailabilityChanged = { available ->
             val content = state as? ProviderDashboardUiState.Content
-            if (available && content?.provider?.locationMode == ProviderLocationMode.MOBILE) {
+            val mode = content?.provider?.locationMode
+            if (available && mode in TRACKED_MODES) {
+                pendingMode = requireNotNull(mode)
                 locationPermission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION))
             } else viewModel.setAvailability(available)
         },
@@ -94,6 +97,17 @@ fun ProviderDashboardRoute(
         onOpenIncomingRequest = onOpenIncomingRequest,
         onOpenLocationSettings = {
             context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            viewModel.clearAvailabilityIssue()
+        },
+        onOpenNotificationSettings = {
+            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            } else {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(Uri.parse("package:${context.packageName}"))
+            }
+            context.startActivity(intent)
             viewModel.clearAvailabilityIssue()
         },
         showBatteryOptimizationBanner = !ignoringBatteryOptimizations,
@@ -107,6 +121,8 @@ fun ProviderDashboardRoute(
         },
     )
 }
+
+private val TRACKED_MODES = setOf(ProviderLocationMode.MOBILE, ProviderLocationMode.PITTEC)
 
 private fun isIgnoringBatteryOptimizations(context: android.content.Context): Boolean {
     val powerManager = context.getSystemService(android.content.Context.POWER_SERVICE) as? PowerManager
@@ -122,6 +138,7 @@ private fun ProviderDashboardScreen(
     onModeChanged: (ProviderLocationMode) -> Unit,
     onOpenIncomingRequest: (String) -> Unit,
     onOpenLocationSettings: () -> Unit,
+    onOpenNotificationSettings: () -> Unit,
     showBatteryOptimizationBanner: Boolean,
     onRequestBatteryExemption: () -> Unit,
 ) {
@@ -136,7 +153,7 @@ private fun ProviderDashboardScreen(
                 style = MaterialTheme.typography.headlineMedium,
             )
             val content = state as? ProviderDashboardUiState.Content
-            if (showBatteryOptimizationBanner && content?.provider?.locationMode == ProviderLocationMode.MOBILE) {
+            if (showBatteryOptimizationBanner && content?.provider?.locationMode in TRACKED_MODES) {
                 Card(
                     Modifier.fillMaxWidth(),
                     colors = androidx.compose.material3.CardDefaults.cardColors(
@@ -174,6 +191,12 @@ private fun ProviderDashboardScreen(
                                 state.provider.locationMode?.name ?: "—",
                             ),
                         )
+                        state.provider.pendingLocationMode?.let {
+                            Text(
+                                stringResource(R.string.provider_mode_pending),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         val isAvailable = state.provider.available
                         Surface(
                             modifier = Modifier
@@ -250,6 +273,10 @@ private fun ProviderDashboardScreen(
                                 onClick = { onModeChanged(ProviderLocationMode.MOBILE) },
                                 enabled = !state.updating,
                             ) { Text(stringResource(R.string.provider_mode_mobile)) }
+                            Button(
+                                onClick = { onModeChanged(ProviderLocationMode.PITTEC) },
+                                enabled = !state.updating,
+                            ) { Text(stringResource(R.string.provider_mode_pittec)) }
                         }
                         Text(
                             when (state.tracking) {
@@ -268,6 +295,7 @@ private fun ProviderDashboardScreen(
                                         ProviderAvailabilityIssue.PRECISE_PERMISSION_REQUIRED -> R.string.provider_availability_precise_required
                                         ProviderAvailabilityIssue.LOCATION_SERVICES_DISABLED -> R.string.provider_availability_location_disabled
                                         ProviderAvailabilityIssue.PRECISE_FIX_UNAVAILABLE -> R.string.provider_availability_fix_unavailable
+                                        ProviderAvailabilityIssue.NOTIFICATIONS_REQUIRED -> R.string.pittec_notifications_required
                                         ProviderAvailabilityIssue.UPDATE_FAILED -> R.string.provider_availability_update_failed
                                     },
                                 ),
@@ -276,6 +304,11 @@ private fun ProviderDashboardScreen(
                             if (issue == ProviderAvailabilityIssue.LOCATION_SERVICES_DISABLED) {
                                 Button(onClick = onOpenLocationSettings) {
                                     Text(stringResource(R.string.provider_availability_open_location_settings))
+                                }
+                            }
+                            if (issue == ProviderAvailabilityIssue.NOTIFICATIONS_REQUIRED) {
+                                Button(onClick = onOpenNotificationSettings) {
+                                    Text(stringResource(R.string.pittec_open_notification_settings))
                                 }
                             }
                         }

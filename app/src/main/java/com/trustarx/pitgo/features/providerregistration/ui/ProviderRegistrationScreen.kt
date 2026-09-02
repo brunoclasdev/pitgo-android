@@ -562,12 +562,19 @@ private fun ProviderModeSection(
                     enabled = enabled,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(stringResource(R.string.provider_mode_mobile)) }
+                OutlinedButton(
+                    onClick = { onSelected(ProviderLocationMode.PITTEC) },
+                    enabled = enabled,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(R.string.provider_mode_pittec)) }
             }
             if (selected != null) {
                 Text(
-                    if (selected == ProviderLocationMode.FIXED) {
-                        stringResource(R.string.provider_mode_fixed_description)
-                    } else stringResource(R.string.provider_mode_mobile_description),
+                    when (selected) {
+                        ProviderLocationMode.FIXED -> stringResource(R.string.provider_mode_fixed_description)
+                        ProviderLocationMode.MOBILE -> stringResource(R.string.provider_mode_mobile_description)
+                        ProviderLocationMode.PITTEC -> stringResource(R.string.provider_mode_pittec_description)
+                    },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

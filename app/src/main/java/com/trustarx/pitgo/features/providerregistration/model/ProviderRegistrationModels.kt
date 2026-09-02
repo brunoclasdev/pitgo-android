@@ -78,7 +78,7 @@ data class ProviderRegistration(
     val offers: List<OfferRegistration>,
 )
 
-enum class ProviderLocationMode { FIXED, MOBILE }
+enum class ProviderLocationMode { FIXED, MOBILE, PITTEC }
 
 sealed interface AddressVerificationState {
     data object Unverified : AddressVerificationState

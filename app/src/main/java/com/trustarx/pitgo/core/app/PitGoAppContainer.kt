@@ -22,6 +22,7 @@ import com.trustarx.pitgo.features.providermigration.repository.ProviderMigratio
 import com.trustarx.pitgo.features.providermigration.repository.ProviderMigrationRepository
 import com.trustarx.pitgo.features.providertracking.repository.ProviderLocationRepository
 import com.trustarx.pitgo.features.providertracking.repository.ProviderTrackingStateRepository
+import com.trustarx.pitgo.features.providertracking.notification.ProviderIncomingRequestNotifier
 import com.trustarx.pitgo.features.appointmenttracking.repository.AppointmentTrackingRepository
 import com.trustarx.pitgo.features.providermap.repository.ServiceMapRepository
 import com.trustarx.pitgo.features.signup.repository.SupabaseSignUpRepository
@@ -48,6 +49,7 @@ class PitGoAppContainer(context: Context) {
     val providerMigrationRepository = ProviderMigrationRepository(supabase)
     val providerLocationRepository = ProviderLocationRepository(supabase)
     val providerTrackingStateRepository = ProviderTrackingStateRepository(context.applicationContext)
+    val providerIncomingRequestNotifier = ProviderIncomingRequestNotifier(context.applicationContext)
     val providerTrackingPreferences = ProviderTrackingPreferences(context)
     val appointmentTrackingRepository = AppointmentTrackingRepository(supabase)
     val serviceMapRepository = ServiceMapRepository(supabase)

@@ -480,6 +480,8 @@
     <string name="pittec_incoming_body">Abra para responder. %1$d segundos restantes.</string>
     <string name="pittec_notifications_required">Ative as notificações de Chamados PitTec para ficar disponível.</string>
     <string name="pittec_open_notification_settings">Abrir configurações de notificações</string>
+    <string name="provider_mode_pittec">PitTec</string>
     <string name="provider_mode_pittec_description">Técnico sob demanda, acionado automaticamente por proximidade.</string>
+    <string name="provider_mode_pittec_notifications_required">Ative as notificações de Chamados PitTec para escolher esta modalidade.</string>
     <string name="provider_mode_pending">A modalidade será alterada após o atendimento atual.</string>
 </resources>

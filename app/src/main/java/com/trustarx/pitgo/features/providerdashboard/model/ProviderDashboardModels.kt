@@ -19,6 +19,8 @@ enum class ProviderAvailabilityIssue {
     PRECISE_PERMISSION_REQUIRED,
     LOCATION_SERVICES_DISABLED,
     PRECISE_FIX_UNAVAILABLE,
+    /** PITTEC only — the offers channel is silenced or notifications are disabled app-wide. */
+    NOTIFICATIONS_REQUIRED,
     UPDATE_FAILED,
 }
 
