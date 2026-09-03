@@ -599,6 +599,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                             navController.navigateRoot(PitGoRoutes.Welcome)
                         }
                     },
+                    onLogout = sessionViewModel::logout,
                     onFinished = {
                         sessionViewModel.refresh()
                     },

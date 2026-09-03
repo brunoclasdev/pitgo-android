@@ -1,5 +1,6 @@
 package com.trustarx.pitgo.features.providerregistration.repository
 
+import com.trustarx.pitgo.core.catalog.model.ServiceDispatchKind
 import com.trustarx.pitgo.features.providerregistration.data.CatalogServiceDto
 import com.trustarx.pitgo.features.providerregistration.data.ProviderAddressDto
 import com.trustarx.pitgo.features.providerregistration.data.ProviderDto
@@ -12,6 +13,7 @@ import com.trustarx.pitgo.features.providerregistration.data.toDomain
 import com.trustarx.pitgo.features.providerregistration.data.toDto
 import com.trustarx.pitgo.features.providerregistration.model.AddressSummary
 import com.trustarx.pitgo.features.providerregistration.model.CatalogService
+import com.trustarx.pitgo.features.providerregistration.model.ImplicitServiceResult
 import com.trustarx.pitgo.features.providerregistration.model.OfferSummary
 import com.trustarx.pitgo.features.providerregistration.model.ProviderCatalogResult
 import com.trustarx.pitgo.features.providerregistration.model.ProviderEntryResult
@@ -55,6 +57,30 @@ class ProviderRegistrationRepository(private val client: SupabaseClient) {
         throw cancellation
     } catch (error: Throwable) {
         ProviderCatalogResult.Failure(classifyFailure(error))
+    }
+
+    /**
+     * Localiza o serviço implícito de Móvel/PitTec pelo `dispatch_kind` (nunca pelo nome — ver
+     * research.md #1). Busca no máximo 2 registros ativos para distinguir ausência de
+     * duplicidade sem exigir uma constraint de unicidade nova no banco (research.md #2).
+     */
+    suspend fun resolveImplicitService(dispatchKind: ServiceDispatchKind): ImplicitServiceResult = try {
+        val matches = client.from(SERVICES).select {
+            filter {
+                eq("dispatch_kind", dispatchKind.name)
+                eq("active", true)
+            }
+            limit(2)
+        }.decodeList<CatalogServiceDto>().map(CatalogServiceDto::toDomain)
+        when (matches.size) {
+            1 -> ImplicitServiceResult.Found(matches.single())
+            0 -> ImplicitServiceResult.Absent
+            else -> ImplicitServiceResult.Duplicated
+        }
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (error: Throwable) {
+        ImplicitServiceResult.Failure(classifyFailure(error))
     }
 
     suspend fun submit(

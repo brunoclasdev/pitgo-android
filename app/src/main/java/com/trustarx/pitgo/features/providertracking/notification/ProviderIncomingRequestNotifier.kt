@@ -42,6 +42,10 @@ class ProviderIncomingRequestNotifier(private val context: Context) {
      * unreachable (see contracts/pittec-realtime-notifications.md `Availability lifecycle`).
      */
     fun isReady(): Boolean {
+        // Availability is checked before the first incoming request. Create the channel here so
+        // a fresh installation is not rejected merely because notifyIncoming() has never run.
+        // Recreating an existing channel preserves any importance chosen by the user.
+        ensureChannel()
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = context.getSystemService(NotificationManager::class.java)

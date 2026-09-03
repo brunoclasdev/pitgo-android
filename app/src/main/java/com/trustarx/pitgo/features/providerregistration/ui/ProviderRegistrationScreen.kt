@@ -108,6 +108,7 @@ import kotlinx.coroutines.yield
 fun ProviderRegistrationRoute(
     viewModel: ProviderRegistrationViewModel,
     onBack: () -> Unit,
+    onLogout: () -> Unit,
     onFinished: () -> Unit,
     onSessionExpired: () -> Unit,
 ) {
@@ -115,6 +116,7 @@ fun ProviderRegistrationRoute(
     val requestAddressVerification: () -> Unit = viewModel::verifyAddress
     var showDiscardDialog by rememberSaveable { mutableStateOf(false) }
     var showProcessingMessage by rememberSaveable { mutableStateOf(false) }
+    var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
     val editing = (state as? ProviderRegistrationUiState.Editing)?.content
     val isSubmitting = editing?.submission == ProviderSubmissionState.Submitting
 
@@ -134,6 +136,9 @@ fun ProviderRegistrationRoute(
     ProviderRegistrationScreen(
         state = state,
         onBack = ::handleBack,
+        onLogout = {
+            if (isSubmitting) showProcessingMessage = true else showLogoutDialog = true
+        },
         onRetryStartup = viewModel::retryStartup,
         onFieldChanged = viewModel::onFieldChanged,
         onLookupPostalCode = viewModel::lookupPostalCode,
@@ -147,9 +152,29 @@ fun ProviderRegistrationRoute(
         onAddOffer = viewModel::addOffer,
         onRemoveOffer = viewModel::removeOffer,
         onRetryCatalog = viewModel::retryCatalog,
+        onRetryImplicitService = viewModel::retryImplicitService,
         onSubmit = viewModel::submit,
         onFinished = onFinished,
     )
+
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = { Text(stringResource(R.string.profile_logout_title)) },
+            text = { Text(stringResource(R.string.profile_logout_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showLogoutDialog = false
+                    onLogout()
+                }) { Text(stringResource(R.string.action_logout)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutDialog = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
 
     if (showDiscardDialog) {
         AlertDialog(
@@ -188,6 +213,7 @@ fun ProviderRegistrationRoute(
 fun ProviderRegistrationScreen(
     state: ProviderRegistrationUiState,
     onBack: () -> Unit,
+    onLogout: () -> Unit,
     onRetryStartup: () -> Unit,
     onFieldChanged: (ProviderField, String) -> Unit,
     onLookupPostalCode: () -> Unit,
@@ -201,6 +227,7 @@ fun ProviderRegistrationScreen(
     onAddOffer: () -> Unit,
     onRemoveOffer: (Long) -> Unit,
     onRetryCatalog: (String?) -> Unit,
+    onRetryImplicitService: () -> Unit,
     onSubmit: () -> Unit,
     onFinished: () -> Unit,
 ) {
@@ -223,6 +250,11 @@ fun ProviderRegistrationScreen(
                             painter = painterResource(R.drawable.ic_back),
                             contentDescription = stringResource(R.string.action_back),
                         )
+                    }
+                },
+                actions = {
+                    TextButton(onClick = onLogout) {
+                        Text(stringResource(R.string.action_logout))
                     }
                 },
             )
@@ -255,6 +287,7 @@ fun ProviderRegistrationScreen(
                     onAddOffer = onAddOffer,
                     onRemoveOffer = onRemoveOffer,
                     onRetryCatalog = onRetryCatalog,
+                    onRetryImplicitService = onRetryImplicitService,
                     onSubmit = onSubmit,
                 )
                 is ProviderRegistrationUiState.AlreadyRegistered -> SummaryContent(
@@ -294,6 +327,7 @@ private fun RegistrationForm(
     onAddOffer: () -> Unit,
     onRemoveOffer: (Long) -> Unit,
     onRetryCatalog: (String?) -> Unit,
+    onRetryImplicitService: () -> Unit,
     onSubmit: () -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -441,58 +475,87 @@ private fun RegistrationForm(
                 onConfirmDivergence,
             )
         }
-        item {
-            val offersError = content.errors[ProviderField.Offers]?.let {
-                fieldErrorMessage(it, ProviderField.Offers)
-            }
-            Box(
-                modifier = Modifier.focusRequester(
-                    rememberFieldFocusRequester(focusRequesters, ProviderField.Offers),
-                ).focusable().then(
-                    if (offersError != null) Modifier.semantics { error(offersError) }
-                    else Modifier,
-                ),
-            ) {
-                SectionTitle(R.string.provider_offers_section)
-            }
+        content.implicitServiceIssue?.let { issue ->
+            item { ErrorBanner(failureMessage(issue), onRetry = onRetryImplicitService) }
         }
-        if (content.categories == LoadState.Loading) {
-            item { CatalogMessage(stringResource(R.string.provider_catalog_loading), loading = true) }
-        } else if (content.categories == LoadState.Empty) {
-            item { CatalogMessage(stringResource(R.string.provider_catalog_empty_message), onRetry = { onRetryCatalog(null) }) }
-        } else if (content.categories is LoadState.Failure) {
-            item { CatalogMessage(stringResource(R.string.provider_catalog_failure), onRetry = { onRetryCatalog(null) }) }
-        }
-        if (content.draft.offers.isEmpty()) {
+        if (content.draft.locationMode == ProviderLocationMode.FIXED) {
             item {
-                ErrorBanner(stringResource(R.string.provider_offers_empty))
+                val offersError = content.errors[ProviderField.Offers]?.let {
+                    fieldErrorMessage(it, ProviderField.Offers)
+                }
+                Box(
+                    modifier = Modifier.focusRequester(
+                        rememberFieldFocusRequester(focusRequesters, ProviderField.Offers),
+                    ).focusable().then(
+                        if (offersError != null) Modifier.semantics { error(offersError) }
+                        else Modifier,
+                    ),
+                ) {
+                    SectionTitle(R.string.provider_offers_section)
+                }
             }
-        }
-        itemsIndexed(content.draft.offers, key = { _, offer -> offer.localId }) { index, offer ->
-            OfferCard(
-                index = index,
-                offer = offer,
-                categories = categories,
-                servicesState = offer.categoryId?.let(content.servicesByCategory::get),
-                selectedServiceIds = selectedServices - setOfNotNull(offer.serviceId),
-                errors = content.errors,
-                enabled = !submitting,
-                focusRequesters = focusRequesters,
-                onCategorySelected = onCategorySelected,
-                onServiceSelected = onServiceSelected,
-                onFieldChanged = onOfferFieldChanged,
-                onFreeChanged = onFreeChanged,
-                onRemove = onRemoveOffer,
-                onRetryServices = { offer.categoryId?.let { onRetryCatalog(it) } },
-            )
-        }
-        item {
-            FormWidth {
-                OutlinedButton(
-                    onClick = onAddOffer,
-                    enabled = !submitting && content.categories is LoadState.Content,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = PitGoSize.MinimumTouchTarget),
-                ) { Text(stringResource(R.string.provider_add_offer)) }
+            if (content.categories == LoadState.Loading) {
+                item { CatalogMessage(stringResource(R.string.provider_catalog_loading), loading = true) }
+            } else if (content.categories == LoadState.Empty) {
+                item { CatalogMessage(stringResource(R.string.provider_catalog_empty_message), onRetry = { onRetryCatalog(null) }) }
+            } else if (content.categories is LoadState.Failure) {
+                item { CatalogMessage(stringResource(R.string.provider_catalog_failure), onRetry = { onRetryCatalog(null) }) }
+            }
+            if (content.draft.offers.isEmpty()) {
+                item {
+                    ErrorBanner(stringResource(R.string.provider_offers_empty))
+                }
+            }
+            itemsIndexed(content.draft.offers, key = { _, offer -> offer.localId }) { index, offer ->
+                OfferCard(
+                    index = index,
+                    offer = offer,
+                    categories = categories,
+                    servicesState = offer.categoryId?.let(content.servicesByCategory::get),
+                    selectedServiceIds = selectedServices - setOfNotNull(offer.serviceId),
+                    errors = content.errors,
+                    enabled = !submitting,
+                    focusRequesters = focusRequesters,
+                    onCategorySelected = onCategorySelected,
+                    onServiceSelected = onServiceSelected,
+                    onFieldChanged = onOfferFieldChanged,
+                    onFreeChanged = onFreeChanged,
+                    onRemove = onRemoveOffer,
+                    onRetryServices = { offer.categoryId?.let { onRetryCatalog(it) } },
+                )
+            }
+            item {
+                FormWidth {
+                    OutlinedButton(
+                        onClick = onAddOffer,
+                        enabled = !submitting && content.categories is LoadState.Content,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = PitGoSize.MinimumTouchTarget),
+                    ) { Text(stringResource(R.string.provider_add_offer)) }
+                }
+            }
+        } else if (content.draft.locationMode == ProviderLocationMode.MOBILE) {
+            content.draft.offers.firstOrNull()?.let { offer ->
+                item {
+                    MobileOfferSection(
+                        offer = offer,
+                        errors = content.errors,
+                        enabled = !submitting,
+                        focusRequesters = focusRequesters,
+                        onFieldChanged = onOfferFieldChanged,
+                        onFreeChanged = onFreeChanged,
+                    )
+                }
+            }
+        } else if (content.draft.locationMode == ProviderLocationMode.PITTEC) {
+            // Spec 016 US3: nenhum campo e nenhum título de seção de serviço para PitTec — só
+            // uma frase curta explicando que o serviço é atribuído automaticamente sem preço.
+            item {
+                FormWidth {
+                    Text(
+                        stringResource(R.string.provider_offer_pittec_hint),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
         val failure = (content.submission as? ProviderSubmissionState.Failure)?.reason
@@ -855,6 +918,68 @@ private fun StateDropdown(
                         onSelected(state)
                     })
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Oferta simplificada de Móvel (spec 016, US2): o serviço "Guincho" já é o implícito dessa
+ * modalidade (ver `ProviderRegistrationViewModel.resolveImplicitOffer`), então esta seção só
+ * pede preço e duração — sem categoria, serviço, descrição ou os controles de
+ * adicionar/remover que só fazem sentido quando o prestador escolhe entre vários serviços.
+ */
+@Composable
+private fun MobileOfferSection(
+    offer: OfferDraft,
+    errors: Map<ProviderField, ProviderFieldError>,
+    enabled: Boolean,
+    focusRequesters: MutableMap<ProviderField, FocusRequester>,
+    onFieldChanged: (Long, OfferField, String) -> Unit,
+    onFreeChanged: (Long, Boolean) -> Unit,
+) {
+    FormWidth {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = CardDefaults.outlinedCardBorder(),
+            elevation = CardDefaults.cardElevation(PitGoElevation.Card),
+        ) {
+            Column(
+                Modifier.padding(PitGoSpacing.Medium),
+                verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
+            ) {
+                Text(
+                    stringResource(R.string.provider_mode_mobile),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.semantics { heading() },
+                )
+                Text(
+                    stringResource(R.string.provider_offer_mobile_hint),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().toggleable(
+                        value = offer.isFree,
+                        enabled = enabled,
+                        onValueChange = { onFreeChanged(offer.localId, it) },
+                    ).heightIn(min = PitGoSize.MinimumTouchTarget),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = offer.isFree, onCheckedChange = null, enabled = enabled)
+                    Text(stringResource(R.string.provider_free_service_label))
+                }
+                OfferTextField(offer, OfferField.PRICE, R.string.provider_price_label, errors,
+                    enabled && !offer.isFree, focusRequesters, onFieldChanged,
+                    KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
+                    prefix = stringResource(R.string.provider_price_prefix))
+                OfferTextField(offer, OfferField.DURATION, R.string.provider_duration_label, errors,
+                    enabled, focusRequesters, onFieldChanged,
+                    KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next))
+                Text(
+                    stringResource(R.string.provider_duration_support),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

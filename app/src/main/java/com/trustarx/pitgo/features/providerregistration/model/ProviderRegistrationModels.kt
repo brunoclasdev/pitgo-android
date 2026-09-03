@@ -3,6 +3,7 @@ package com.trustarx.pitgo.features.providerregistration.model
 import com.trustarx.pitgo.core.address.model.AddressDraft
 import com.trustarx.pitgo.core.address.model.CepAutofillProvenance
 import com.trustarx.pitgo.core.address.model.PostalCodeLookupState
+import com.trustarx.pitgo.core.catalog.model.ServiceDispatchKind
 import java.math.BigDecimal
 
 data class ServiceCategory(
@@ -16,6 +17,8 @@ data class CatalogService(
     val categoryId: String,
     val name: String,
     val description: String?,
+    /** Identifica o serviço implícito de Móvel/PitTec sem depender do nome (ver research.md #1). */
+    val dispatchKind: ServiceDispatchKind = ServiceDispatchKind.BROWSE,
 )
 
 data class CompanyDraft(
@@ -210,6 +213,13 @@ data class ProviderEditingContent(
     val errors: Map<ProviderField, ProviderFieldError> = emptyMap(),
     val focusRequest: ProviderFocusRequest? = null,
     val submission: ProviderSubmissionState = ProviderSubmissionState.Idle,
+    /**
+     * Serviço implícito de Móvel/PitTec ausente ou duplicado no catálogo (ver
+     * contracts/provider-registration-service-rule.md). Independente de [submission]: é
+     * verificado ao trocar de modalidade e de novo antes do envio, não apenas como resultado de
+     * uma tentativa de envio já feita.
+     */
+    val implicitServiceIssue: ProviderFailure? = null,
 ) {
     val hasDraft: Boolean get() = draft != baselineDraft
 }
@@ -232,6 +242,14 @@ sealed interface ProviderEntryResult {
 sealed interface ProviderCatalogResult<out T> {
     data class Success<T>(val items: List<T>) : ProviderCatalogResult<T>
     data class Failure(val reason: ProviderFailure) : ProviderCatalogResult<Nothing>
+}
+
+/** Resultado de localizar o serviço implícito de Móvel/PitTec pelo `dispatchKind` (data-model.md). */
+sealed interface ImplicitServiceResult {
+    data class Found(val service: CatalogService) : ImplicitServiceResult
+    data object Absent : ImplicitServiceResult
+    data object Duplicated : ImplicitServiceResult
+    data class Failure(val reason: ProviderFailure) : ImplicitServiceResult
 }
 
 sealed interface ProviderRegistrationResult {

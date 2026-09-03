@@ -228,6 +228,8 @@
     <string name="provider_company_section">Dados da empresa</string>
     <string name="provider_address_section">Endereço</string>
     <string name="provider_offers_section">Serviços oferecidos</string>
+    <string name="provider_offer_mobile_hint">O Guincho já é o serviço desta modalidade. Defina apenas o preço e a duração do atendimento.</string>
+    <string name="provider_offer_pittec_hint">O PitTec não tem serviço, preço ou duração para definir aqui — o valor da chamada é fixado pela plataforma.</string>
     <string name="provider_name_label">Nome da empresa</string>
     <string name="provider_description_label">Descrição da empresa (opcional)</string>
     <string name="provider_email_label">E-mail comercial</string>

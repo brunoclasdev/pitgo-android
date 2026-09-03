@@ -52,6 +52,13 @@ alter table public.service_searches add constraint service_searches_last_event_v
 
 alter table public.appointments add column if not exists arrived_at timestamptz;
 
+-- service_categories was created outside this migration history without a description column;
+-- add it defensively so the PitTec category seed below can rely on it.
+alter table public.service_categories add column if not exists description text;
+alter table public.service_categories drop constraint if exists service_categories_description_length;
+alter table public.service_categories add constraint service_categories_description_length
+  check (description is null or char_length(description) <= 1000);
+
 create table if not exists public.appointment_route_snapshots (
   appointment_id uuid primary key references public.appointments(id) on delete cascade,
   provider_location_revision bigint not null check (provider_location_revision > 0),

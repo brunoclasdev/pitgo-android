@@ -71,16 +71,23 @@ fun ProviderDashboardRoute(
     val batteryOptimizationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { ignoringBatteryOptimizations = isIgnoringBatteryOptimizations(context) }
+    var pendingMode by remember { mutableStateOf(ProviderLocationMode.MOBILE) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { }
-    var pendingMode by remember { mutableStateOf(ProviderLocationMode.MOBILE) }
+    ) {
+        // Re-run the preflight only after Android has resolved the permission request. When it is
+        // denied, isReady() maps the result to the actionable notifications-required message.
+        viewModel.enableTrackedAvailability(pendingMode)
+    }
     val locationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
         if (result[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
-            viewModel.enableTrackedAvailability(pendingMode)
-            if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            if (pendingMode == ProviderLocationMode.PITTEC && Build.VERSION.SDK_INT >= 33) {
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                viewModel.enableTrackedAvailability(pendingMode)
+            }
         } else viewModel.onPrecisePermissionDenied()
     }
     ProviderDashboardScreen(

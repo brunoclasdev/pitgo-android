@@ -12,8 +12,11 @@ import com.trustarx.pitgo.core.address.model.PostalCodeLookupState
 import com.trustarx.pitgo.core.address.repository.ViaCepAddressLookupRepository
 import com.trustarx.pitgo.core.auth.model.AppSessionState
 import com.trustarx.pitgo.core.auth.repository.SessionRepository
+import com.trustarx.pitgo.core.catalog.model.ServiceDispatchKind
 import com.trustarx.pitgo.features.providerregistration.model.AddressVerificationState
+import com.trustarx.pitgo.features.providerregistration.model.CatalogService
 import com.trustarx.pitgo.features.providerregistration.model.CompanyDraft
+import com.trustarx.pitgo.features.providerregistration.model.ImplicitServiceResult
 import com.trustarx.pitgo.features.providerregistration.model.LoadState
 import com.trustarx.pitgo.features.providerregistration.model.OfferDraft
 import com.trustarx.pitgo.features.providerregistration.model.OfferField
@@ -60,6 +63,7 @@ class ProviderRegistrationViewModel(
     private var focusRequestId = 0L
     private var bootstrapJob: Job? = null
     private var submitJob: Job? = null
+    private var modeResolutionJob: Job? = null
     private var verificationJob: Job? = null
     private var postalCodeLookupJob: Job? = null
     private var postalCodeLookupAttemptId = 0L
@@ -178,11 +182,70 @@ class ProviderRegistrationViewModel(
         }
     }
 
-    fun onLocationModeSelected(mode: ProviderLocationMode) = updateEditing { content ->
-        content.copy(
-            draft = content.draft.copy(locationMode = mode),
-            errors = content.errors - ProviderField.LocationMode,
-        )
+    fun onLocationModeSelected(mode: ProviderLocationMode) {
+        val current = (_uiState.value as? ProviderRegistrationUiState.Editing)?.content ?: return
+        if (current.draft.locationMode == mode) {
+            updateEditing { it.copy(errors = it.errors - ProviderField.LocationMode) }
+            return
+        }
+        modeResolutionJob?.cancel()
+        updateEditing { content ->
+            content.copy(
+                draft = content.draft.copy(locationMode = mode),
+                errors = content.errors.filterKeys {
+                    it != ProviderField.LocationMode && it != ProviderField.Offers && it !is ProviderField.Offer
+                },
+                implicitServiceIssue = null,
+            )
+        }
+        when (mode) {
+            ProviderLocationMode.FIXED -> updateEditing { content ->
+                content.copy(draft = content.draft.copy(offers = listOf(OfferDraft(localId = nextOfferId++))))
+            }
+            ProviderLocationMode.MOBILE -> resolveImplicitOffer(mode, ServiceDispatchKind.MOBILE_SEQUENTIAL)
+            ProviderLocationMode.PITTEC -> resolveImplicitOffer(mode, ServiceDispatchKind.PITTEC_AUTO_SEQUENTIAL)
+        }
+    }
+
+    /**
+     * Móvel e PitTec não têm etapa de escolha de serviço (spec 016): o serviço implícito é
+     * localizado pelo `dispatchKind` (nunca pelo nome, ver research.md #1) e vira a única oferta
+     * do rascunho. Reaproveita `servicesByCategory` para que a validação existente enxergue esse
+     * serviço sem precisar de nenhuma mudança em `ProviderRegistrationValidation`.
+     */
+    private fun resolveImplicitOffer(mode: ProviderLocationMode, dispatchKind: ServiceDispatchKind) {
+        modeResolutionJob = viewModelScope.launch {
+            when (val result = repository.resolveImplicitService(dispatchKind)) {
+                is ImplicitServiceResult.Found -> {
+                    if (!isSessionCurrent()) {
+                        expireSession()
+                        return@launch
+                    }
+                    updateEditing { content ->
+                        if (content.draft.locationMode != mode) return@updateEditing content
+                        content.withImplicitOffer(mode, result.service, OfferDraft(localId = nextOfferId++))
+                    }
+                }
+                ImplicitServiceResult.Absent, ImplicitServiceResult.Duplicated -> updateEditing { content ->
+                    if (content.draft.locationMode != mode) return@updateEditing content
+                    content.copy(
+                        draft = content.draft.copy(offers = emptyList()),
+                        implicitServiceIssue = ProviderFailure.CatalogChanged,
+                    )
+                }
+                is ImplicitServiceResult.Failure -> if (result.reason == ProviderFailure.SessionExpired) {
+                    expireSession()
+                } else {
+                    updateEditing { content ->
+                        if (content.draft.locationMode != mode) return@updateEditing content
+                        content.copy(
+                            draft = content.draft.copy(offers = emptyList()),
+                            implicitServiceIssue = result.reason,
+                        )
+                    }
+                }
+            }
+        }
     }
 
     fun verifyAddress() {
@@ -438,10 +501,86 @@ class ProviderRegistrationViewModel(
         if (categoryId != null) loadServices(categoryId) else bootstrap()
     }
 
+    /** Tenta de novo a resolução do serviço implícito depois de uma falha (T006). */
+    fun retryImplicitService() {
+        val content = (_uiState.value as? ProviderRegistrationUiState.Editing)?.content ?: return
+        when (val mode = content.draft.locationMode) {
+            ProviderLocationMode.MOBILE -> resolveImplicitOffer(mode, ServiceDispatchKind.MOBILE_SEQUENTIAL)
+            ProviderLocationMode.PITTEC -> resolveImplicitOffer(mode, ServiceDispatchKind.PITTEC_AUTO_SEQUENTIAL)
+            ProviderLocationMode.FIXED, null -> Unit
+        }
+    }
+
     fun submit() {
         val editing = (_uiState.value as? ProviderRegistrationUiState.Editing)?.content ?: return
         if (editing.submission == ProviderSubmissionState.Submitting || submitJob != null) return
         if (editing.postalCodeLookup is PostalCodeLookupState.Loading) return
+        submitJob = viewModelScope.launch {
+            try {
+                val validated = when (editing.draft.locationMode) {
+                    ProviderLocationMode.MOBILE, ProviderLocationMode.PITTEC -> recheckImplicitService(editing)
+                    else -> editing
+                } ?: return@launch
+                proceedWithValidation(validated)
+            } finally {
+                submitJob = null
+            }
+        }
+    }
+
+    /**
+     * Confere de novo, imediatamente antes do envio, que o serviço implícito de Móvel/PitTec
+     * ainda existe e é único (spec 016, FR-009) — o catálogo pode ter mudado entre a escolha da
+     * modalidade e o clique em enviar. Preserva o preço/duração já digitados para Móvel ao
+     * reaproveitar a oferta atual como base. Retorna `null` quando a checagem já tratou um
+     * desfecho terminal (falha exibida ou sessão expirada) e o envio não deve continuar.
+     */
+    private suspend fun recheckImplicitService(editing: ProviderEditingContent): ProviderEditingContent? {
+        val mode = requireNotNull(editing.draft.locationMode)
+        val dispatchKind = if (mode == ProviderLocationMode.PITTEC) {
+            ServiceDispatchKind.PITTEC_AUTO_SEQUENTIAL
+        } else ServiceDispatchKind.MOBILE_SEQUENTIAL
+        _uiState.updateEditing { it.copy(submission = ProviderSubmissionState.Submitting) }
+        return when (val result = repository.resolveImplicitService(dispatchKind)) {
+            is ImplicitServiceResult.Found -> {
+                if (!isSessionCurrent()) {
+                    expireSession()
+                    return null
+                }
+                var refreshed: ProviderEditingContent? = null
+                _uiState.updateEditing { content ->
+                    if (content.draft.locationMode != mode) return@updateEditing content
+                    val base = content.draft.offers.singleOrNull() ?: OfferDraft(localId = nextOfferId++)
+                    content.withImplicitOffer(mode, result.service, base).also { refreshed = it }
+                }
+                refreshed
+            }
+            ImplicitServiceResult.Absent, ImplicitServiceResult.Duplicated -> {
+                _uiState.updateEditing {
+                    it.copy(
+                        submission = ProviderSubmissionState.Idle,
+                        implicitServiceIssue = ProviderFailure.CatalogChanged,
+                    )
+                }
+                null
+            }
+            is ImplicitServiceResult.Failure -> {
+                if (result.reason == ProviderFailure.SessionExpired) {
+                    expireSession()
+                } else {
+                    _uiState.updateEditing {
+                        it.copy(
+                            submission = ProviderSubmissionState.Idle,
+                            implicitServiceIssue = result.reason,
+                        )
+                    }
+                }
+                null
+            }
+        }
+    }
+
+    private suspend fun proceedWithValidation(editing: ProviderEditingContent) {
         val services = editing.availableServices()
         val validation = ProviderRegistrationValidation.validate(
             editing.draft, services, editing.addressVerification,
@@ -466,7 +605,7 @@ class ProviderRegistrationViewModel(
         startRegistration(registration)
     }
 
-    private fun geocodeAndSubmit(editing: ProviderEditingContent) {
+    private suspend fun geocodeAndSubmit(editing: ProviderEditingContent) {
         val fingerprint = editing.draft.address.fingerprint()
         _uiState.updateEditing {
             it.copy(
@@ -475,70 +614,56 @@ class ProviderRegistrationViewModel(
                 submission = ProviderSubmissionState.Submitting,
             )
         }
-        submitJob = viewModelScope.launch {
-            try {
-                when (val geocode = addressVerificationRepository.verify(editing.draft.address)) {
-                    is AddressVerificationResult.Verified -> {
-                        _uiState.updateEditing {
-                            if (isSessionCurrent() && it.draft.address.fingerprint() == fingerprint) {
-                                it.copy(addressVerification = geocode.state)
-                            } else it
-                        }
-                        val current = (_uiState.value as? ProviderRegistrationUiState.Editing)
-                            ?.content ?: return@launch
-                        if (!isSessionCurrent() || current.draft.address.fingerprint() != fingerprint) {
-                            return@launch
-                        }
-                        val services = current.servicesByCategory.values.flatMap { state ->
-                            (state as? LoadState.Content)?.value.orEmpty()
-                        }
-                        val validation = ProviderRegistrationValidation.validate(
-                            current.draft, services, current.addressVerification,
-                        )
-                        val registration = validation.registration
-                        if (registration == null) {
-                            requestFocus(validation.firstInvalidField, validation.errors)
-                            _uiState.updateEditing {
-                                it.copy(submission = ProviderSubmissionState.Idle)
-                            }
-                            return@launch
-                        }
-                        performRegistration(registration)
-                    }
-                    is AddressVerificationResult.Failure -> _uiState.updateEditing {
-                        it.copy(
-                            addressVerification = AddressVerificationState.Failure(geocode.reason),
-                            submission = ProviderSubmissionState.Failure(geocode.reason),
-                        )
-                    }
-                    is AddressVerificationResult.Diverged -> _uiState.updateEditing {
-                        if (isSessionCurrent() && it.draft.address.fingerprint() == fingerprint) {
-                            it.copy(
-                                addressVerification = AddressVerificationState.Diverged(
-                                    geocode.distanceMeters,
-                                ),
-                                submission = ProviderSubmissionState.Idle,
-                            )
-                        } else it
-                    }
+        when (val geocode = addressVerificationRepository.verify(editing.draft.address)) {
+            is AddressVerificationResult.Verified -> {
+                _uiState.updateEditing {
+                    if (isSessionCurrent() && it.draft.address.fingerprint() == fingerprint) {
+                        it.copy(addressVerification = geocode.state)
+                    } else it
                 }
-            } finally {
-                submitJob = null
+                val current = (_uiState.value as? ProviderRegistrationUiState.Editing)
+                    ?.content ?: return
+                if (!isSessionCurrent() || current.draft.address.fingerprint() != fingerprint) {
+                    return
+                }
+                val services = current.availableServices()
+                val validation = ProviderRegistrationValidation.validate(
+                    current.draft, services, current.addressVerification,
+                )
+                val registration = validation.registration
+                if (registration == null) {
+                    requestFocus(validation.firstInvalidField, validation.errors)
+                    _uiState.updateEditing {
+                        it.copy(submission = ProviderSubmissionState.Idle)
+                    }
+                    return
+                }
+                performRegistration(registration)
+            }
+            is AddressVerificationResult.Failure -> _uiState.updateEditing {
+                it.copy(
+                    addressVerification = AddressVerificationState.Failure(geocode.reason),
+                    submission = ProviderSubmissionState.Failure(geocode.reason),
+                )
+            }
+            is AddressVerificationResult.Diverged -> _uiState.updateEditing {
+                if (isSessionCurrent() && it.draft.address.fingerprint() == fingerprint) {
+                    it.copy(
+                        addressVerification = AddressVerificationState.Diverged(
+                            geocode.distanceMeters,
+                        ),
+                        submission = ProviderSubmissionState.Idle,
+                    )
+                } else it
             }
         }
     }
 
-    private fun startRegistration(registration: ProviderRegistration) {
+    private suspend fun startRegistration(registration: ProviderRegistration) {
         _uiState.updateEditing {
             it.copy(errors = emptyMap(), submission = ProviderSubmissionState.Submitting)
         }
-        submitJob = viewModelScope.launch {
-            try {
-                performRegistration(registration)
-            } finally {
-                submitJob = null
-            }
-        }
+        performRegistration(registration)
     }
 
     private suspend fun performRegistration(registration: ProviderRegistration) {
@@ -742,6 +867,31 @@ class ProviderRegistrationViewModel(
         state -> (state as? LoadState.Content)?.value.orEmpty()
     }
 
+    /**
+     * Aplica o serviço implícito de Móvel/PitTec resolvido como a única oferta do rascunho,
+     * partindo de [base] — uma oferta nova (troca de modalidade) ou a oferta atual (nova
+     * checagem antes do envio, preservando o preço/duração já digitados para Móvel).
+     */
+    private fun ProviderEditingContent.withImplicitOffer(
+        mode: ProviderLocationMode,
+        service: CatalogService,
+        base: OfferDraft,
+    ): ProviderEditingContent {
+        val offer = base.copy(
+            categoryId = service.categoryId,
+            serviceId = service.id,
+            isFree = mode == ProviderLocationMode.PITTEC,
+            durationInput = if (mode == ProviderLocationMode.PITTEC) {
+                DEFAULT_PITTEC_DURATION_MINUTES.toString()
+            } else base.durationInput,
+        )
+        return copy(
+            draft = draft.copy(offers = listOf(offer)),
+            servicesByCategory = servicesByCategory + (service.categoryId to LoadState.Content(listOf(service))),
+            implicitServiceIssue = null,
+        )
+    }
+
     private fun ProviderEditingContent.matchesPostalCodeAttempt(
         attemptId: Long,
         postalCode: String,
@@ -852,6 +1002,13 @@ class ProviderRegistrationViewModel(
             ProviderField.State,
         )
         private const val POSTAL_CODE_LENGTH = 8
+
+        /**
+         * Duração interna sem significado de cobrança para a oferta implícita do PitTec — o
+         * valor real (fixo + variável por distância) é definido pela plataforma, não pelo
+         * prestador (spec 016, Clarifications).
+         */
+        private const val DEFAULT_PITTEC_DURATION_MINUTES = 60
     }
 }
 

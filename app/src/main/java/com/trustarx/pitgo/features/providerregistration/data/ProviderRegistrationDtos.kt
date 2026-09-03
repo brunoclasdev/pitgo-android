@@ -1,5 +1,6 @@
 package com.trustarx.pitgo.features.providerregistration.data
 
+import com.trustarx.pitgo.core.catalog.model.ServiceDispatchKind
 import com.trustarx.pitgo.features.providerregistration.model.AddressRegistration
 import com.trustarx.pitgo.features.providerregistration.model.CatalogService
 import com.trustarx.pitgo.features.providerregistration.model.CompanyRegistration
@@ -23,6 +24,7 @@ internal data class CatalogServiceDto(
     @SerialName("category_id") val categoryId: String,
     val name: String,
     val description: String? = null,
+    @SerialName("dispatch_kind") val dispatchKind: String? = null,
 )
 
 @Serializable
@@ -109,6 +111,9 @@ internal fun CatalogServiceDto.toDomain() = CatalogService(
     categoryId = categoryId,
     name = name,
     description = description,
+    dispatchKind = dispatchKind
+        ?.let { runCatching { ServiceDispatchKind.valueOf(it) }.getOrNull() }
+        ?: ServiceDispatchKind.BROWSE,
 )
 
 internal fun CompanyRegistration.toDto(locationMode: String) = ProviderInputDto(
