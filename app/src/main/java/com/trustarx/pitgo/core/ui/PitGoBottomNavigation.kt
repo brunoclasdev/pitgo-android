@@ -23,6 +23,9 @@ enum class BottomItemId {
     GARAGE,
     APPOINTMENTS,
     PROFILE,
+    MAP,
+    RIDE_DATA,
+    VALUES,
 }
 
 data class BottomNavigationItem(
@@ -38,6 +41,14 @@ val PitGoBottomNavigationItems = listOf(
     BottomNavigationItem(BottomItemId.GARAGE, R.string.nav_garage, R.drawable.ic_nav_garage, 2),
     BottomNavigationItem(BottomItemId.APPOINTMENTS, R.string.nav_appointments, R.drawable.ic_nav_appointments, 3),
     BottomNavigationItem(BottomItemId.PROFILE, R.string.nav_profile, R.drawable.ic_nav_profile, 4),
+)
+
+/** Mocked PitTec provider shell (US5) — same component/behavior, provider-specific options. */
+val PitTecBottomNavigationItems = listOf(
+    BottomNavigationItem(BottomItemId.MAP, R.string.nav_pittec_map, R.drawable.ic_nav_map, 0),
+    BottomNavigationItem(BottomItemId.RIDE_DATA, R.string.nav_pittec_ride_data, R.drawable.ic_nav_ride_data, 1),
+    BottomNavigationItem(BottomItemId.VALUES, R.string.nav_pittec_values, R.drawable.ic_nav_values, 2),
+    BottomNavigationItem(BottomItemId.PROFILE, R.string.nav_profile, R.drawable.ic_nav_profile, 3),
 )
 
 @Composable
