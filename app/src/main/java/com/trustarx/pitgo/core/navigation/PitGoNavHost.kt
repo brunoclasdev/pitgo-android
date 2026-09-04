@@ -75,10 +75,12 @@ import com.trustarx.pitgo.features.mobiledispatch.viewmodel.ProviderIncomingRequ
 import com.trustarx.pitgo.features.mobiledispatch.viewmodel.DispatchResumeViewModel
 import com.trustarx.pitgo.features.mobiledispatch.viewmodel.DispatchResumeState
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus
-import com.trustarx.pitgo.features.pittec.ui.PitTecProviderDashboardRoute
+import com.trustarx.pitgo.features.pittec.model.PitTecAppointmentStatus
+import com.trustarx.pitgo.features.pittec.model.PitTecDispatchStatus
 import com.trustarx.pitgo.features.pittec.ui.PitTecRoute
-import com.trustarx.pitgo.features.pittec.viewmodel.PitTecClientMockViewModel
-import com.trustarx.pitgo.features.pittec.viewmodel.PitTecProviderMockViewModel
+import com.trustarx.pitgo.features.pittec.viewmodel.PitTecResumeState
+import com.trustarx.pitgo.features.pittec.viewmodel.PitTecResumeViewModel
+import com.trustarx.pitgo.features.pittec.viewmodel.PitTecViewModel
 
 private const val TRACKING_WATCHDOG_INTERVAL_MS = 30_000L
 
@@ -95,25 +97,11 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         ),
     )
     val dispatchResumeState by dispatchResumeViewModel.state.collectAsStateWithLifecycle()
+    val pitTecResumeViewModel: PitTecResumeViewModel = viewModel(
+        factory = PitTecResumeViewModel.factory(container.sessionRepository, container.pitTecRepository),
+    )
+    val pitTecResumeState by pitTecResumeViewModel.state.collectAsStateWithLifecycle()
     val migrationStage by container.providerMigrationCoordinator.stage.collectAsStateWithLifecycle()
-
-    // PitTec's entirely mocked prototype (specs/017-pittec-mocked-ui): two independent, in-memory
-    // state machines scoped to this NavHost's owner and keyed by session so they survive internal
-    // navigation but never outlive the authenticated account. See research.md #2.
-    val clientMockSessionKey = (sessionState as? AppSessionState.Authenticated.Client)?.account?.userId ?: "none"
-    val pitTecClientMockViewModel: PitTecClientMockViewModel = viewModel(
-        key = "pittec-client-mock-$clientMockSessionKey",
-        factory = PitTecClientMockViewModel.factory("pittec", container.deviceLocationRepository),
-    )
-    val providerReadySession = sessionState as? AppSessionState.Authenticated.ProviderReady
-    val providerMockSessionKey = providerReadySession?.account?.userId ?: "none"
-    val pitTecProviderMockViewModel: PitTecProviderMockViewModel = viewModel(
-        key = "pittec-provider-mock-$providerMockSessionKey",
-        factory = PitTecProviderMockViewModel.factory(
-            providerReadySession?.account?.name ?: "PitTec",
-            container.deviceLocationRepository,
-        ),
-    )
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
     val usesAppSurface = currentRoute in setOf(
@@ -160,21 +148,12 @@ fun PitGoNavHost(container: PitGoAppContainer) {
     LaunchedEffect(sessionState) {
         while (true) {
             val ready = sessionState as? AppSessionState.Authenticated.ProviderReady ?: return@LaunchedEffect
-            if (ready.account.available && ready.account.locationMode == ProviderLocationMode.MOBILE) {
+            if (ready.account.available &&
+                ready.account.locationMode in setOf(ProviderLocationMode.MOBILE, ProviderLocationMode.PITTEC)
+            ) {
                 container.providerTrackingStateRepository.start()
             }
             delay(TRACKING_WATCHDOG_INTERVAL_MS)
-        }
-    }
-
-    // PitTec's Home is now the fully mocked prototype (specs/017-pittec-mocked-ui): it must never
-    // resume real dispatch, Realtime or provider location publication. A PitTec session stops any
-    // legacy tracking/alert job left over from a previous MOBILE/real-PitTec run without an RPC or
-    // an availability mutation — see contracts/provider-pittec-ui.md "Route selection and isolation".
-    LaunchedEffect(sessionState) {
-        val ready = sessionState as? AppSessionState.Authenticated.ProviderReady ?: return@LaunchedEffect
-        if (ready.account.locationMode == ProviderLocationMode.PITTEC) {
-            container.providerTrackingStateRepository.stopLocally()
         }
     }
 
@@ -272,6 +251,30 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                 navController.navigate(PitGoRoutes.providerRequest(it.id)) { launchSingleTop = true }
             }
             else -> Unit
+        }
+    }
+
+    // Client-only PitTec counterpart to the block above — kept in its own effect/guard so it never
+    // competes with a legacy MOBILE_SEQUENTIAL resume for the same client (US2 mandates at most one
+    // active PitTec search per client, which the backend already enforces independently).
+    var lastPitTecAutoNavigated by remember { mutableStateOf<Pair<String, Long>?>(null) }
+    LaunchedEffect(pitTecResumeState, sessionState, currentRoute) {
+        val active = pitTecResumeState as? PitTecResumeState.Active ?: return@LaunchedEffect
+        if (sessionState !is AppSessionState.Authenticated.Client) return@LaunchedEffect
+        val related = currentRoute in setOf(PitGoRoutes.PitTec, PitGoRoutes.AppointmentTracking)
+        if (related) return@LaunchedEffect
+        val appointment = active.snapshot.appointment
+        val target = appointment?.let { it.id to it.revision } ?: (active.snapshot.searchId to active.snapshot.revision)
+        if (target == lastPitTecAutoNavigated) return@LaunchedEffect
+        lastPitTecAutoNavigated = target
+        if (appointment != null && appointment.status in
+            setOf(PitTecAppointmentStatus.ACCEPTED, PitTecAppointmentStatus.IN_PROGRESS)
+        ) {
+            navController.navigate(PitGoRoutes.appointmentTracking(appointment.id)) { launchSingleTop = true }
+        } else if (active.snapshot.status in
+            setOf(PitTecDispatchStatus.SEARCHING, PitTecDispatchStatus.AWAITING_PROVIDER)
+        ) {
+            navController.navigate(PitGoRoutes.pitTec(active.snapshot.serviceId)) { launchSingleTop = true }
         }
     }
 
@@ -608,31 +611,22 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         composable(PitGoRoutes.ProviderDashboard) {
             val account = (sessionState as? AppSessionState.Authenticated.ProviderReady)?.account
             if (account != null) {
-                if (account.locationMode == ProviderLocationMode.PITTEC) {
-                    // Mocked prototype: no ProviderDashboardViewModel/repository is created for
-                    // PITTEC — see contracts/provider-pittec-ui.md "Route selection and isolation".
-                    PitTecProviderDashboardRoute(
-                        viewModel = pitTecProviderMockViewModel,
-                        onLogout = sessionViewModel::logout,
-                    )
-                } else {
-                    val dashboardViewModel: ProviderDashboardViewModel = viewModel(
-                        factory = ProviderDashboardViewModel.factory(
-                            account,
-                            container.providerDashboardRepository,
-                            container.sessionRepository,
-                            container.providerTrackingStateRepository,
-                            container.mobileDispatchRepository,
-                            container.deviceLocationRepository,
-                            container.providerIncomingRequestNotifier,
-                        ),
-                    )
-                    ProviderDashboardRoute(
-                        viewModel = dashboardViewModel,
-                        onLogout = sessionViewModel::logout,
-                        onOpenIncomingRequest = { navController.navigate(PitGoRoutes.providerRequest(it)) },
-                    )
-                }
+                val dashboardViewModel: ProviderDashboardViewModel = viewModel(
+                    factory = ProviderDashboardViewModel.factory(
+                        account,
+                        container.providerDashboardRepository,
+                        container.sessionRepository,
+                        container.providerTrackingStateRepository,
+                        container.mobileDispatchRepository,
+                        container.deviceLocationRepository,
+                        container.providerIncomingRequestNotifier,
+                    ),
+                )
+                ProviderDashboardRoute(
+                    viewModel = dashboardViewModel,
+                    onLogout = sessionViewModel::logout,
+                    onOpenIncomingRequest = { navController.navigate(PitGoRoutes.providerRequest(it)) },
+                )
             }
         }
 
@@ -708,11 +702,20 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         ) { entry ->
             val serviceId = entry.arguments?.getString(PitGoRoutes.PitTecServiceArg).orEmpty()
             if (sessionState is AppSessionState.Authenticated.Client && serviceId.isNotBlank()) {
-                // Mocked prototype: no PitTecRepository/connectivity dependency and no navigation
-                // to the real AppointmentTracking route — see contracts/client-pittec-ui.md.
+                val pitTecViewModel: PitTecViewModel = viewModel(
+                    key = serviceId,
+                    factory = PitTecViewModel.factory(
+                        serviceId,
+                        container.pitTecRepository,
+                        container.deviceLocationRepository,
+                        container.connectivityObserver,
+                    ),
+                )
                 PitTecRoute(
-                    viewModel = pitTecClientMockViewModel,
+                    viewModel = pitTecViewModel,
                     onBack = { navController.popBackStack() },
+                    onAccepted = { navController.navigate(PitGoRoutes.appointmentTracking(it)) { launchSingleTop = true } },
+                    onSessionExpired = sessionViewModel::refresh,
                 )
             }
         }

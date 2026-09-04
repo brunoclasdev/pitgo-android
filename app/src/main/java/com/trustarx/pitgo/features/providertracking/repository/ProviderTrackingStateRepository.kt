@@ -32,19 +32,5 @@ class ProviderTrackingStateRepository(private val context: Context) {
         )
     }
 
-    /**
-     * Cancels any legacy tracking/alert job without an RPC or a remote availability change — used
-     * when a session's effective mode is PitTec's mocked prototype (specs/017-pittec-mocked-ui),
-     * which must never resume the real dispatch/tracking stack. Safe to call even when nothing is
-     * running: the service action itself is a no-op in that case.
-     */
-    fun stopLocally() {
-        if (_state.value == ProviderTrackingState.Stopped) return
-        context.startService(
-            Intent(context, ProviderLocationTrackingService::class.java)
-                .setAction(ProviderLocationTrackingService.ACTION_STOP_LOCAL),
-        )
-    }
-
     internal fun update(state: ProviderTrackingState) { _state.value = state }
 }

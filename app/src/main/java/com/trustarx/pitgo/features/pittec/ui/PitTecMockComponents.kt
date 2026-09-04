@@ -237,10 +237,13 @@ private fun LoadingRow(text: String) {
     }
 }
 
-/** Shared "1.234 m" / "1,2 km" wording used by every mocked distance readout. */
-@Composable
+/**
+ * Bare "540 m" / "7,4 km" distance value — every call site supplies its own label (e.g.
+ * "Distância restante: %s"), so this must not carry a prefix of its own (unlike
+ * R.string.mobile_dispatch_distance/service_map_distance, which already do).
+ */
 internal fun formatDistanceMeters(meters: Int): String = if (meters < 1000) {
-    stringResource(R.string.service_map_distance, meters)
+    "$meters m"
 } else {
-    stringResource(R.string.mobile_dispatch_distance, meters / 1000.0)
+    String.format(Locale.forLanguageTag("pt-BR"), "%.1f km", meters / 1000.0)
 }
