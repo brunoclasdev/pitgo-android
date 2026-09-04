@@ -49,12 +49,12 @@ import coil3.compose.AsyncImage
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.account.model.Profile
 import com.trustarx.pitgo.core.catalog.model.HomeService
-import com.trustarx.pitgo.core.design.theme.PitGoElevation
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 import com.trustarx.pitgo.core.ui.BottomItemId
 import com.trustarx.pitgo.core.ui.PitGoBottomNavigation
 import com.trustarx.pitgo.core.ui.PitGoBottomNavigationItems
+import com.trustarx.pitgo.core.ui.PitGoOutlinedCard
 import com.trustarx.pitgo.core.vehicle.model.Vehicle
 import com.trustarx.pitgo.features.clientaddress.model.ClientAddress
 import com.trustarx.pitgo.features.home.model.HomeDiagnosticPrompt
@@ -247,12 +247,8 @@ private fun HomeHeader(profile: Profile) {
 
 @Composable
 private fun VehicleCard(vehicle: Vehicle) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = PitGoElevation.Card),
-    ) {
+    PitGoOutlinedCard {
         Row(
-            modifier = Modifier.padding(PitGoSpacing.Medium),
             horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -269,16 +265,11 @@ private fun VehicleCard(vehicle: Vehicle) {
 
 @Composable
 private fun NoVehicleCard(onOpenGarage: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(PitGoSpacing.Medium),
-            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
-        ) {
-            Text(stringResource(R.string.home_no_vehicle_title), style = MaterialTheme.typography.titleMedium)
-            Text(stringResource(R.string.home_no_vehicle_message), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Button(onClick = onOpenGarage, modifier = Modifier.sizeIn(minHeight = PitGoSize.MinimumTouchTarget)) {
-                Text(stringResource(R.string.home_open_garage))
-            }
+    PitGoOutlinedCard {
+        Text(stringResource(R.string.home_no_vehicle_title), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.home_no_vehicle_message), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Button(onClick = onOpenGarage, modifier = Modifier.sizeIn(minHeight = PitGoSize.MinimumTouchTarget)) {
+            Text(stringResource(R.string.home_open_garage))
         }
     }
 }
@@ -309,21 +300,18 @@ private fun AddressRow(address: ClientAddress?, onClick: () -> Unit) {
 
 @Composable
 fun ServiceCard(service: HomeService, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Card(
+    PitGoOutlinedCard(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth().sizeIn(minHeight = PitGoSize.MinimumTouchTarget),
-        elevation = CardDefaults.cardElevation(defaultElevation = PitGoElevation.Card),
+        modifier = modifier.sizeIn(minHeight = PitGoSize.MinimumTouchTarget),
     ) {
-        Column(modifier = Modifier.padding(PitGoSpacing.Medium)) {
-            IconContainer(R.drawable.ic_service_mechanic)
-            Spacer(Modifier.height(PitGoSpacing.Medium))
-            Text(service.name, style = MaterialTheme.typography.titleMedium)
-            Text(
-                service.minimumPrice?.let { stringResource(R.string.service_map_price, it) }
-                    ?: service.categoryName,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        IconContainer(R.drawable.ic_service_mechanic)
+        Spacer(Modifier.height(PitGoSpacing.Medium))
+        Text(service.name, style = MaterialTheme.typography.titleMedium)
+        Text(
+            service.minimumPrice?.let { stringResource(R.string.service_map_price, it) }
+                ?: service.categoryName,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

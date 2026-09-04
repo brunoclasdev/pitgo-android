@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
+import com.trustarx.pitgo.core.ui.PitGoOutlinedCard
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchAction
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchPhase
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchStatus
@@ -79,23 +80,14 @@ internal fun DispatchOverlay(
     }
 }
 
-/**
- * White/surface fill with a purple border — every PitTec card uses this outlined style instead of
- * the plain Material default, which renders as a flat gray tonal surface.
- */
+/** Every PitTec overlay card shares the app's standard outlined margin/padding. */
 @Composable
 private fun PitTecOutlinedCard(modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-        modifier = modifier.fillMaxWidth().padding(PitGoSpacing.Medium),
-    ) {
-        Column(
-            Modifier.padding(PitGoSpacing.Large),
-            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
-            content = content,
-        )
-    }
+    PitGoOutlinedCard(
+        modifier = modifier.padding(PitGoSpacing.Medium),
+        contentPadding = PitGoSpacing.Large,
+        content = content,
+    )
 }
 
 @Composable

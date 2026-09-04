@@ -33,6 +33,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.design.theme.PitGoSize
+import com.trustarx.pitgo.core.ui.PitGoOutlinedCard
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 import com.trustarx.pitgo.features.pittec.model.MockSearch
 import com.trustarx.pitgo.features.pittec.model.MockSearchFeedback
@@ -46,24 +47,14 @@ import kotlin.coroutines.coroutineContext
 internal fun formatCents(cents: Long): String =
     NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")).format(cents / 100.0)
 
-/**
- * Every PitTec card uses the same outlined style — white/surface fill with a purple border,
- * never the plain Material default (which renders as a flat gray tonal surface) — so the design
- * stays consistent instead of mixing gray and purple containers on the same screen.
- */
+/** Every PitTec overlay card shares the app's standard outlined margin/padding. */
 @Composable
 private fun PitTecOutlinedCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-        modifier = modifier.fillMaxWidth().padding(PitGoSpacing.Medium),
-    ) {
-        Column(
-            Modifier.padding(PitGoSpacing.Large),
-            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
-            content = content,
-        )
-    }
+    PitGoOutlinedCard(
+        modifier = modifier.padding(PitGoSpacing.Medium),
+        contentPadding = PitGoSpacing.Large,
+        content = content,
+    )
 }
 
 /**
