@@ -497,7 +497,8 @@
     <string name="pittec_mock_locating">Obtendo sua localização…</string>
     <string name="pittec_mock_unavailable">Não foi possível obter sua localização agora.</string>
     <string name="pittec_mock_available_title">Disponível</string>
-    <string name="pittec_mock_available_hint">Você está disponível para receber uma solicitação simulada.</string>
+    <string name="pittec_mock_available_hint">Você está disponível para receber solicitações.</string>
+    <string name="pittec_home_unavailable_hint">Ative sua disponibilidade no Perfil para receber solicitações.</string>
     <string name="pittec_mock_simulate_request">Simular nova solicitação</string>
     <string name="pittec_mock_map_unavailable">Não foi possível carregar o mapa. As informações continuam abaixo.</string>
 

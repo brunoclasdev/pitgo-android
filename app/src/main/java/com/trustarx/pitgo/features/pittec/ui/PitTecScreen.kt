@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,11 +47,14 @@ import com.trustarx.pitgo.core.map.model.MapRenderModel
 import com.trustarx.pitgo.core.map.model.MapResourceState
 import com.trustarx.pitgo.core.map.model.MapStyleState
 import com.trustarx.pitgo.core.map.ui.MapLibreMapHost
+import com.trustarx.pitgo.core.design.theme.PitGoSize
+import com.trustarx.pitgo.features.pittec.model.DistancePerimeter
 import com.trustarx.pitgo.features.pittec.model.PitTecAppointmentStatus
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchPhase
 import com.trustarx.pitgo.features.pittec.model.PitTecDiscoveryState
 import com.trustarx.pitgo.features.pittec.model.PitTecLocationState
 import com.trustarx.pitgo.features.pittec.model.PitTecUiState
+import com.trustarx.pitgo.features.pittec.model.ServiceEstimate
 import com.trustarx.pitgo.features.pittec.viewmodel.PitTecViewModel
 
 @Composable
@@ -191,7 +195,7 @@ private fun PitTecScreen(
                     ) { Text(stringResource(R.string.service_map_my_location)) }
                 }
             }
-            DispatchOverlay(
+            EstimateGatedDispatchOverlay(
                 phase = state.dispatch,
                 onRequestPitTec = onRequestPitTec,
                 onCancelSearch = onCancelSearch,
@@ -232,5 +236,41 @@ private fun DiscoveryStateBanner(
                 Text(stringResource(R.string.map_retry))
             }
         }
+    }
+}
+
+/**
+ * Adds a fixed-perimeter cost estimate step in front of the real dispatch flow — PitTec has no
+ * real price in the backend, so this figure is a placeholder only (see EstimateCard). Every state
+ * from "Buscar PitTec" onward (searching, awaiting response, found, empty, failure) is the
+ * existing real [DispatchOverlay], unchanged: real search, real candidate, real acceptance.
+ */
+@Composable
+private fun EstimateGatedDispatchOverlay(
+    phase: PitTecDispatchPhase,
+    onRequestPitTec: () -> Unit,
+    onCancelSearch: () -> Unit,
+    onRetryDispatch: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (phase != PitTecDispatchPhase.None) {
+        DispatchOverlay(phase, onRequestPitTec, onCancelSearch, onRetryDispatch, modifier)
+        return
+    }
+    var estimateVisible by remember { mutableStateOf(false) }
+    if (estimateVisible) {
+        EstimateCard(
+            estimate = ServiceEstimate(DistancePerimeter(5)),
+            confirmEnabled = true,
+            onConfirm = { estimateVisible = false; onRequestPitTec() },
+            onDismiss = { estimateVisible = false },
+            modifier = modifier,
+        )
+    } else {
+        Button(
+            onClick = { estimateVisible = true },
+            modifier = modifier.fillMaxWidth().padding(PitGoSpacing.Medium)
+                .heightIn(min = PitGoSize.PrimaryActionMinHeight),
+        ) { Text(stringResource(R.string.pittec_mock_search_cta)) }
     }
 }

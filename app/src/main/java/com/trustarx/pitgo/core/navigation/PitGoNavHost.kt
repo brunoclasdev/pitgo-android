@@ -77,7 +77,9 @@ import com.trustarx.pitgo.features.mobiledispatch.viewmodel.DispatchResumeState
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus
 import com.trustarx.pitgo.features.pittec.model.PitTecAppointmentStatus
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchStatus
+import com.trustarx.pitgo.features.pittec.ui.PitTecProviderDashboardRoute
 import com.trustarx.pitgo.features.pittec.ui.PitTecRoute
+import com.trustarx.pitgo.features.pittec.viewmodel.PitTecProviderViewModel
 import com.trustarx.pitgo.features.pittec.viewmodel.PitTecResumeState
 import com.trustarx.pitgo.features.pittec.viewmodel.PitTecResumeViewModel
 import com.trustarx.pitgo.features.pittec.viewmodel.PitTecViewModel
@@ -622,11 +624,34 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         container.providerIncomingRequestNotifier,
                     ),
                 )
-                ProviderDashboardRoute(
-                    viewModel = dashboardViewModel,
-                    onLogout = sessionViewModel::logout,
-                    onOpenIncomingRequest = { navController.navigate(PitGoRoutes.providerRequest(it)) },
-                )
+                if (account.locationMode == ProviderLocationMode.PITTEC) {
+                    // Real data end to end (offer/accept/decline/tracking); only the price shown
+                    // on this new layout is a fixed placeholder — PitTec has no real price.
+                    val pitTecHomeViewModel: PitTecProviderViewModel = viewModel(
+                        factory = PitTecProviderViewModel.factory(container.deviceLocationRepository),
+                    )
+                    val incomingViewModel: ProviderIncomingRequestViewModel = viewModel(
+                        factory = ProviderIncomingRequestViewModel.factory(
+                            account.providerId, container.mobileDispatchRepository,
+                            container.appointmentTrackingRepository,
+                        ),
+                    )
+                    PitTecProviderDashboardRoute(
+                        dashboardViewModel = dashboardViewModel,
+                        homeViewModel = pitTecHomeViewModel,
+                        incomingViewModel = incomingViewModel,
+                        onLogout = sessionViewModel::logout,
+                        onOpenTracking = {
+                            navController.navigate(PitGoRoutes.appointmentTracking(it)) { launchSingleTop = true }
+                        },
+                    )
+                } else {
+                    ProviderDashboardRoute(
+                        viewModel = dashboardViewModel,
+                        onLogout = sessionViewModel::logout,
+                        onOpenIncomingRequest = { navController.navigate(PitGoRoutes.providerRequest(it)) },
+                    )
+                }
             }
         }
 

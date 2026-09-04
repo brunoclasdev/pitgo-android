@@ -4,12 +4,19 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -17,14 +24,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -33,49 +47,75 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.MotionDurationScale
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.trustarx.pitgo.R
+import com.trustarx.pitgo.core.account.model.ProviderLocationMode
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 import com.trustarx.pitgo.core.map.config.PitGoManagedMapStyle
 import com.trustarx.pitgo.core.map.model.MapMarkerKind
 import com.trustarx.pitgo.core.map.model.MapMarkerSpec
 import com.trustarx.pitgo.core.map.model.MapRenderModel
+import com.trustarx.pitgo.core.map.model.MapSurfaceState
 import com.trustarx.pitgo.core.map.model.MapViewport
 import com.trustarx.pitgo.core.map.ui.MapLibreMapHost
 import com.trustarx.pitgo.core.map.ui.ParticipantMapStyleController
 import com.trustarx.pitgo.core.ui.BottomItemId
 import com.trustarx.pitgo.core.ui.PitGoBottomNavigation
 import com.trustarx.pitgo.core.ui.PitTecBottomNavigationItems
-import com.trustarx.pitgo.features.pittec.model.MockAppointment
+import com.trustarx.pitgo.features.mobiledispatch.model.DispatchPendingAction
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchKind
+import com.trustarx.pitgo.features.mobiledispatch.model.PendingDispatchAction
+import com.trustarx.pitgo.features.mobiledispatch.model.PitTecOfferSummary
+import com.trustarx.pitgo.features.mobiledispatch.model.ProviderIncomingUiState
+import com.trustarx.pitgo.features.mobiledispatch.viewmodel.ProviderIncomingRequestViewModel
+import com.trustarx.pitgo.features.pittec.model.DistancePerimeter
 import com.trustarx.pitgo.features.pittec.model.PitTecBottomTab
-import com.trustarx.pitgo.features.pittec.model.PitTecProviderMockUiState
-import com.trustarx.pitgo.features.pittec.model.PitTecProviderStage
 import com.trustarx.pitgo.features.pittec.model.ProviderLocationGate
-import com.trustarx.pitgo.features.pittec.viewmodel.PitTecProviderMockViewModel
-import java.text.DateFormat
-import java.util.Date
+import com.trustarx.pitgo.features.pittec.model.ServiceEstimate
+import com.trustarx.pitgo.features.pittec.viewmodel.PitTecHomeUiState
+import com.trustarx.pitgo.features.pittec.viewmodel.PitTecProviderViewModel
+import com.trustarx.pitgo.features.providerdashboard.model.ProviderAvailabilityIssue
+import com.trustarx.pitgo.features.providerdashboard.model.ProviderDashboardUiState
+import com.trustarx.pitgo.features.providerdashboard.viewmodel.ProviderDashboardViewModel
 
 /**
- * Mocked PitTec provider shell: location-gated Home/alert (US1), participant tracking (US3),
- * bilateral confirmations (US4) and the four-tab bottom navigation (US5). See
- * contracts/provider-pittec-ui.md. Never instantiates the real ProviderDashboardViewModel/repos.
+ * PitTec provider Home/alert/bottom-navigation shell (US1/US5 layout) backed entirely by real
+ * data: [ProviderDashboardViewModel] (availability, mode, profile — unchanged real RPCs),
+ * [PitTecProviderViewModel] (real device-location gate) and [ProviderIncomingRequestViewModel]
+ * (real offer/accept/decline, already used by the existing ProviderRequest route). Only the
+ * price/"Valores" figures are a fixed placeholder — PitTec has no real price in the backend.
  */
 @Composable
 fun PitTecProviderDashboardRoute(
-    viewModel: PitTecProviderMockViewModel,
+    dashboardViewModel: ProviderDashboardViewModel,
+    homeViewModel: PitTecProviderViewModel,
+    incomingViewModel: ProviderIncomingRequestViewModel,
     onLogout: () -> Unit,
+    onOpenTracking: (String) -> Unit,
 ) {
-    val state by viewModel.state.collectAsStateWithLifecycle()
+    val dashboardState by dashboardViewModel.state.collectAsStateWithLifecycle()
+    val homeState by homeViewModel.state.collectAsStateWithLifecycle()
+    val incomingState by incomingViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    val activeAppointmentId = (incomingState as? ProviderIncomingUiState.Active)
+        ?.snapshot?.appointment
+        ?.takeIf { it.status in setOf(MobileAppointmentStatus.ACCEPTED, MobileAppointmentStatus.IN_PROGRESS) }
+        ?.id
+    LaunchedEffect(activeAppointmentId) { activeAppointmentId?.let(onOpenTracking) }
+
     val locationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
         val hasFine = result[Manifest.permission.ACCESS_FINE_LOCATION] == true
         val hasCoarse = hasFine || result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        viewModel.onPermissionChecked(hasFine, hasCoarse)
+        homeViewModel.onPermissionChecked(hasFine, hasCoarse)
     }
     LifecycleStartEffect(Unit) {
         val hasFine = ContextCompat.checkSelfPermission(
@@ -84,15 +124,41 @@ fun PitTecProviderDashboardRoute(
         val hasCoarse = hasFine || ContextCompat.checkSelfPermission(
             context, Manifest.permission.ACCESS_COARSE_LOCATION,
         ) == PackageManager.PERMISSION_GRANTED
-        viewModel.onPermissionChecked(hasFine, hasCoarse)
-        viewModel.onVisible()
-        onStopOrDispose { viewModel.onHidden() }
+        homeViewModel.onPermissionChecked(hasFine, hasCoarse)
+        homeViewModel.onVisible()
+        onStopOrDispose { homeViewModel.onHidden() }
     }
+
+    var ignoringBatteryOptimizations by remember { mutableStateOf(true) }
+    LifecycleStartEffect(Unit) {
+        ignoringBatteryOptimizations = isIgnoringBatteryOptimizations(context)
+        onStopOrDispose {}
+    }
+    val batteryOptimizationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { ignoringBatteryOptimizations = isIgnoringBatteryOptimizations(context) }
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { dashboardViewModel.enableTrackedAvailability(ProviderLocationMode.PITTEC) }
+    val availabilityPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        if (result[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+            if (Build.VERSION.SDK_INT >= 33) {
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                dashboardViewModel.enableTrackedAvailability(ProviderLocationMode.PITTEC)
+            }
+        } else dashboardViewModel.onPrecisePermissionDenied()
+    }
+
     PitTecProviderDashboardScreen(
-        state = state,
+        dashboardState = dashboardState,
+        homeState = homeState,
+        incomingState = incomingState,
         styleController = remember { ParticipantMapStyleController() },
         onLogout = onLogout,
-        onGrantPermission = {
+        onGrantLocationPermission = {
             locationPermission.launch(
                 arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION),
             )
@@ -103,77 +169,107 @@ fun PitTecProviderDashboardRoute(
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")),
             )
         },
-        onRetryLocation = viewModel::retryLocation,
-        onSimulateRequest = viewModel::onSimulateRequest,
-        onPulseStarted = viewModel::onPulseEffectStarted,
-        onAccept = viewModel::onAccept,
-        onDecline = viewModel::onDecline,
-        onTabSelected = viewModel::onTabSelected,
-        onViewportIdle = viewModel::onViewportIdle,
-        onSurfaceState = viewModel::onSurfaceState,
-        onRetryStyle = viewModel::retryStyle,
-        onRecenter = viewModel::onRecenter,
-        onMeetingConfirmed = viewModel::onMeetingConfirmed,
-        onCompletionConfirmed = viewModel::onCompletionConfirmed,
-        onReturnToAvailable = viewModel::onReturnToAvailable,
+        onRetryLocation = homeViewModel::retryLocation,
+        onTabSelected = homeViewModel::onTabSelected,
+        onViewportIdle = homeViewModel::onViewportIdle,
+        onSurfaceState = homeViewModel::onSurfaceState,
+        onRetryStyle = homeViewModel::retryStyle,
+        onAccept = incomingViewModel::accept,
+        onDecline = incomingViewModel::decline,
+        onAvailabilityChanged = { available ->
+            if (available) {
+                availabilityPermission.launch(
+                    arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION),
+                )
+            } else dashboardViewModel.setAvailability(false)
+        },
+        onOpenNotificationSettings = {
+            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            } else {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
+            }
+            context.startActivity(intent)
+            dashboardViewModel.clearAvailabilityIssue()
+        },
+        showBatteryOptimizationBanner = !ignoringBatteryOptimizations,
+        onRequestBatteryExemption = {
+            batteryOptimizationLauncher.launch(
+                Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:${context.packageName}"),
+                ),
+            )
+        },
     )
+}
+
+private fun isIgnoringBatteryOptimizations(context: android.content.Context): Boolean {
+    val powerManager = context.getSystemService(android.content.Context.POWER_SERVICE) as? PowerManager
+        ?: return true
+    return powerManager.isIgnoringBatteryOptimizations(context.packageName)
 }
 
 @Composable
 private fun PitTecProviderDashboardScreen(
-    state: PitTecProviderMockUiState,
+    dashboardState: ProviderDashboardUiState,
+    homeState: PitTecHomeUiState,
+    incomingState: ProviderIncomingUiState,
     styleController: ParticipantMapStyleController,
     onLogout: () -> Unit,
-    onGrantPermission: () -> Unit,
+    onGrantLocationPermission: () -> Unit,
     onOpenLocationSettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
     onRetryLocation: () -> Unit,
-    onSimulateRequest: () -> Unit,
-    onPulseStarted: () -> Unit,
-    onAccept: () -> Unit,
-    onDecline: () -> Unit,
     onTabSelected: (PitTecBottomTab) -> Unit,
     onViewportIdle: (MapViewport) -> Unit,
-    onSurfaceState: (com.trustarx.pitgo.core.map.model.MapSurfaceState) -> Unit,
+    onSurfaceState: (MapSurfaceState) -> Unit,
     onRetryStyle: () -> Unit,
-    onRecenter: () -> Unit,
-    onMeetingConfirmed: () -> Unit,
-    onCompletionConfirmed: () -> Unit,
-    onReturnToAvailable: () -> Unit,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit,
+    onAvailabilityChanged: (Boolean) -> Unit,
+    onOpenNotificationSettings: () -> Unit,
+    showBatteryOptimizationBanner: Boolean,
+    onRequestBatteryExemption: () -> Unit,
 ) {
     Scaffold(
         bottomBar = {
             PitGoBottomNavigation(
                 items = PitTecBottomNavigationItems,
-                selectedItem = state.selectedTab.toBottomItemId(),
+                selectedItem = homeState.selectedTab.toBottomItemId(),
                 onItemClick = { onTabSelected(it.toPitTecTab()) },
             )
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            when (state.selectedTab) {
+            when (homeState.selectedTab) {
                 PitTecBottomTab.MAP -> MapTab(
-                    state = state,
+                    homeState = homeState,
+                    incomingState = incomingState,
                     styleController = styleController,
-                    onGrantPermission = onGrantPermission,
+                    onGrantLocationPermission = onGrantLocationPermission,
                     onOpenLocationSettings = onOpenLocationSettings,
                     onOpenAppSettings = onOpenAppSettings,
                     onRetryLocation = onRetryLocation,
-                    onSimulateRequest = onSimulateRequest,
-                    onPulseStarted = onPulseStarted,
-                    onAccept = onAccept,
-                    onDecline = onDecline,
                     onViewportIdle = onViewportIdle,
                     onSurfaceState = onSurfaceState,
                     onRetryStyle = onRetryStyle,
-                    onRecenter = onRecenter,
-                    onMeetingConfirmed = onMeetingConfirmed,
-                    onCompletionConfirmed = onCompletionConfirmed,
-                    onReturnToAvailable = onReturnToAvailable,
+                    onAccept = onAccept,
+                    onDecline = onDecline,
+                    isAvailable = (dashboardState as? ProviderDashboardUiState.Content)?.provider?.available == true,
                 )
-                PitTecBottomTab.RIDE_DATA -> RideDataTab(state.currentOrLastAppointment)
-                PitTecBottomTab.VALUES -> ValuesTab(state.currentOrLastAppointment)
-                PitTecBottomTab.PROFILE -> ProfileTab(state.provider.displayName, onLogout)
+                PitTecBottomTab.RIDE_DATA -> RideDataTab(incomingState)
+                PitTecBottomTab.VALUES -> ValuesTab(incomingState)
+                PitTecBottomTab.PROFILE -> ProfileTab(
+                    state = dashboardState,
+                    onAvailabilityChanged = onAvailabilityChanged,
+                    onOpenLocationSettings = onOpenLocationSettings,
+                    onOpenNotificationSettings = onOpenNotificationSettings,
+                    showBatteryOptimizationBanner = showBatteryOptimizationBanner,
+                    onRequestBatteryExemption = onRequestBatteryExemption,
+                    onLogout = onLogout,
+                )
             }
         }
     }
@@ -195,25 +291,21 @@ private fun BottomItemId.toPitTecTab(): PitTecBottomTab = when (this) {
 
 @Composable
 private fun MapTab(
-    state: PitTecProviderMockUiState,
+    homeState: PitTecHomeUiState,
+    incomingState: ProviderIncomingUiState,
     styleController: ParticipantMapStyleController,
-    onGrantPermission: () -> Unit,
+    onGrantLocationPermission: () -> Unit,
     onOpenLocationSettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
     onRetryLocation: () -> Unit,
-    onSimulateRequest: () -> Unit,
-    onPulseStarted: () -> Unit,
+    onViewportIdle: (MapViewport) -> Unit,
+    onSurfaceState: (MapSurfaceState) -> Unit,
+    onRetryStyle: () -> Unit,
     onAccept: () -> Unit,
     onDecline: () -> Unit,
-    onViewportIdle: (MapViewport) -> Unit,
-    onSurfaceState: (com.trustarx.pitgo.core.map.model.MapSurfaceState) -> Unit,
-    onRetryStyle: () -> Unit,
-    onRecenter: () -> Unit,
-    onMeetingConfirmed: () -> Unit,
-    onCompletionConfirmed: () -> Unit,
-    onReturnToAvailable: () -> Unit,
+    isAvailable: Boolean,
 ) {
-    when (val gate = state.locationGate) {
+    when (val gate = homeState.locationGate) {
         ProviderLocationGate.CheckingPermission -> LocationGateMessage(
             message = stringResource(R.string.pittec_mock_checking_permission),
             loading = true,
@@ -221,7 +313,7 @@ private fun MapTab(
         ProviderLocationGate.PermissionRequired -> LocationGateMessage(
             message = stringResource(R.string.pittec_mock_permission_required),
             actionLabel = stringResource(R.string.pittec_mock_grant_permission),
-            onAction = onGrantPermission,
+            onAction = onGrantLocationPermission,
         )
         ProviderLocationGate.ApproximateOnly -> LocationGateMessage(
             message = stringResource(R.string.pittec_mock_approximate_only),
@@ -242,95 +334,22 @@ private fun MapTab(
             actionLabel = stringResource(R.string.action_retry),
             onAction = onRetryLocation,
         )
-        is ProviderLocationGate.Ready -> ReadyMapContent(
-            state = state,
-            deviceCoordinate = gate.deviceLocation.coordinate,
-            styleController = styleController,
-            onSimulateRequest = onSimulateRequest,
-            onPulseStarted = onPulseStarted,
-            onAccept = onAccept,
-            onDecline = onDecline,
-            onViewportIdle = onViewportIdle,
-            onSurfaceState = onSurfaceState,
-            onRetryStyle = onRetryStyle,
-            onRecenter = onRecenter,
-            onMeetingConfirmed = onMeetingConfirmed,
-            onCompletionConfirmed = onCompletionConfirmed,
-            onReturnToAvailable = onReturnToAvailable,
-        )
-    }
-}
-
-@Composable
-private fun ReadyMapContent(
-    state: PitTecProviderMockUiState,
-    deviceCoordinate: com.trustarx.pitgo.core.map.model.MapCoordinate,
-    styleController: ParticipantMapStyleController,
-    onSimulateRequest: () -> Unit,
-    onPulseStarted: () -> Unit,
-    onAccept: () -> Unit,
-    onDecline: () -> Unit,
-    onViewportIdle: (MapViewport) -> Unit,
-    onSurfaceState: (com.trustarx.pitgo.core.map.model.MapSurfaceState) -> Unit,
-    onRetryStyle: () -> Unit,
-    onRecenter: () -> Unit,
-    onMeetingConfirmed: () -> Unit,
-    onCompletionConfirmed: () -> Unit,
-    onReturnToAvailable: () -> Unit,
-) {
-    when (val stage = state.stage) {
-        is PitTecProviderStage.Tracking -> PitTecMockTrackingContent(
-            appointment = stage.appointment,
-            isClientViewer = false,
-            viewport = state.viewport,
-            cameraCommand = state.cameraCommand,
-            styleReloadRevision = state.styleReloadRevision,
-            surfaceState = state.surfaceState,
-            onViewportIdle = onViewportIdle,
-            onSurfaceState = onSurfaceState,
-            onRetryStyle = onRetryStyle,
-            onRecenter = onRecenter,
-            onMeetingConfirmed = onMeetingConfirmed,
-            onCompletionConfirmed = onCompletionConfirmed,
-            completedActionLabel = stringResource(R.string.pittec_mock_back_to_map),
-            onCompletedAction = onReturnToAvailable,
-            styleController = styleController,
-        )
-        is PitTecProviderStage.Completed -> PitTecMockTrackingContent(
-            appointment = stage.appointment,
-            isClientViewer = false,
-            viewport = state.viewport,
-            cameraCommand = state.cameraCommand,
-            styleReloadRevision = state.styleReloadRevision,
-            surfaceState = state.surfaceState,
-            onViewportIdle = onViewportIdle,
-            onSurfaceState = onSurfaceState,
-            onRetryStyle = onRetryStyle,
-            onRecenter = onRecenter,
-            onMeetingConfirmed = onMeetingConfirmed,
-            onCompletionConfirmed = onCompletionConfirmed,
-            completedActionLabel = stringResource(R.string.pittec_mock_back_to_map),
-            onCompletedAction = onReturnToAvailable,
-            styleController = styleController,
-        )
-        PitTecProviderStage.Available,
-        is PitTecProviderStage.IncomingRequest,
-        -> Box(Modifier.fillMaxSize()) {
+        is ProviderLocationGate.Ready -> Box(Modifier.fillMaxSize()) {
             MapLibreMapHost(
                 configuration = PitGoManagedMapStyle.configuration,
                 renderModel = MapRenderModel(
                     listOf(
                         MapMarkerSpec(
-                            id = "pittec-mock-self",
-                            coordinate = deviceCoordinate,
+                            id = "pittec-self",
+                            coordinate = gate.deviceLocation.coordinate,
                             kind = MapMarkerKind.LIVE,
                             accessibilityLabel = stringResource(R.string.pittec_mock_available_title),
                         ),
                     ),
                 ),
-                viewport = MapViewport(deviceCoordinate, 15.0),
+                viewport = MapViewport(gate.deviceLocation.coordinate, 15.0),
                 cameraCommand = null,
-                styleReloadRevision = state.styleReloadRevision,
+                styleReloadRevision = homeState.styleReloadRevision,
                 online = true,
                 styleController = styleController,
                 onViewportIdle = onViewportIdle,
@@ -342,12 +361,13 @@ private fun ReadyMapContent(
                 modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(PitGoSpacing.Small),
                 verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
             ) {
-                if (stage is PitTecProviderStage.IncomingRequest) {
-                    IncomingRequestCard(
-                        request = stage.request,
-                        pulseConsumed = stage.request.pulseConsumed,
-                        responded = false,
-                        onPulseStarted = onPulseStarted,
+                val request = (incomingState as? ProviderIncomingUiState.Request)
+                    ?.takeIf { it.snapshot.dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL }
+                if (request != null) {
+                    RealIncomingRequestCard(
+                        offer = request.snapshot.offer,
+                        revision = request.snapshot.revision,
+                        pending = request.pending,
                         onAccept = onAccept,
                         onDecline = onDecline,
                     )
@@ -362,24 +382,105 @@ private fun ReadyMapContent(
                             verticalArrangement = Arrangement.spacedBy(PitGoSpacing.ExtraSmall),
                         ) {
                             Text(
-                                stringResource(R.string.pittec_mock_available_title),
+                                stringResource(
+                                    if (isAvailable) R.string.pittec_mock_available_title else R.string.provider_dashboard_available_off,
+                                ),
                                 style = MaterialTheme.typography.titleMedium,
                                 modifier = Modifier.semantics { heading() },
                             )
-                            Text(stringResource(R.string.pittec_mock_available_hint))
+                            Text(
+                                stringResource(
+                                    if (isAvailable) R.string.pittec_mock_available_hint else R.string.pittec_home_unavailable_hint,
+                                ),
+                            )
                         }
                     }
                 }
             }
-            if (stage is PitTecProviderStage.Available) {
+        }
+    }
+}
+
+/**
+ * Purple pulse card sourced from the real [PitTecOfferSummary] (approximate distance/region —
+ * PitTec never reveals the client's identity/exact position before acceptance, see
+ * contracts/pittec-rpcs.md). The total shown is a fixed placeholder: PitTec has no real price.
+ */
+@Composable
+private fun RealIncomingRequestCard(
+    offer: PitTecOfferSummary?,
+    revision: Long,
+    pending: DispatchPendingAction?,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit,
+) {
+    val pulseAlpha = remember(revision) { Animatable(0f) }
+    LaunchedEffect(revision) {
+        val scaleFactor = kotlin.coroutines.coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f
+        if (scaleFactor == 0f) return@LaunchedEffect
+        repeat(3) {
+            pulseAlpha.animateTo(1f, tween(350))
+            pulseAlpha.animateTo(0f, tween(350))
+        }
+    }
+    val purple = MaterialTheme.colorScheme.primary
+    val mockEstimate = ServiceEstimate(
+        DistancePerimeter(bandedKilometers(offer?.approximateDistanceMeters)),
+    )
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        border = BorderStroke(2.dp, purple),
+        modifier = Modifier.fillMaxWidth()
+            .background(purple.copy(alpha = pulseAlpha.value * 0.25f))
+            .semantics { liveRegion = LiveRegionMode.Assertive },
+    ) {
+        Column(
+            Modifier.padding(PitGoSpacing.Large),
+            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
+        ) {
+            Text(
+                stringResource(R.string.pittec_mock_incoming_heading),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() },
+            )
+            offer?.region?.takeIf { it.isNotBlank() }?.let { Text(it) }
+            offer?.let {
+                Text(
+                    stringResource(
+                        R.string.pittec_mock_incoming_distance,
+                        formatDistanceMeters(it.approximateDistanceMeters),
+                    ),
+                )
+            }
+            Text(
+                stringResource(R.string.pittec_mock_incoming_total, formatCents(mockEstimate.totalCents)),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
+                OutlinedButton(
+                    onClick = onDecline,
+                    enabled = pending == null,
+                    modifier = Modifier.weight(1f).heightIn(min = PitGoSize.MinimumTouchTarget),
+                ) { Text(stringResource(R.string.pittec_mock_decline)) }
                 Button(
-                    onClick = onSimulateRequest,
-                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                        .padding(PitGoSpacing.Medium).heightIn(min = PitGoSize.PrimaryActionMinHeight),
-                ) { Text(stringResource(R.string.pittec_mock_simulate_request)) }
+                    onClick = onAccept,
+                    enabled = pending == null,
+                    modifier = Modifier.weight(1f).heightIn(min = PitGoSize.MinimumTouchTarget),
+                ) {
+                    if (pending?.kind == PendingDispatchAction.ACCEPT) {
+                        CircularProgressIndicator(Modifier.heightIn(max = PitGoSize.NavigationIcon))
+                    } else Text(stringResource(R.string.pittec_mock_accept))
+                }
             }
         }
     }
+}
+
+/** Bands a real approximate distance into the same 5 km buckets the mocked pricing uses. */
+private fun bandedKilometers(approximateDistanceMeters: Int?): Int {
+    val km = ((approximateDistanceMeters ?: 0) / 1000.0)
+    val banded = (kotlin.math.ceil(km / 5.0) * 5).toInt()
+    return banded.coerceAtLeast(5)
 }
 
 @Composable
@@ -405,7 +506,7 @@ private fun LocationGateMessage(
 }
 
 @Composable
-private fun RideDataTab(appointment: MockAppointment?) {
+private fun RideDataTab(incomingState: ProviderIncomingUiState) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PitGoSpacing.Large),
         verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
@@ -415,32 +516,31 @@ private fun RideDataTab(appointment: MockAppointment?) {
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.semantics { heading() },
         )
-        if (appointment == null) {
+        val snapshot = when (incomingState) {
+            is ProviderIncomingUiState.Request -> incomingState.snapshot
+            is ProviderIncomingUiState.Active -> incomingState.snapshot
+            else -> null
+        }?.takeIf { it.dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL }
+        if (snapshot?.appointment == null) {
             Text(stringResource(R.string.pittec_mock_ride_data_empty))
         } else {
-            Text(stringResource(R.string.pittec_mock_ride_data_client, appointment.client.displayName))
-            Text(stringResource(R.string.pittec_mock_ride_data_provider, appointment.provider.displayName))
-            Text(stringResource(R.string.pittec_mock_ride_data_perimeter, appointment.estimate.perimeter.kilometers))
-            Text(
-                stringResource(
-                    R.string.pittec_mock_ride_data_distance,
-                    formatDistanceMeters(appointment.remainingDistanceMeters),
-                ),
-            )
-            Text(stringResource(R.string.pittec_mock_ride_data_state, stringResource(statusLabel(appointment.status))))
-            Text(stringResource(R.string.pittec_mock_ride_data_accepted_at, timeOf(appointment.acceptedAtEpochMillis)))
-            appointment.startedAtEpochMillis?.let {
-                Text(stringResource(R.string.pittec_mock_ride_data_started_at, timeOf(it)))
+            Text(snapshot.serviceName, style = MaterialTheme.typography.titleMedium)
+            snapshot.offer?.region?.takeIf { it.isNotBlank() }?.let { Text(it) }
+            snapshot.offer?.let {
+                Text(
+                    stringResource(
+                        R.string.pittec_mock_ride_data_distance,
+                        formatDistanceMeters(it.approximateDistanceMeters),
+                    ),
+                )
             }
-            appointment.completedAtEpochMillis?.let {
-                Text(stringResource(R.string.pittec_mock_ride_data_completed_at, timeOf(it)))
-            }
+            Text(stringResource(R.string.pittec_mock_ride_data_state, snapshot.appointment.status.name))
         }
     }
 }
 
 @Composable
-private fun ValuesTab(appointment: MockAppointment?) {
+private fun ValuesTab(incomingState: ProviderIncomingUiState) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PitGoSpacing.Large),
         verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
@@ -450,10 +550,16 @@ private fun ValuesTab(appointment: MockAppointment?) {
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.semantics { heading() },
         )
-        if (appointment == null) {
+        val snapshot = when (incomingState) {
+            is ProviderIncomingUiState.Request -> incomingState.snapshot
+            is ProviderIncomingUiState.Active -> incomingState.snapshot
+            else -> null
+        }?.takeIf { it.dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL }
+        if (snapshot?.appointment == null) {
             Text(stringResource(R.string.pittec_mock_values_empty))
         } else {
-            val estimate = appointment.estimate
+            // PitTec has no real price in the backend — this is a fixed placeholder only.
+            val estimate = ServiceEstimate(DistancePerimeter(bandedKilometers(snapshot.offer?.approximateDistanceMeters)))
             Text(stringResource(R.string.pittec_mock_values_fixed, formatCents(estimate.fixedCents)))
             Text(
                 stringResource(
@@ -471,7 +577,15 @@ private fun ValuesTab(appointment: MockAppointment?) {
 }
 
 @Composable
-private fun ProfileTab(providerName: String, onLogout: () -> Unit) {
+private fun ProfileTab(
+    state: ProviderDashboardUiState,
+    onAvailabilityChanged: (Boolean) -> Unit,
+    onOpenLocationSettings: () -> Unit,
+    onOpenNotificationSettings: () -> Unit,
+    showBatteryOptimizationBanner: Boolean,
+    onRequestBatteryExemption: () -> Unit,
+    onLogout: () -> Unit,
+) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PitGoSpacing.Large),
         verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
@@ -481,13 +595,70 @@ private fun ProfileTab(providerName: String, onLogout: () -> Unit) {
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.semantics { heading() },
         )
-        Text(providerName, style = MaterialTheme.typography.titleMedium)
+        if (showBatteryOptimizationBanner) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Column(
+                    Modifier.padding(PitGoSpacing.Medium),
+                    verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
+                ) {
+                    Text(
+                        stringResource(R.string.provider_battery_optimization_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(stringResource(R.string.provider_battery_optimization_message))
+                    Button(onClick = onRequestBatteryExemption) {
+                        Text(stringResource(R.string.provider_battery_optimization_action))
+                    }
+                }
+            }
+        }
+        when (state) {
+            ProviderDashboardUiState.Loading -> Text(stringResource(R.string.session_verifying))
+            ProviderDashboardUiState.Failure -> Text(stringResource(R.string.signup_failure_service))
+            is ProviderDashboardUiState.Content -> {
+                Text(state.provider.name, style = MaterialTheme.typography.titleMedium)
+                Text(state.provider.email, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(R.string.provider_dashboard_available))
+                    Switch(
+                        checked = state.provider.available,
+                        onCheckedChange = onAvailabilityChanged,
+                        enabled = !state.updating,
+                    )
+                }
+                state.availabilityIssue?.let { issue ->
+                    Text(
+                        text = stringResource(
+                            when (issue) {
+                                ProviderAvailabilityIssue.PRECISE_PERMISSION_REQUIRED -> R.string.provider_availability_precise_required
+                                ProviderAvailabilityIssue.LOCATION_SERVICES_DISABLED -> R.string.provider_availability_location_disabled
+                                ProviderAvailabilityIssue.PRECISE_FIX_UNAVAILABLE -> R.string.provider_availability_fix_unavailable
+                                ProviderAvailabilityIssue.NOTIFICATIONS_REQUIRED -> R.string.pittec_notifications_required
+                                ProviderAvailabilityIssue.UPDATE_FAILED -> R.string.provider_availability_update_failed
+                            },
+                        ),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    if (issue == ProviderAvailabilityIssue.LOCATION_SERVICES_DISABLED) {
+                        Button(onClick = onOpenLocationSettings) {
+                            Text(stringResource(R.string.provider_availability_open_location_settings))
+                        }
+                    }
+                    if (issue == ProviderAvailabilityIssue.NOTIFICATIONS_REQUIRED) {
+                        Button(onClick = onOpenNotificationSettings) {
+                            Text(stringResource(R.string.pittec_open_notification_settings))
+                        }
+                    }
+                }
+            }
+        }
         Button(
             onClick = onLogout,
             modifier = Modifier.fillMaxWidth().heightIn(min = PitGoSize.PrimaryActionMinHeight),
         ) { Text(stringResource(R.string.action_logout)) }
     }
 }
-
-private fun timeOf(epochMillis: Long): String =
-    DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(epochMillis))
