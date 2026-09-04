@@ -56,6 +56,7 @@ class ProviderLocationTrackingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> stopTracking(updateAvailability = true)
+            ACTION_STOP_LOCAL -> stopLocally()
             ACTION_START, null -> startTracking()
         }
         return START_STICKY
@@ -241,6 +242,24 @@ class ProviderLocationTrackingService : Service() {
         }
     }
 
+    /**
+     * Local-only stop for the PitTec mocked prototype (specs/017-pittec-mocked-ui): cancels
+     * whatever legacy job/alert this service still owns without any RPC or remote availability
+     * mutation, so the mock flow never leaves the real dispatch stack half-running underneath it.
+     */
+    private fun stopLocally() {
+        val alreadyStopped = trackingJob == null && watchdogJob == null && incomingRequestJob == null
+        trackingJob?.cancel(); trackingJob = null
+        watchdogJob?.cancel(); watchdogJob = null
+        incomingRequestJob?.cancel(); incomingRequestJob = null
+        lastNotifiedOffer?.let { incomingRequestNotifier.cancel(it.first) }
+        lastNotifiedOffer = null
+        container.providerTrackingStateRepository.update(ProviderTrackingState.Stopped)
+        if (alreadyStopped) return
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     private fun degradeAndStop(reason: TrackingStopReason) {
         container.providerTrackingStateRepository.update(
             ProviderTrackingState.Degraded(ProviderTrackingTarget.DISCOVERY, reason, lastPublishedAt),
@@ -325,6 +344,7 @@ class ProviderLocationTrackingService : Service() {
     companion object {
         const val ACTION_START = "com.trustarx.pitgo.action.START_PROVIDER_TRACKING"
         const val ACTION_STOP = "com.trustarx.pitgo.action.STOP_PROVIDER_TRACKING"
+        const val ACTION_STOP_LOCAL = "com.trustarx.pitgo.action.STOP_PROVIDER_TRACKING_LOCAL"
         private const val CHANNEL_ID = "provider_location_tracking"
         private const val NOTIFICATION_ID = 7001
 

@@ -27,7 +27,7 @@ import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 import com.trustarx.pitgo.core.map.config.PitGoManagedMapStyle
 import com.trustarx.pitgo.core.map.model.MapRenderModel
 import com.trustarx.pitgo.core.map.ui.MapLibreMapHost
-import com.trustarx.pitgo.features.appointmenttracking.ui.AppointmentMapStyleController
+import com.trustarx.pitgo.core.map.ui.ParticipantMapStyleController
 import com.trustarx.pitgo.features.mobiledispatch.model.ProviderMapState
 
 /**
@@ -71,7 +71,7 @@ internal fun ProviderAppointmentMap(mapState: ProviderMapState, onFollowChanged:
                 cameraCommand = mapState.cameraCommand,
                 styleReloadRevision = 0,
                 online = true,
-                styleController = remember { AppointmentMapStyleController() },
+                styleController = remember { ParticipantMapStyleController() },
                 onViewportIdle = {},
                 onFeatureClick = {},
                 onSurfaceState = {},

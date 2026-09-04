@@ -486,4 +486,89 @@
     <string name="provider_mode_pittec_description">Técnico sob demanda, acionado automaticamente por proximidade.</string>
     <string name="provider_mode_pittec_notifications_required">Ative as notificações de Chamados PitTec para escolher esta modalidade.</string>
     <string name="provider_mode_pending">A modalidade será alterada após o atendimento atual.</string>
+
+    <!-- PitTec mocked UI prototype (specs/017-pittec-mocked-ui) -->
+    <string name="pittec_mock_checking_permission">Verificando permissão de localização…</string>
+    <string name="pittec_mock_permission_required">Permita a localização precisa para abrir a Home do PitTec.</string>
+    <string name="pittec_mock_grant_permission">Permitir localização</string>
+    <string name="pittec_mock_approximate_only">A localização aproximada não é suficiente. Permita a localização precisa.</string>
+    <string name="pittec_mock_services_disabled">Ative a localização do aparelho para continuar.</string>
+    <string name="pittec_mock_open_location_settings">Ativar localização</string>
+    <string name="pittec_mock_locating">Obtendo sua localização…</string>
+    <string name="pittec_mock_unavailable">Não foi possível obter sua localização agora.</string>
+    <string name="pittec_mock_available_title">Disponível</string>
+    <string name="pittec_mock_available_hint">Você está disponível para receber uma solicitação simulada.</string>
+    <string name="pittec_mock_simulate_request">Simular nova solicitação</string>
+    <string name="pittec_mock_map_unavailable">Não foi possível carregar o mapa. As informações continuam abaixo.</string>
+
+    <string name="pittec_mock_incoming_heading">Nova solicitação PitTec</string>
+    <string name="pittec_mock_incoming_client">Cliente: %1$s</string>
+    <string name="pittec_mock_incoming_perimeter">Perímetro simulado: %1$d km</string>
+    <string name="pittec_mock_incoming_distance">Distância aproximada: %1$s</string>
+    <string name="pittec_mock_incoming_total">Total: %1$s</string>
+    <string name="pittec_mock_accept">Aceitar</string>
+    <string name="pittec_mock_decline">Recusar</string>
+    <string name="pittec_mock_pulse_content_description">Nova solicitação PitTec chegando</string>
+
+    <string name="pittec_mock_search_cta">Buscar PitTec</string>
+    <string name="pittec_mock_confirm">Confirmar</string>
+    <string name="pittec_mock_estimating">Calculando estimativa…</string>
+    <string name="pittec_mock_estimate_heading">Estimativa PitTec</string>
+    <string name="pittec_mock_estimate_perimeter">Perímetro simulado: %1$d km</string>
+    <string name="pittec_mock_estimate_fixed">Parcela fixa: %1$s</string>
+    <string name="pittec_mock_estimate_additional">Adicional (%1$d × R$ 10,00): %2$s</string>
+    <string name="pittec_mock_estimate_total">Total: %1$s</string>
+    <string name="pittec_mock_searching">Procurando PitTec…</string>
+    <string name="pittec_mock_awaiting_response">Aguardando resposta do PitTec…</string>
+    <string name="pittec_mock_declined_continuing">O PitTec recusou. Buscando o próximo…</string>
+    <string name="pittec_mock_found">PitTec encontrado!</string>
+    <string name="pittec_mock_not_found">Nenhum PitTec encontrado nesta simulação.</string>
+
+    <string name="pittec_mock_participants">Cliente: %1$s · PitTec: %2$s</string>
+    <string name="pittec_mock_distance_remaining">Distância restante: %1$s</string>
+    <string name="pittec_mock_distance_close">menos de 100 m</string>
+    <string name="pittec_mock_total_value">Valor total: %1$s</string>
+    <string name="pittec_mock_status_travelling">Deslocando-se</string>
+    <string name="pittec_mock_status_awaiting_meeting">Aguardando encontro</string>
+    <string name="pittec_mock_status_in_progress">Serviço em andamento</string>
+    <string name="pittec_mock_status_awaiting_completion">Aguardando conclusão</string>
+    <string name="pittec_mock_status_completed">Concluído</string>
+    <string name="pittec_mock_position_updated_at">Posição atualizada às %1$s</string>
+    <string name="pittec_mock_position_stale">Última posição desatualizada · registrada às %1$s</string>
+    <string name="pittec_mock_recenter">Centralizar</string>
+
+    <string name="pittec_mock_meeting_action">Já nos encontramos</string>
+    <string name="pittec_mock_completion_action">Finalizar serviço</string>
+    <string name="pittec_mock_waiting_client">Aguardando confirmação do cliente</string>
+    <string name="pittec_mock_waiting_provider">Aguardando confirmação do PitTec</string>
+    <string name="pittec_mock_back_to_home">Voltar para a Home</string>
+    <string name="pittec_mock_back_to_map">Voltar ao mapa</string>
+    <string name="pittec_mock_completed_summary">Atendimento concluído</string>
+
+    <string name="pittec_mock_no_provider_title">Nenhum PitTec encontrado</string>
+    <string name="pittec_mock_no_provider_hint">Não encontramos um PitTec disponível nesta simulação.</string>
+
+    <string name="nav_pittec_map">Mapa</string>
+    <string name="nav_pittec_ride_data">Dados da corrida</string>
+    <string name="nav_pittec_values">Valores</string>
+
+    <string name="pittec_mock_ride_data_title">Dados da corrida</string>
+    <string name="pittec_mock_ride_data_empty">As informações da corrida aparecem aqui depois de aceitar uma solicitação.</string>
+    <string name="pittec_mock_ride_data_client">Cliente: %1$s</string>
+    <string name="pittec_mock_ride_data_provider">PitTec: %1$s</string>
+    <string name="pittec_mock_ride_data_perimeter">Perímetro: %1$d km</string>
+    <string name="pittec_mock_ride_data_distance">Última distância: %1$s</string>
+    <string name="pittec_mock_ride_data_state">Estado: %1$s</string>
+    <string name="pittec_mock_ride_data_requested_at">Solicitado às %1$s</string>
+    <string name="pittec_mock_ride_data_accepted_at">Aceito às %1$s</string>
+    <string name="pittec_mock_ride_data_started_at">Iniciado às %1$s</string>
+    <string name="pittec_mock_ride_data_completed_at">Concluído às %1$s</string>
+
+    <string name="pittec_mock_values_title">Valores</string>
+    <string name="pittec_mock_values_empty">A composição do valor aparece aqui depois de aceitar uma solicitação.</string>
+    <string name="pittec_mock_values_fixed">Parcela fixa: %1$s</string>
+    <string name="pittec_mock_values_additional">Adicional (%1$d × R$ 10,00): %2$s</string>
+    <string name="pittec_mock_values_total">Total: %1$s</string>
+
+    <string name="pittec_mock_profile_title">Perfil</string>
 </resources>

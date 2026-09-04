@@ -48,6 +48,7 @@ import com.trustarx.pitgo.core.map.model.MapRenderModel
 import com.trustarx.pitgo.core.map.model.MapResourceState
 import com.trustarx.pitgo.core.map.model.MapStyleState
 import com.trustarx.pitgo.core.map.ui.MapLibreMapHost
+import com.trustarx.pitgo.core.map.ui.ParticipantMapStyleController
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentProviderLocation
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentTrackingUiState
 import com.trustarx.pitgo.features.appointmenttracking.model.TrackingDataState
@@ -74,7 +75,7 @@ fun AppointmentTrackingRoute(
     AppointmentTrackingScreen(
         state = state,
         isClient = isClient,
-        styleController = remember { AppointmentMapStyleController() },
+        styleController = remember { ParticipantMapStyleController() },
         onBack = onBack,
         onFollowChanged = viewModel::setFollowProvider,
         onViewportIdle = viewModel::onViewportIdle,
@@ -91,7 +92,7 @@ fun AppointmentTrackingRoute(
 private fun AppointmentTrackingScreen(
     state: AppointmentTrackingUiState,
     isClient: Boolean,
-    styleController: AppointmentMapStyleController,
+    styleController: ParticipantMapStyleController,
     onBack: () -> Unit,
     onFollowChanged: (Boolean) -> Unit,
     onViewportIdle: (com.trustarx.pitgo.core.map.model.MapViewport) -> Unit,

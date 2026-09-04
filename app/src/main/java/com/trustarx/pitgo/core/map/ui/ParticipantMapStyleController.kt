@@ -1,4 +1,4 @@
-package com.trustarx.pitgo.features.appointmenttracking.ui
+package com.trustarx.pitgo.core.map.ui
 
 import android.content.Context
 import com.trustarx.pitgo.R
@@ -6,7 +6,6 @@ import com.trustarx.pitgo.core.map.model.MapFeatureSelection
 import com.trustarx.pitgo.core.map.model.MapMarkerKind
 import com.trustarx.pitgo.core.map.model.MapRenderModel
 import com.trustarx.pitgo.core.map.model.MapRouteStyle
-import com.trustarx.pitgo.core.map.ui.MapLibreStyleController
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression.eq
 import org.maplibre.android.style.expressions.Expression.get
@@ -28,7 +27,13 @@ import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 
-class AppointmentMapStyleController : MapLibreStyleController {
+/**
+ * Exact-participant map styling (client/PitTec markers plus a direct line between them), shared
+ * by the real AppointmentTracking screen and the mocked PitTec tracking content — see
+ * specs/017-pittec-mocked-ui research.md #7. Promoted out of the `appointmenttracking` feature
+ * because it now has two independent consumers and no dispatch-specific behavior.
+ */
+class ParticipantMapStyleController : MapLibreStyleController {
     override val clickableLayerIds: Array<String> = emptyArray()
 
     override fun install(context: Context, style: Style) {
