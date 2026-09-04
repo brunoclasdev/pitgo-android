@@ -6,6 +6,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -44,6 +45,26 @@ import kotlin.coroutines.coroutineContext
 /** Cent-based totals are only ever formatted at the UI edge (data-model.md invariant). */
 internal fun formatCents(cents: Long): String =
     NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")).format(cents / 100.0)
+
+/**
+ * Every PitTec card uses the same outlined style — white/surface fill with a purple border,
+ * never the plain Material default (which renders as a flat gray tonal surface) — so the design
+ * stays consistent instead of mixing gray and purple containers on the same screen.
+ */
+@Composable
+private fun PitTecOutlinedCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+        modifier = modifier.fillMaxWidth().padding(PitGoSpacing.Medium),
+    ) {
+        Column(
+            Modifier.padding(PitGoSpacing.Large),
+            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
+            content = content,
+        )
+    }
+}
 
 /**
  * Persistent purple incoming-request card (US1). Plays exactly three ~0.7s pulses once per
@@ -121,9 +142,9 @@ fun IncomingRequestCard(
 
 @Composable
 fun EstimatingCard(modifier: Modifier = Modifier) {
-    Card(modifier.fillMaxWidth().padding(PitGoSpacing.Medium)) {
+    PitTecOutlinedCard(modifier) {
         Row(
-            Modifier.fillMaxWidth().padding(PitGoSpacing.Large),
+            Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -141,87 +162,72 @@ fun EstimateCard(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(modifier.fillMaxWidth().padding(PitGoSpacing.Medium)) {
-        Column(
-            Modifier.padding(PitGoSpacing.Large),
-            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
-        ) {
-            Text(
-                stringResource(R.string.pittec_mock_estimate_heading),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.semantics { heading() },
-            )
-            Text(stringResource(R.string.pittec_mock_estimate_perimeter, estimate.perimeter.kilometers))
-            Text(stringResource(R.string.pittec_mock_estimate_fixed, formatCents(estimate.fixedCents)))
-            Text(
-                stringResource(
-                    R.string.pittec_mock_estimate_additional,
-                    estimate.bandCount,
-                    formatCents(estimate.distanceAdditionalCents),
-                ),
-            )
-            Text(
-                stringResource(R.string.pittec_mock_estimate_total, formatCents(estimate.totalCents)),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f).heightIn(min = PitGoSize.MinimumTouchTarget),
-                ) { Text(stringResource(R.string.action_back)) }
-                Button(
-                    onClick = onConfirm,
-                    enabled = confirmEnabled,
-                    modifier = Modifier.weight(1f).heightIn(min = PitGoSize.MinimumTouchTarget),
-                ) { Text(stringResource(R.string.pittec_mock_confirm)) }
-            }
+    PitTecOutlinedCard(modifier) {
+        Text(
+            stringResource(R.string.pittec_mock_estimate_heading),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() },
+        )
+        Text(stringResource(R.string.pittec_mock_estimate_perimeter, estimate.perimeter.kilometers))
+        Text(stringResource(R.string.pittec_mock_estimate_fixed, formatCents(estimate.fixedCents)))
+        Text(
+            stringResource(
+                R.string.pittec_mock_estimate_additional,
+                estimate.bandCount,
+                formatCents(estimate.distanceAdditionalCents),
+            ),
+        )
+        Text(
+            stringResource(R.string.pittec_mock_estimate_total, formatCents(estimate.totalCents)),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
+            OutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f).heightIn(min = PitGoSize.MinimumTouchTarget),
+            ) { Text(stringResource(R.string.action_back)) }
+            Button(
+                onClick = onConfirm,
+                enabled = confirmEnabled,
+                modifier = Modifier.weight(1f).heightIn(min = PitGoSize.MinimumTouchTarget),
+            ) { Text(stringResource(R.string.pittec_mock_confirm)) }
         }
     }
 }
 
 @Composable
 fun SearchFeedbackCard(search: MockSearch, modifier: Modifier = Modifier) {
-    Card(modifier.fillMaxWidth().padding(PitGoSpacing.Medium)) {
-        Column(
-            Modifier.padding(PitGoSpacing.Large).semantics { liveRegion = LiveRegionMode.Polite },
-            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
-        ) {
-            when (search.feedback) {
-                MockSearchFeedback.SEARCHING -> LoadingRow(stringResource(R.string.pittec_mock_searching))
-                MockSearchFeedback.AWAITING_RESPONSE -> LoadingRow(stringResource(R.string.pittec_mock_awaiting_response))
-                MockSearchFeedback.DECLINED_CONTINUING -> Text(stringResource(R.string.pittec_mock_declined_continuing))
-                MockSearchFeedback.FOUND -> Text(stringResource(R.string.pittec_mock_found))
-                MockSearchFeedback.NOT_FOUND -> Text(stringResource(R.string.pittec_mock_not_found))
-            }
-            Text(stringResource(R.string.pittec_mock_estimate_perimeter, search.currentPerimeter.kilometers))
-            Text(stringResource(R.string.pittec_mock_estimate_total, formatCents(search.estimate.totalCents)))
+    PitTecOutlinedCard(modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+        when (search.feedback) {
+            MockSearchFeedback.SEARCHING -> LoadingRow(stringResource(R.string.pittec_mock_searching))
+            MockSearchFeedback.AWAITING_RESPONSE -> LoadingRow(stringResource(R.string.pittec_mock_awaiting_response))
+            MockSearchFeedback.DECLINED_CONTINUING -> Text(stringResource(R.string.pittec_mock_declined_continuing))
+            MockSearchFeedback.FOUND -> Text(stringResource(R.string.pittec_mock_found))
+            MockSearchFeedback.NOT_FOUND -> Text(stringResource(R.string.pittec_mock_not_found))
         }
+        Text(stringResource(R.string.pittec_mock_estimate_perimeter, search.currentPerimeter.kilometers))
+        Text(stringResource(R.string.pittec_mock_estimate_total, formatCents(search.estimate.totalCents)))
     }
 }
 
 @Composable
 fun NoProviderCard(onRetry: () -> Unit, onBack: () -> Unit, modifier: Modifier = Modifier) {
-    Card(modifier.fillMaxWidth().padding(PitGoSpacing.Medium)) {
-        Column(
-            Modifier.padding(PitGoSpacing.Large).semantics { liveRegion = LiveRegionMode.Polite },
-            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
-        ) {
-            Text(
-                stringResource(R.string.pittec_mock_no_provider_title),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.semantics { heading() },
-            )
-            Text(stringResource(R.string.pittec_mock_no_provider_hint))
-            Row(horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
-                OutlinedButton(
-                    onClick = onBack,
-                    modifier = Modifier.weight(1f).heightIn(min = PitGoSize.MinimumTouchTarget),
-                ) { Text(stringResource(R.string.action_back)) }
-                Button(
-                    onClick = onRetry,
-                    modifier = Modifier.weight(1f).heightIn(min = PitGoSize.MinimumTouchTarget),
-                ) { Text(stringResource(R.string.action_retry)) }
-            }
+    PitTecOutlinedCard(modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+        Text(
+            stringResource(R.string.pittec_mock_no_provider_title),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() },
+        )
+        Text(stringResource(R.string.pittec_mock_no_provider_hint))
+        Row(horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
+            OutlinedButton(
+                onClick = onBack,
+                modifier = Modifier.weight(1f).heightIn(min = PitGoSize.MinimumTouchTarget),
+            ) { Text(stringResource(R.string.action_back)) }
+            Button(
+                onClick = onRetry,
+                modifier = Modifier.weight(1f).heightIn(min = PitGoSize.MinimumTouchTarget),
+            ) { Text(stringResource(R.string.action_retry)) }
         }
     }
 }

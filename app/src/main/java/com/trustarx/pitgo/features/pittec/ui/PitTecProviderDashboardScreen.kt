@@ -372,9 +372,9 @@ private fun MapTab(
                         onDecline = onDecline,
                     )
                 } else {
-                    Surface(
-                        shape = MaterialTheme.shapes.large,
-                        tonalElevation = PitGoSpacing.ExtraSmall,
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
                         modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
                     ) {
                         Column(

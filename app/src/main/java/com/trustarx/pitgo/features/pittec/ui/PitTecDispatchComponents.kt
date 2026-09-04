@@ -1,13 +1,16 @@
 package com.trustarx.pitgo.features.pittec.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -20,6 +23,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
@@ -75,6 +79,25 @@ internal fun DispatchOverlay(
     }
 }
 
+/**
+ * White/surface fill with a purple border — every PitTec card uses this outlined style instead of
+ * the plain Material default, which renders as a flat gray tonal surface.
+ */
+@Composable
+private fun PitTecOutlinedCard(modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+        modifier = modifier.fillMaxWidth().padding(PitGoSpacing.Medium),
+    ) {
+        Column(
+            Modifier.padding(PitGoSpacing.Large),
+            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
+            content = content,
+        )
+    }
+}
+
 @Composable
 private fun ActiveDispatchCard(
     active: PitTecDispatchPhase.Active,
@@ -82,46 +105,41 @@ private fun ActiveDispatchCard(
     modifier: Modifier,
 ) {
     val snapshot = active.snapshot
-    Card(modifier.fillMaxWidth().padding(PitGoSpacing.Medium)) {
-        Column(
-            Modifier.padding(PitGoSpacing.Large),
-            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
+    PitTecOutlinedCard(modifier) {
+        val eventText = when (snapshot.lastEvent) {
+            PitTecLastEvent.PROVIDER_REJECTED -> R.string.pittec_rejected
+            PitTecLastEvent.OFFER_EXPIRED -> R.string.pittec_expired
+            else -> null
+        }
+        Text(
+            stringResource(
+                eventText ?: when (snapshot.status) {
+                    PitTecDispatchStatus.AWAITING_PROVIDER -> R.string.pittec_awaiting
+                    else -> R.string.pittec_searching
+                },
+            ),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading(); liveRegion = LiveRegionMode.Polite },
+        )
+        active.remainingSeconds?.let { Text(stringResource(R.string.mobile_dispatch_seconds, it)) }
+        active.failure?.let { Text(failureTitle(it), color = MaterialTheme.colorScheme.error) }
+        OutlinedButton(
+            onClick = onCancelSearch,
+            enabled = active.pending == null && PitTecDispatchAction.CANCEL in snapshot.allowedActions,
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            val eventText = when (snapshot.lastEvent) {
-                PitTecLastEvent.PROVIDER_REJECTED -> R.string.pittec_rejected
-                PitTecLastEvent.OFFER_EXPIRED -> R.string.pittec_expired
-                else -> null
-            }
-            Text(
-                stringResource(
-                    eventText ?: when (snapshot.status) {
-                        PitTecDispatchStatus.AWAITING_PROVIDER -> R.string.pittec_awaiting
-                        else -> R.string.pittec_searching
-                    },
-                ),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.semantics { heading(); liveRegion = LiveRegionMode.Polite },
-            )
-            active.remainingSeconds?.let { Text(stringResource(R.string.mobile_dispatch_seconds, it)) }
-            active.failure?.let { Text(failureTitle(it), color = MaterialTheme.colorScheme.error) }
-            OutlinedButton(
-                onClick = onCancelSearch,
-                enabled = active.pending == null && PitTecDispatchAction.CANCEL in snapshot.allowedActions,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (active.pending?.kind == PitTecPendingAction.CANCEL) {
-                    CircularProgressIndicator(Modifier.heightIn(max = PitGoSize.NavigationIcon))
-                } else Text(stringResource(R.string.pittec_cancel_search))
-            }
+            if (active.pending?.kind == PitTecPendingAction.CANCEL) {
+                CircularProgressIndicator(Modifier.heightIn(max = PitGoSize.NavigationIcon))
+            } else Text(stringResource(R.string.pittec_cancel_search))
         }
     }
 }
 
 @Composable
 private fun LoadingCard(modifier: Modifier, text: String) {
-    Card(modifier.fillMaxWidth().padding(PitGoSpacing.Medium)) {
+    PitTecOutlinedCard(modifier) {
         Row(
-            Modifier.fillMaxWidth().padding(PitGoSpacing.Large),
+            Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -133,15 +151,10 @@ private fun LoadingCard(modifier: Modifier, text: String) {
 
 @Composable
 private fun MessageCard(modifier: Modifier, text: String, onRetry: () -> Unit) {
-    Card(modifier.fillMaxWidth().padding(PitGoSpacing.Medium)) {
-        Column(
-            Modifier.fillMaxWidth().padding(PitGoSpacing.Large),
-            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
-        ) {
-            Text(text, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-            Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.action_retry))
-            }
+    PitTecOutlinedCard(modifier) {
+        Text(text, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.action_retry))
         }
     }
 }
