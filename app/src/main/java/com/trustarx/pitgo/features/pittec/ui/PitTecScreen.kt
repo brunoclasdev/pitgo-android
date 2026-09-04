@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -24,9 +25,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -40,43 +39,40 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.trustarx.pitgo.R
+import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 import com.trustarx.pitgo.core.map.config.PitGoManagedMapStyle
+import com.trustarx.pitgo.core.map.model.MapMarkerKind
+import com.trustarx.pitgo.core.map.model.MapMarkerSpec
 import com.trustarx.pitgo.core.map.model.MapRenderModel
 import com.trustarx.pitgo.core.map.model.MapResourceState
 import com.trustarx.pitgo.core.map.model.MapStyleState
 import com.trustarx.pitgo.core.map.ui.MapLibreMapHost
-import com.trustarx.pitgo.features.pittec.model.PitTecAppointmentStatus
-import com.trustarx.pitgo.features.pittec.model.PitTecDispatchPhase
-import com.trustarx.pitgo.features.pittec.model.PitTecDiscoveryState
+import com.trustarx.pitgo.core.map.ui.ParticipantMapStyleController
+import com.trustarx.pitgo.features.pittec.model.PitTecClientMockUiState
+import com.trustarx.pitgo.features.pittec.model.PitTecClientStage
 import com.trustarx.pitgo.features.pittec.model.PitTecLocationState
-import com.trustarx.pitgo.features.pittec.model.PitTecUiState
-import com.trustarx.pitgo.features.pittec.viewmodel.PitTecViewModel
+import com.trustarx.pitgo.features.pittec.viewmodel.PitTecClientMockViewModel
 
+/**
+ * Mocked client PitTec journey (US2–US4). The discovery presentation before "Buscar PitTec" stays
+ * pixel-for-pixel the same as the original screen (FR-011); everything past it is entirely local —
+ * see contracts/client-pittec-ui.md. No real repository or connectivity dependency is used here.
+ */
 @Composable
 fun PitTecRoute(
-    viewModel: PitTecViewModel,
+    viewModel: PitTecClientMockViewModel,
     onBack: () -> Unit,
-    onAccepted: (appointmentId: String) -> Unit,
-    onSessionExpired: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val coarsePermission = rememberLauncherForActivityResult(
+    val locationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { permissions ->
         viewModel.onLocationPermissionResult(
             permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
                 permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true,
         )
-    }
-    val precisePermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { permissions ->
-        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) viewModel.requestPitTec()
-    }
-    LifecycleStartEffect(viewModel) {
-        onStopOrDispose { viewModel.clearTransientLocation() }
     }
     LaunchedEffect(viewModel) {
         val granted = ContextCompat.checkSelfPermission(
@@ -86,58 +82,57 @@ fun PitTecRoute(
         ) == PackageManager.PERMISSION_GRANTED
         if (granted) viewModel.onLocationPermissionResult(true)
     }
-    val content = state as? PitTecUiState.Content
-    LaunchedEffect(content?.discoveryState) {
-        if (content?.discoveryState == PitTecDiscoveryState.SessionExpired) onSessionExpired()
+    LifecycleStartEffect(viewModel) {
+        viewModel.onVisible()
+        onStopOrDispose { viewModel.onHidden() }
     }
-    var navigatedAppointmentId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(content?.dispatch) {
-        val active = content?.dispatch as? PitTecDispatchPhase.Active ?: return@LaunchedEffect
-        val appointment = active.snapshot.appointment ?: return@LaunchedEffect
-        if (appointment.status !in setOf(PitTecAppointmentStatus.ACCEPTED, PitTecAppointmentStatus.IN_PROGRESS)) return@LaunchedEffect
-        if (navigatedAppointmentId == appointment.id) return@LaunchedEffect
-        navigatedAppointmentId = appointment.id
-        onAccepted(appointment.id)
-    }
-    val hasFinePermission = ContextCompat.checkSelfPermission(
-        context, Manifest.permission.ACCESS_FINE_LOCATION,
-    ) == PackageManager.PERMISSION_GRANTED
     PitTecScreen(
         state = state,
-        styleController = remember { PitTecMapStyleController() },
+        discoveryStyleController = remember { PitTecMapStyleController() },
+        trackingStyleController = remember { ParticipantMapStyleController() },
         onBack = onBack,
         onUseLocation = {
-            coarsePermission.launch(
+            locationPermission.launch(
                 arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION),
             )
         },
         onRetryDiscovery = viewModel::retryDiscovery,
         onRetryStyle = viewModel::retryStyle,
         onViewportIdle = viewModel::onViewportIdle,
-        onSurfaceState = viewModel::updateSurfaceState,
-        onRequestPitTec = {
-            if (hasFinePermission) viewModel.requestPitTec()
-            else precisePermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
-        },
-        onCancelSearch = viewModel::cancelSearch,
-        onRetryDispatch = viewModel::retryDispatch,
+        onSurfaceState = viewModel::onSurfaceState,
+        onSearchRequested = viewModel::onSearchRequested,
+        onEstimateDismissed = viewModel::onEstimateDismissed,
+        onEstimateConfirmed = viewModel::onEstimateConfirmed,
+        onRetrySearch = viewModel::onRetrySearch,
+        onBackFromNoProvider = viewModel::onBackFromNoProvider,
+        onMeetingConfirmed = viewModel::onMeetingConfirmed,
+        onCompletionConfirmed = viewModel::onCompletionConfirmed,
+        onBackToHome = viewModel::onBackToHome,
+        onRecenter = viewModel::onRecenter,
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PitTecScreen(
-    state: PitTecUiState,
-    styleController: PitTecMapStyleController,
+    state: PitTecClientMockUiState,
+    discoveryStyleController: PitTecMapStyleController,
+    trackingStyleController: ParticipantMapStyleController,
     onBack: () -> Unit,
     onUseLocation: () -> Unit,
     onRetryDiscovery: () -> Unit,
     onRetryStyle: () -> Unit,
     onViewportIdle: (com.trustarx.pitgo.core.map.model.MapViewport) -> Unit,
     onSurfaceState: (com.trustarx.pitgo.core.map.model.MapSurfaceState) -> Unit,
-    onRequestPitTec: () -> Unit,
-    onCancelSearch: () -> Unit,
-    onRetryDispatch: () -> Unit,
+    onSearchRequested: () -> Unit,
+    onEstimateDismissed: () -> Unit,
+    onEstimateConfirmed: () -> Unit,
+    onRetrySearch: () -> Unit,
+    onBackFromNoProvider: () -> Unit,
+    onMeetingConfirmed: () -> Unit,
+    onCompletionConfirmed: () -> Unit,
+    onBackToHome: () -> Unit,
+    onRecenter: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -151,68 +146,168 @@ private fun PitTecScreen(
             )
         },
     ) { padding ->
-        if (state !is PitTecUiState.Content) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text(stringResource(R.string.service_map_invalid))
-            }
-            return@Scaffold
-        }
         Box(Modifier.fillMaxSize().padding(padding)) {
-            Column(Modifier.fillMaxSize()) {
-                DiscoveryStateBanner(state, onRetryDiscovery, onRetryStyle)
-                val mapDescription = stringResource(R.string.pittec_map_description, state.markers.size)
-                Box(Modifier.weight(1f).semantics { contentDescription = mapDescription }) {
-                    MapLibreMapHost(
-                        configuration = PitGoManagedMapStyle.configuration,
-                        renderModel = MapRenderModel(state.mapMarkers),
-                        viewport = state.viewport,
-                        cameraCommand = state.cameraCommand,
-                        styleReloadRevision = state.styleReloadRevision,
-                        online = state.discoveryState != PitTecDiscoveryState.Offline,
-                        styleController = styleController,
-                        onViewportIdle = onViewportIdle,
-                        onFeatureClick = {},
-                        onSurfaceState = onSurfaceState,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    if (state.discoveryState == PitTecDiscoveryState.Loading ||
-                        state.surfaceState.style is MapStyleState.Loading
-                    ) {
-                        CircularProgressIndicator(Modifier.align(Alignment.Center))
-                    }
-                    if (state.surfaceState.style is MapStyleState.Failed) {
-                        Button(onClick = onRetryStyle, modifier = Modifier.align(Alignment.Center)) {
-                            Text(stringResource(R.string.map_retry))
-                        }
-                    }
-                    TextButton(
-                        onClick = onUseLocation,
-                        modifier = Modifier.align(Alignment.TopStart).padding(PitGoSpacing.Small),
-                    ) { Text(stringResource(R.string.service_map_my_location)) }
-                }
+            when (val stage = state.stage) {
+                is PitTecClientStage.Tracking -> PitTecMockTrackingContent(
+                    appointment = stage.appointment,
+                    isClientViewer = true,
+                    viewport = state.viewport,
+                    cameraCommand = state.cameraCommand,
+                    styleReloadRevision = state.styleReloadRevision,
+                    surfaceState = state.surfaceState,
+                    onViewportIdle = onViewportIdle,
+                    onSurfaceState = onSurfaceState,
+                    onRetryStyle = onRetryStyle,
+                    onRecenter = onRecenter,
+                    onMeetingConfirmed = onMeetingConfirmed,
+                    onCompletionConfirmed = onCompletionConfirmed,
+                    completedActionLabel = stringResource(R.string.pittec_mock_back_to_home),
+                    onCompletedAction = onBackToHome,
+                    styleController = trackingStyleController,
+                )
+
+                is PitTecClientStage.Completed -> PitTecMockTrackingContent(
+                    appointment = stage.appointment,
+                    isClientViewer = true,
+                    viewport = state.viewport,
+                    cameraCommand = state.cameraCommand,
+                    styleReloadRevision = state.styleReloadRevision,
+                    surfaceState = state.surfaceState,
+                    onViewportIdle = onViewportIdle,
+                    onSurfaceState = onSurfaceState,
+                    onRetryStyle = onRetryStyle,
+                    onRecenter = onRecenter,
+                    onMeetingConfirmed = onMeetingConfirmed,
+                    onCompletionConfirmed = onCompletionConfirmed,
+                    completedActionLabel = stringResource(R.string.pittec_mock_back_to_home),
+                    onCompletedAction = onBackToHome,
+                    styleController = trackingStyleController,
+                )
+
+                else -> DiscoveryAndSearch(
+                    state = state,
+                    stage = stage,
+                    styleController = discoveryStyleController,
+                    onUseLocation = onUseLocation,
+                    onRetryDiscovery = onRetryDiscovery,
+                    onRetryStyle = onRetryStyle,
+                    onViewportIdle = onViewportIdle,
+                    onSurfaceState = onSurfaceState,
+                    onSearchRequested = onSearchRequested,
+                    onEstimateDismissed = onEstimateDismissed,
+                    onEstimateConfirmed = onEstimateConfirmed,
+                    onRetrySearch = onRetrySearch,
+                    onBackFromNoProvider = onBackFromNoProvider,
+                )
             }
-            DispatchOverlay(
-                phase = state.dispatch,
-                onRequestPitTec = onRequestPitTec,
-                onCancelSearch = onCancelSearch,
-                onRetryDispatch = onRetryDispatch,
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
         }
     }
 }
 
 @Composable
+private fun DiscoveryAndSearch(
+    state: PitTecClientMockUiState,
+    stage: PitTecClientStage,
+    styleController: PitTecMapStyleController,
+    onUseLocation: () -> Unit,
+    onRetryDiscovery: () -> Unit,
+    onRetryStyle: () -> Unit,
+    onViewportIdle: (com.trustarx.pitgo.core.map.model.MapViewport) -> Unit,
+    onSurfaceState: (com.trustarx.pitgo.core.map.model.MapSurfaceState) -> Unit,
+    onSearchRequested: () -> Unit,
+    onEstimateDismissed: () -> Unit,
+    onEstimateConfirmed: () -> Unit,
+    onRetrySearch: () -> Unit,
+    onBackFromNoProvider: () -> Unit,
+) {
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            DiscoveryStateBanner(state, onRetryDiscovery, onRetryStyle)
+            val markers = clientMapMarkers(state)
+            val mapDescription = stringResource(R.string.pittec_map_description, state.markers.size)
+            Box(Modifier.weight(1f).semantics { contentDescription = mapDescription }) {
+                MapLibreMapHost(
+                    configuration = PitGoManagedMapStyle.configuration,
+                    renderModel = MapRenderModel(markers),
+                    viewport = state.viewport,
+                    cameraCommand = null,
+                    styleReloadRevision = state.styleReloadRevision,
+                    online = true,
+                    styleController = styleController,
+                    onViewportIdle = onViewportIdle,
+                    onFeatureClick = {},
+                    onSurfaceState = onSurfaceState,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                if (state.locationState == PitTecLocationState.Resolving) {
+                    CircularProgressIndicator(Modifier.align(Alignment.Center))
+                }
+                TextButton(
+                    onClick = onUseLocation,
+                    modifier = Modifier.align(Alignment.TopStart).padding(PitGoSpacing.Small),
+                ) { Text(stringResource(R.string.service_map_my_location)) }
+            }
+        }
+        when (stage) {
+            PitTecClientStage.Discovery -> Button(
+                onClick = onSearchRequested,
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(PitGoSpacing.Medium)
+                    .heightIn(min = PitGoSize.PrimaryActionMinHeight),
+            ) { Text(stringResource(R.string.pittec_mock_search_cta)) }
+            PitTecClientStage.Estimating -> EstimatingCard(
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+            is PitTecClientStage.AwaitingClientConfirmation -> EstimateCard(
+                estimate = stage.estimate,
+                confirmEnabled = true,
+                onConfirm = onEstimateConfirmed,
+                onDismiss = onEstimateDismissed,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+            is PitTecClientStage.Searching -> SearchFeedbackCard(
+                search = stage.search,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+            is PitTecClientStage.NoProvider -> NoProviderCard(
+                onRetry = onRetrySearch,
+                onBack = onBackFromNoProvider,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+            else -> Unit
+        }
+    }
+}
+
+@Composable
+private fun clientMapMarkers(state: PitTecClientMockUiState): List<MapMarkerSpec> {
+    val approximateLabel = stringResource(R.string.pittec_marker_approximate)
+    val clientLabel = stringResource(R.string.pittec_client_marker)
+    val approximate = state.markers.map { marker ->
+        MapMarkerSpec(
+            id = marker.markerId,
+            coordinate = marker.coordinate,
+            kind = MapMarkerKind.PITTEC_APPROXIMATE,
+            accessibilityLabel = approximateLabel,
+        )
+    }
+    val client = state.clientCoordinate?.takeIf { it.isValid }?.let { coordinate ->
+        MapMarkerSpec(
+            id = "pittec-mock-client-location",
+            coordinate = coordinate,
+            kind = MapMarkerKind.CLIENT_LOCATION,
+            accessibilityLabel = clientLabel,
+        )
+    }
+    return approximate + listOfNotNull(client)
+}
+
+@Composable
 private fun DiscoveryStateBanner(
-    state: PitTecUiState.Content,
+    state: PitTecClientMockUiState,
     onRetryDiscovery: () -> Unit,
     onRetryStyle: () -> Unit,
 ) {
     val message = when {
-        state.discoveryState == PitTecDiscoveryState.Offline -> R.string.map_offline
-        state.discoveryState == PitTecDiscoveryState.Failure -> R.string.mobile_dispatch_unavailable
-        state.discoveryState == PitTecDiscoveryState.Empty -> R.string.pittec_empty_map
-        state.discoveryState == PitTecDiscoveryState.UpdateRequired -> R.string.mobile_dispatch_unavailable
         state.locationState == PitTecLocationState.Denied -> R.string.pittec_location_required
         state.locationState == PitTecLocationState.Unavailable -> R.string.pittec_location_unavailable
         state.surfaceState.style is MapStyleState.Failed -> R.string.map_style_failure
