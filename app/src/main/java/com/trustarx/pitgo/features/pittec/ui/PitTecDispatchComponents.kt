@@ -36,9 +36,11 @@ import com.trustarx.pitgo.features.pittec.model.PitTecLastEvent
 import com.trustarx.pitgo.features.pittec.model.PitTecPendingAction
 
 /**
- * Stateless bottom-card family for every pre-accept PitTec dispatch phase (US2). Once accepted,
- * the screen navigates away to the shared AppointmentTracking flow (US3), so there is no card for
- * ACCEPTED/IN_PROGRESS here.
+ * Stateless bottom-card family for every pre-accept PitTec dispatch phase (US2). `ConfirmingValues`
+ * (`019`) is the one exception past ACCEPTED — it only shows a brief transitional loading state
+ * while `PitTecRoute` opens the real payment screen (`018`) and waits for approval; once approved,
+ * the screen navigates away to the shared AppointmentTracking flow, so nothing further is modeled
+ * here.
  */
 @Composable
 internal fun DispatchOverlay(
@@ -46,6 +48,8 @@ internal fun DispatchOverlay(
     onRequestPitTec: () -> Unit,
     onCancelSearch: () -> Unit,
     onRetryDispatch: () -> Unit,
+    onConfirmCandidate: () -> Unit,
+    onDeclineCandidate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (phase) {
@@ -63,6 +67,12 @@ internal fun DispatchOverlay(
 
         is PitTecDispatchPhase.Active -> ActiveDispatchCard(phase, onCancelSearch, modifier)
 
+        is PitTecDispatchPhase.CandidateFound -> FoundCandidateCard(
+            phase, onConfirmCandidate, onDeclineCandidate, modifier,
+        )
+
+        is PitTecDispatchPhase.ConfirmingValues -> LoadingCard(modifier, stringResource(R.string.pittec_confirming_values))
+
         is PitTecDispatchPhase.NoProvider -> MessageCard(
             modifier, stringResource(R.string.pittec_none_nearby), onRetryDispatch,
         )
@@ -77,6 +87,49 @@ internal fun DispatchOverlay(
         )
 
         is PitTecDispatchPhase.Failure -> MessageCard(modifier, failureTitle(phase.reason), onRetryDispatch)
+    }
+}
+
+/**
+ * Candidato encontrado, ainda não aceito pelo prestador (`019-pittec-request-flow`, US2) — nome e
+ * distância aproximada, sem nenhuma cobrança neste ponto. "Recusar" cancela este appointment e a
+ * busca automática segue para o próximo candidato sozinha.
+ */
+@Composable
+private fun FoundCandidateCard(
+    phase: PitTecDispatchPhase.CandidateFound,
+    onConfirm: () -> Unit,
+    onDecline: () -> Unit,
+    modifier: Modifier,
+) {
+    val candidate = phase.snapshot.candidate ?: return
+    PitTecOutlinedCard(modifier) {
+        Text(
+            stringResource(R.string.pittec_candidate_found_title),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading(); liveRegion = LiveRegionMode.Polite },
+        )
+        Text(candidate.providerName)
+        Text(
+            stringResource(
+                R.string.pittec_candidate_distance,
+                formatDistanceMeters(candidate.approximateDistanceMeters),
+            ),
+        )
+        val isPending = phase.pending != null
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
+        ) {
+            OutlinedButton(onClick = onDecline, enabled = !isPending, modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.pittec_candidate_decline))
+            }
+            Button(onClick = onConfirm, enabled = !isPending, modifier = Modifier.weight(1f)) {
+                if (isPending) {
+                    CircularProgressIndicator(Modifier.heightIn(max = PitGoSize.NavigationIcon))
+                } else Text(stringResource(R.string.pittec_candidate_confirm))
+            }
+        }
     }
 }
 

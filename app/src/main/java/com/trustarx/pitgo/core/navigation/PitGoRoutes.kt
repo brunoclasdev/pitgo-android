@@ -18,7 +18,9 @@ object PitGoRoutes {
     const val ServiceMap = "service-map/{$ServiceMapArg}"
     const val PitTecServiceArg = "pittecServiceId"
     const val PaymentRequestIdArg = "requestId"
-    const val PitTec = "pittec/{$PitTecServiceArg}?$PaymentRequestIdArg={$PaymentRequestIdArg}"
+    // (019) Sem requestId de pagamento prévio — a busca do PitTec sempre gera seu próprio id
+    // internamente agora; o pagamento acontece depois do aceite, não antes da busca.
+    const val PitTec = "pittec/{$PitTecServiceArg}"
     const val MobileDispatchServiceArg = "mobileServiceId"
     const val MobileDispatchNew =
         "mobile-dispatch/new/{$MobileDispatchServiceArg}?$PaymentRequestIdArg={$PaymentRequestIdArg}"
@@ -26,7 +28,11 @@ object PitGoRoutes {
     const val MobileDispatch = "mobile-dispatch/{$MobileDispatchSearchArg}"
     const val PaymentServiceArg = "paymentServiceId"
     const val PaymentDispatchKindArg = "paymentDispatchKind"
-    const val Payment = "payment/{$PaymentServiceArg}/{$PaymentDispatchKindArg}"
+    // (019) `requestId` opcional: quando presente, o checkout cobra pelo id de busca já existente
+    // (PitTec, pago só depois do aceite) em vez de gerar um novo id (caminho original, guincho
+    // móvel, pago antes do despacho).
+    const val Payment =
+        "payment/{$PaymentServiceArg}/{$PaymentDispatchKindArg}?$PaymentRequestIdArg={$PaymentRequestIdArg}"
     const val ProviderRequest = "provider-request/{$AppointmentIdArg}"
     const val Home = "home"
     const val VehicleOnboarding = "vehicle-onboarding"
@@ -55,10 +61,7 @@ object PitGoRoutes {
     fun appointmentTracking(appointmentId: String) = "appointment-tracking/${Uri.encode(appointmentId)}"
     fun serviceMap(serviceId: String) = "service-map/${Uri.encode(serviceId)}"
 
-    fun pitTec(serviceId: String, requestId: String? = null): String {
-        val base = "pittec/${Uri.encode(serviceId)}"
-        return if (requestId != null) "$base?$PaymentRequestIdArg=${Uri.encode(requestId)}" else base
-    }
+    fun pitTec(serviceId: String) = "pittec/${Uri.encode(serviceId)}"
 
     fun mobileDispatchNew(serviceId: String, requestId: String? = null): String {
         val base = "mobile-dispatch/new/${Uri.encode(serviceId)}"
@@ -67,6 +70,8 @@ object PitGoRoutes {
 
     fun mobileDispatch(searchId: String) = "mobile-dispatch/${Uri.encode(searchId)}"
     fun providerRequest(appointmentId: String) = "provider-request/${Uri.encode(appointmentId)}"
-    fun payment(serviceId: String, dispatchKind: String) =
-        "payment/${Uri.encode(serviceId)}/${Uri.encode(dispatchKind)}"
+    fun payment(serviceId: String, dispatchKind: String, requestId: String? = null): String {
+        val base = "payment/${Uri.encode(serviceId)}/${Uri.encode(dispatchKind)}"
+        return if (requestId != null) "$base?$PaymentRequestIdArg=${Uri.encode(requestId)}" else base
+    }
 }

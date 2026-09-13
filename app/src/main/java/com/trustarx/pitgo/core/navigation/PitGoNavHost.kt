@@ -451,11 +451,15 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         if (!navigationPending) {
                             navigationPending = true
                             val destination = when (service.dispatchKind) {
-                                // Payment (spec 018) sits before dispatch for both auto-matched
-                                // kinds; it generates the request_id and, once approved, forwards
-                                // to the same dispatch routes below with that id attached.
-                                ServiceDispatchKind.MOBILE_SEQUENTIAL, ServiceDispatchKind.PITTEC_AUTO_SEQUENTIAL ->
+                                // Payment (spec 018) still sits before dispatch for guincho móvel —
+                                // generates the request_id and forwards it once approved.
+                                ServiceDispatchKind.MOBILE_SEQUENTIAL ->
                                     PitGoRoutes.payment(service.id, service.dispatchKind.name)
+                                // (019) PitTec agora abre direto no mapa/busca, sem pagamento
+                                // prévio — o pagamento passa a ser cobrado depois do aceite, a
+                                // partir da própria tela do PitTec (ver PitTecRoute).
+                                ServiceDispatchKind.PITTEC_AUTO_SEQUENTIAL ->
+                                    PitGoRoutes.pitTec(service.id)
                                 ServiceDispatchKind.BROWSE -> PitGoRoutes.serviceMap(service.id)
                             }
                             navController.navigate(destination) {
@@ -752,6 +756,11 @@ fun PitGoNavHost(container: PitGoAppContainer) {
             arguments = listOf(
                 navArgument(PitGoRoutes.PaymentServiceArg) { type = NavType.StringType },
                 navArgument(PitGoRoutes.PaymentDispatchKindArg) { type = NavType.StringType },
+                navArgument(PitGoRoutes.PaymentRequestIdArg) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
             ),
         ) { entry ->
             val serviceId = entry.arguments?.getString(PitGoRoutes.PaymentServiceArg).orEmpty()
@@ -766,14 +775,17 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     viewModel = paymentViewModel,
                     onBack = { navController.popBackStack() },
                     onApproved = { requestId ->
-                        val destination = if (dispatchKind == "PITTEC_AUTO_SEQUENTIAL") {
-                            PitGoRoutes.pitTec(serviceId, requestId)
+                        // (019) PitTec já chega aqui com uma busca/appointment ACEITO em
+                        // andamento (requestId = search_id, ver PitTecRoute.onNeedsPayment) — só
+                        // volta para a mesma tela, que já detecta a aprovação sozinha. Guincho
+                        // móvel continua indo para o despacho com o requestId recém-gerado.
+                        if (dispatchKind == "PITTEC_AUTO_SEQUENTIAL") {
+                            navController.popBackStack()
                         } else {
-                            PitGoRoutes.mobileDispatchNew(serviceId, requestId)
-                        }
-                        navController.navigate(destination) {
-                            popUpTo(PitGoRoutes.Home)
-                            launchSingleTop = true
+                            navController.navigate(PitGoRoutes.mobileDispatchNew(serviceId, requestId)) {
+                                popUpTo(PitGoRoutes.Home)
+                                launchSingleTop = true
+                            }
                         }
                     },
                 )
@@ -784,15 +796,9 @@ fun PitGoNavHost(container: PitGoAppContainer) {
             route = PitGoRoutes.PitTec,
             arguments = listOf(
                 navArgument(PitGoRoutes.PitTecServiceArg) { type = NavType.StringType },
-                navArgument(PitGoRoutes.PaymentRequestIdArg) {
-                    type = NavType.StringType
-                    nullable = true
-                    defaultValue = null
-                },
             ),
         ) { entry ->
             val serviceId = entry.arguments?.getString(PitGoRoutes.PitTecServiceArg).orEmpty()
-            val paidRequestId = entry.arguments?.getString(PitGoRoutes.PaymentRequestIdArg)
             if (sessionState is AppSessionState.Authenticated.Client && serviceId.isNotBlank()) {
                 val pitTecViewModel: PitTecViewModel = viewModel(
                     key = serviceId,
@@ -801,13 +807,17 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         container.pitTecRepository,
                         container.deviceLocationRepository,
                         container.connectivityObserver,
-                        paidRequestId,
                         container.paymentRepository,
                     ),
                 )
                 PitTecRoute(
                     viewModel = pitTecViewModel,
                     onBack = { navController.popBackStack() },
+                    onNeedsPayment = { requestId ->
+                        navController.navigate(
+                            PitGoRoutes.payment(serviceId, "PITTEC_AUTO_SEQUENTIAL", requestId),
+                        )
+                    },
                     onAccepted = { navController.navigate(PitGoRoutes.appointmentTracking(it)) { launchSingleTop = true } },
                     onSessionExpired = sessionViewModel::refresh,
                 )

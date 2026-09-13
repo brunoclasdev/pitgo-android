@@ -5,6 +5,7 @@ import com.trustarx.pitgo.core.map.model.MapCoordinate
 import com.trustarx.pitgo.features.pittec.model.NearbyPitTecMarker
 import com.trustarx.pitgo.features.pittec.model.PitTecAppointment
 import com.trustarx.pitgo.features.pittec.model.PitTecAppointmentStatus
+import com.trustarx.pitgo.features.pittec.model.PitTecCandidate
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchAction
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchSnapshot
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchStatus
@@ -49,12 +50,13 @@ internal data class PitTecDispatchEnvelopeDto(
     @SerialName("last_event_at") val lastEventAt: String? = null,
     @SerialName("allowed_actions") val allowedActions: List<String> = emptyList(),
     val offer: PitTecOfferDto? = null,
+    val candidate: PitTecCandidateDto? = null,
     val provider: PitTecProviderDto? = null,
     val appointment: PitTecAppointmentDto? = null,
 ) {
     fun domainOrNull(): PitTecDispatchSnapshot? = (snapshot ?: PitTecDispatchSnapshotDto(
         searchId, serviceId, serviceName, status, radiusMeters, revision, serverNow,
-        lastEvent, lastEventAt, allowedActions, offer, provider, appointment,
+        lastEvent, lastEventAt, allowedActions, offer, candidate, provider, appointment,
     )).toDomainOrNull()
 }
 
@@ -71,6 +73,7 @@ internal data class PitTecDispatchSnapshotDto(
     @SerialName("last_event_at") val lastEventAt: String? = null,
     @SerialName("allowed_actions") val allowedActions: List<String> = emptyList(),
     val offer: PitTecOfferDto? = null,
+    val candidate: PitTecCandidateDto? = null,
     val provider: PitTecProviderDto? = null,
     val appointment: PitTecAppointmentDto? = null,
 ) {
@@ -89,6 +92,7 @@ internal data class PitTecDispatchSnapshotDto(
                 runCatching { PitTecDispatchAction.valueOf(it) }.getOrNull()
             }.toSet(),
             offer = offer?.toDomain(),
+            candidate = candidate?.toDomain(),
             provider = provider?.toDomain(),
             appointment = appointment?.toDomain(),
         ).takeIf(PitTecDispatchSnapshot::isValid)
@@ -101,6 +105,14 @@ internal data class PitTecOfferDto(
     val region: String,
 ) {
     fun toDomain() = PitTecOffer(approximateDistanceMeters, region)
+}
+
+@Serializable
+internal data class PitTecCandidateDto(
+    @SerialName("provider_name") val providerName: String,
+    @SerialName("approximate_distance_meters") val approximateDistanceMeters: Int,
+) {
+    fun toDomain() = PitTecCandidate(providerName, approximateDistanceMeters)
 }
 
 @Serializable

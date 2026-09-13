@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -49,21 +48,18 @@ import com.trustarx.pitgo.core.map.model.MapRenderModel
 import com.trustarx.pitgo.core.map.model.MapResourceState
 import com.trustarx.pitgo.core.map.model.MapStyleState
 import com.trustarx.pitgo.core.map.ui.MapLibreMapHost
-import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.features.payment.model.PaymentStatus
-import com.trustarx.pitgo.features.pittec.model.DistancePerimeter
-import com.trustarx.pitgo.features.pittec.model.PitTecAppointmentStatus
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchPhase
 import com.trustarx.pitgo.features.pittec.model.PitTecDiscoveryState
 import com.trustarx.pitgo.features.pittec.model.PitTecLocationState
 import com.trustarx.pitgo.features.pittec.model.PitTecUiState
-import com.trustarx.pitgo.features.pittec.model.ServiceEstimate
 import com.trustarx.pitgo.features.pittec.viewmodel.PitTecViewModel
 
 @Composable
 fun PitTecRoute(
     viewModel: PitTecViewModel,
     onBack: () -> Unit,
+    onNeedsPayment: (requestId: String) -> Unit,
     onAccepted: (appointmentId: String) -> Unit,
     onSessionExpired: () -> Unit,
 ) {
@@ -97,14 +93,23 @@ fun PitTecRoute(
     LaunchedEffect(content?.discoveryState) {
         if (content?.discoveryState == PitTecDiscoveryState.SessionExpired) onSessionExpired()
     }
+    // (019) Duas etapas guardadas por id, cada uma disparando só uma vez: abrir o pagamento real
+    // assim que o prestador aceita (ConfirmingValues ainda não aprovado), e só então seguir para o
+    // acompanhamento quando o próprio PitTecViewModel confirmar a aprovação do pagamento.
+    var paymentRequestedForSearchId by remember { mutableStateOf<String?>(null) }
     var navigatedAppointmentId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(content?.dispatch) {
-        val active = content?.dispatch as? PitTecDispatchPhase.Active ?: return@LaunchedEffect
-        val appointment = active.snapshot.appointment ?: return@LaunchedEffect
-        if (appointment.status !in setOf(PitTecAppointmentStatus.ACCEPTED, PitTecAppointmentStatus.IN_PROGRESS)) return@LaunchedEffect
-        if (navigatedAppointmentId == appointment.id) return@LaunchedEffect
-        navigatedAppointmentId = appointment.id
-        onAccepted(appointment.id)
+        val dispatch = content?.dispatch as? PitTecDispatchPhase.ConfirmingValues ?: return@LaunchedEffect
+        val appointment = dispatch.snapshot.appointment ?: return@LaunchedEffect
+        if (dispatch.paymentApproved) {
+            if (navigatedAppointmentId == appointment.id) return@LaunchedEffect
+            navigatedAppointmentId = appointment.id
+            onAccepted(appointment.id)
+        } else {
+            if (paymentRequestedForSearchId == dispatch.snapshot.searchId) return@LaunchedEffect
+            paymentRequestedForSearchId = dispatch.snapshot.searchId
+            onNeedsPayment(dispatch.snapshot.searchId)
+        }
     }
     val hasFinePermission = ContextCompat.checkSelfPermission(
         context, Manifest.permission.ACCESS_FINE_LOCATION,
@@ -128,6 +133,8 @@ fun PitTecRoute(
         },
         onCancelSearch = viewModel::cancelSearch,
         onRetryDispatch = viewModel::retryDispatch,
+        onConfirmCandidate = viewModel::confirmCandidate,
+        onDeclineCandidate = viewModel::declineCandidate,
     )
 }
 
@@ -145,6 +152,8 @@ private fun PitTecScreen(
     onRequestPitTec: () -> Unit,
     onCancelSearch: () -> Unit,
     onRetryDispatch: () -> Unit,
+    onConfirmCandidate: () -> Unit,
+    onDeclineCandidate: () -> Unit,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val refundedMessage = stringResource(R.string.payment_refunded_message)
@@ -210,11 +219,15 @@ private fun PitTecScreen(
                     ) { Text(stringResource(R.string.service_map_my_location)) }
                 }
             }
-            EstimateGatedDispatchOverlay(
+            // (019) Sem card de estimativa fictícia — DispatchOverlay já cobre None com o botão
+            // real de "Solicitar" (pittec_call) até o card final de valores/pagamento real.
+            DispatchOverlay(
                 phase = state.dispatch,
                 onRequestPitTec = onRequestPitTec,
                 onCancelSearch = onCancelSearch,
                 onRetryDispatch = onRetryDispatch,
+                onConfirmCandidate = onConfirmCandidate,
+                onDeclineCandidate = onDeclineCandidate,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -251,41 +264,5 @@ private fun DiscoveryStateBanner(
                 Text(stringResource(R.string.map_retry))
             }
         }
-    }
-}
-
-/**
- * Adds a fixed-perimeter cost estimate step in front of the real dispatch flow — PitTec has no
- * real price in the backend, so this figure is a placeholder only (see EstimateCard). Every state
- * from "Buscar PitTec" onward (searching, awaiting response, found, empty, failure) is the
- * existing real [DispatchOverlay], unchanged: real search, real candidate, real acceptance.
- */
-@Composable
-private fun EstimateGatedDispatchOverlay(
-    phase: PitTecDispatchPhase,
-    onRequestPitTec: () -> Unit,
-    onCancelSearch: () -> Unit,
-    onRetryDispatch: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    if (phase != PitTecDispatchPhase.None) {
-        DispatchOverlay(phase, onRequestPitTec, onCancelSearch, onRetryDispatch, modifier)
-        return
-    }
-    var estimateVisible by remember { mutableStateOf(false) }
-    if (estimateVisible) {
-        EstimateCard(
-            estimate = ServiceEstimate(DistancePerimeter(5)),
-            confirmEnabled = true,
-            onConfirm = { estimateVisible = false; onRequestPitTec() },
-            onDismiss = { estimateVisible = false },
-            modifier = modifier,
-        )
-    } else {
-        Button(
-            onClick = { estimateVisible = true },
-            modifier = modifier.fillMaxWidth().padding(PitGoSpacing.Medium)
-                .heightIn(min = PitGoSize.PrimaryActionMinHeight),
-        ) { Text(stringResource(R.string.pittec_mock_search_cta)) }
     }
 }

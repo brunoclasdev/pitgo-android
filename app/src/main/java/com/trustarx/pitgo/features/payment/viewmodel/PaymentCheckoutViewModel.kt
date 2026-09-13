@@ -11,6 +11,7 @@ import com.trustarx.pitgo.core.catalog.model.CatalogItemResult
 import com.trustarx.pitgo.core.catalog.repository.ServiceCatalogRepository
 import com.trustarx.pitgo.core.navigation.PitGoRoutes
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchKind
+import com.trustarx.pitgo.features.mobiledispatch.model.isUuid
 import com.trustarx.pitgo.features.payment.model.CreatePaymentCommand
 import com.trustarx.pitgo.features.payment.model.CreatePaymentResult
 import com.trustarx.pitgo.features.payment.model.Payment
@@ -46,8 +47,16 @@ class PaymentCheckoutViewModel(
         MobileDispatchKind.valueOf(savedStateHandle.get<String>(PitGoRoutes.PaymentDispatchKindArg).orEmpty())
     }.getOrDefault(MobileDispatchKind.MOBILE_SEQUENTIAL)
 
-    /** The id the dispatch screen will reuse to start once this payment is approved. */
-    val requestId: String = UUID.randomUUID().toString()
+    /**
+     * The id the dispatch screen will reuse to start once this payment is approved. Normally a
+     * fresh id (guincho móvel, paid before dispatch); `019-pittec-request-flow` instead supplies
+     * the PitTec search's own id here, since that search/appointment already exists and the
+     * payment must be tied to it (`arrive_pittec_appointment` checks
+     * `payments.request_id = dispatch_search_id`).
+     */
+    val requestId: String = savedStateHandle.get<String>(PitGoRoutes.PaymentRequestIdArg)
+        ?.takeIf(String::isUuid)
+        ?: UUID.randomUUID().toString()
 
     private var amount: BigDecimal = BigDecimal.ZERO
     private var savedCards: List<SavedCard> = emptyList()

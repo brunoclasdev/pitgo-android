@@ -510,6 +510,11 @@
     <string name="pittec_arrived">PitTec chegou</string>
     <string name="pittec_arrive">CHEGUEI</string>
     <string name="pittec_complete">CONCLUIR ATENDIMENTO</string>
+    <string name="pittec_candidate_found_title">PitTec encontrado</string>
+    <string name="pittec_candidate_distance">A %1$s de distância</string>
+    <string name="pittec_candidate_confirm">Confirmar</string>
+    <string name="pittec_candidate_decline">Recusar</string>
+    <string name="pittec_confirming_values">Preparando pagamento…</string>
     <string name="pittec_cancel_search">Cancelar busca</string>
     <string name="pittec_cancel_service">Cancelar atendimento</string>
     <string name="pittec_cancel_reason_required">Informe o motivo do cancelamento.</string>
@@ -553,7 +558,6 @@
     <string name="pittec_mock_decline">Recusar</string>
     <string name="pittec_mock_pulse_content_description">Nova solicitação PitTec chegando</string>
 
-    <string name="pittec_mock_search_cta">Buscar PitTec</string>
     <string name="pittec_mock_confirm">Confirmar</string>
     <string name="pittec_mock_estimating">Calculando estimativa…</string>
     <string name="pittec_mock_estimate_heading">Estimativa PitTec</string>
