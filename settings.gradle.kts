@@ -19,6 +19,16 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Mercado Pago Android SDK is not published to Maven Central, and it transitively pulls
+        // other com.mercadolibre.* modules (e.g. com.mercadolibre.android.device) from this same
+        // repository — restrict by namespace prefix, not just the top-level SDK group.
+        maven {
+            url = uri("https://artifacts.mercadolibre.com/repository/android-releases")
+            content {
+                includeGroupByRegex("com\\.mercadopago\\..*")
+                includeGroupByRegex("com\\.mercadolibre\\..*")
+            }
+        }
     }
 }
 

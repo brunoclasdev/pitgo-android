@@ -6,6 +6,7 @@ import com.trustarx.pitgo.core.map.model.MapMarkerKind
 import com.trustarx.pitgo.core.map.model.MapMarkerSpec
 import com.trustarx.pitgo.core.map.model.MapViewport
 import com.trustarx.pitgo.core.map.model.MapViewportCommand
+import com.trustarx.pitgo.features.payment.model.PaymentStatus
 import java.math.BigDecimal
 
 enum class MobileDispatchStatus {
@@ -113,6 +114,9 @@ sealed interface ClientMobileDispatchUiState {
         val pending: DispatchPendingAction? = null,
         val failure: MobileDispatchFailure? = null,
         val remainingSeconds: Long? = null,
+        // Set when a payment approved for this search moves to REFUND_PENDING/REFUNDED/
+        // REFUND_FAILED (spec 018, FR-015/FR-017/FR-018) — surfaced as a banner by the screen.
+        val refundNotice: PaymentStatus? = null,
     ) : ClientMobileDispatchUiState
     data class Empty(val serviceName: String) : ClientMobileDispatchUiState
     data class Terminal(val status: MobileDispatchStatus) : ClientMobileDispatchUiState

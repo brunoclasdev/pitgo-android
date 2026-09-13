@@ -18,6 +18,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -48,6 +50,7 @@ import com.trustarx.pitgo.core.map.model.MapResourceState
 import com.trustarx.pitgo.core.map.model.MapStyleState
 import com.trustarx.pitgo.core.map.ui.MapLibreMapHost
 import com.trustarx.pitgo.core.design.theme.PitGoSize
+import com.trustarx.pitgo.features.payment.model.PaymentStatus
 import com.trustarx.pitgo.features.pittec.model.DistancePerimeter
 import com.trustarx.pitgo.features.pittec.model.PitTecAppointmentStatus
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchPhase
@@ -143,6 +146,17 @@ private fun PitTecScreen(
     onCancelSearch: () -> Unit,
     onRetryDispatch: () -> Unit,
 ) {
+    val snackbarHostState = remember { SnackbarHostState() }
+    val refundedMessage = stringResource(R.string.payment_refunded_message)
+    val refundPendingMessage = stringResource(R.string.payment_refund_pending_message)
+    val refundNotice = (state as? PitTecUiState.Content)?.refundNotice
+    LaunchedEffect(refundNotice) {
+        when (refundNotice) {
+            PaymentStatus.REFUNDED -> snackbarHostState.showSnackbar(refundedMessage)
+            PaymentStatus.REFUND_FAILED -> snackbarHostState.showSnackbar(refundPendingMessage)
+            else -> Unit
+        }
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -154,6 +168,7 @@ private fun PitTecScreen(
                 },
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         if (state !is PitTecUiState.Content) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {

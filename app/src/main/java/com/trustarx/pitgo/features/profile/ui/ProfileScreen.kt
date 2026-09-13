@@ -58,6 +58,7 @@ fun ProfileRoute(
     onMigrateProvider: () -> Unit,
     onOpenAddress: () -> Unit,
     onOpenGarage: () -> Unit,
+    onOpenPaymentMethods: () -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -69,6 +70,7 @@ fun ProfileRoute(
         onMigrateProvider = onMigrateProvider,
         onOpenAddress = onOpenAddress,
         onOpenGarage = onOpenGarage,
+        onOpenPaymentMethods = onOpenPaymentMethods,
         onAppearanceSelected = viewModel::setAppearanceMode,
         onBottomItemClick = onBottomItemClick,
         onLogout = onLogout,
@@ -83,6 +85,7 @@ private fun ProfileScreen(
     onMigrateProvider: () -> Unit,
     onOpenAddress: () -> Unit,
     onOpenGarage: () -> Unit,
+    onOpenPaymentMethods: () -> Unit,
     onAppearanceSelected: (AppearanceMode) -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
     onLogout: () -> Unit,
@@ -119,6 +122,7 @@ private fun ProfileScreen(
 
             ProfileAddressCard(profileState.address, profileState.addressLoading, onOpenAddress)
             ProfileVehicleCard(account.primaryVehicle, onOpenGarage)
+            ProfilePaymentMethodsCard(onOpenPaymentMethods)
             ProfileAppearanceCard(profileState.appearanceMode, onAppearanceSelected)
 
             if (legacyProviderMigrationAvailable) {
@@ -198,6 +202,18 @@ private fun ProfileVehicleCard(vehicle: Vehicle?, onOpenGarage: () -> Unit) {
                 vehicle?.displayName ?: stringResource(R.string.home_no_vehicle_title),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+@Composable
+private fun ProfilePaymentMethodsCard(onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().sizeIn(minHeight = PitGoSize.MinimumTouchTarget),
+    ) {
+        Column(Modifier.padding(PitGoSpacing.Medium)) {
+            Text(stringResource(R.string.profile_payment_methods_label), style = MaterialTheme.typography.titleMedium)
         }
     }
 }

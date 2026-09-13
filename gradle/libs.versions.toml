@@ -14,6 +14,8 @@ kotlinSerialization = "2.2.10"
 serializationJson = "1.9.0"
 dataStore = "1.2.1"
 coil = "3.3.0"
+# Confirm against https://github.com/mercadopago/sdk-android/releases before upgrading.
+mercadoPagoSdk = "1.0.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -39,6 +41,8 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "dataStore" }
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 coil-network-ktor3 = { group = "io.coil-kt.coil3", name = "coil-network-ktor3", version.ref = "coil" }
+mercadopago-sdk-bom = { group = "com.mercadopago.android.sdk", name = "sdk-android-bom", version.ref = "mercadoPagoSdk" }
+mercadopago-sdk-core-methods = { group = "com.mercadopago.android.sdk", name = "core-methods" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

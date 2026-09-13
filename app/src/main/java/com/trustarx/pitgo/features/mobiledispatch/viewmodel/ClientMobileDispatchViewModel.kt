@@ -13,11 +13,16 @@ import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchStartComma
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchStatus
 import com.trustarx.pitgo.features.mobiledispatch.model.PendingDispatchAction
 import com.trustarx.pitgo.features.mobiledispatch.repository.MobileDispatchRepository
+import com.trustarx.pitgo.features.payment.model.PaymentEvent
+import com.trustarx.pitgo.features.payment.model.PaymentStatus
+import com.trustarx.pitgo.features.payment.model.RefundResult
+import com.trustarx.pitgo.features.payment.repository.PaymentRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
@@ -27,6 +32,11 @@ class ClientMobileDispatchViewModel(
     private val serviceId: String,
     private val repository: MobileDispatchRepository,
     private val locationRepository: DeviceLocationRepository,
+    // Set only when arriving straight from an approved payment (features/payment); the search
+    // then starts immediately with that already-paid id instead of waiting for a manual tap, and
+    // instead of trying to restore an (impossible, brand new) older session — see spec 018.
+    initialRequestId: String? = null,
+    private val paymentRepository: PaymentRepository? = null,
 ) : ViewModel() {
     private val _state = MutableStateFlow<ClientMobileDispatchUiState>(ClientMobileDispatchUiState.Restoring)
     val state: StateFlow<ClientMobileDispatchUiState> = _state.asStateFlow()
@@ -35,9 +45,46 @@ class ClientMobileDispatchViewModel(
     private var streamJob: Job? = null
     private var pollJob: Job? = null
     private var clockJob: Job? = null
-    private var searchId = UUID.randomUUID().toString()
+    private var refundWatcherJob: Job? = null
+    private var searchId = initialRequestId ?: UUID.randomUUID().toString()
 
-    init { restore() }
+    init {
+        if (initialRequestId != null) startWithPreciseLocation() else restore()
+        watchForRefund()
+    }
+
+    /**
+     * A cancellation or an exhausted search moves an approved payment to REFUND_PENDING
+     * server-side (FR-015/FR-017); this client-initiated call is what actually performs the
+     * Mercado Pago refund (FR-018) — see contracts/payment-rpcs.md.
+     */
+    private fun watchForRefund() {
+        val payments = paymentRepository ?: return
+        refundWatcherJob?.cancel()
+        refundWatcherJob = viewModelScope.launch {
+            payments.observe(searchId).collect { event ->
+                if (event !is PaymentEvent.StatusChanged) return@collect
+                when (event.status) {
+                    PaymentStatus.REFUND_PENDING -> {
+                        setRefundNotice(PaymentStatus.REFUND_PENDING)
+                        val paymentId = event.paymentId ?: return@collect
+                        when (val result = payments.refund(paymentId)) {
+                            is RefundResult.Done -> setRefundNotice(result.status)
+                            is RefundResult.Failure -> Unit // stays REFUND_PENDING; safe to retry later
+                        }
+                    }
+                    PaymentStatus.REFUNDED, PaymentStatus.REFUND_FAILED -> setRefundNotice(event.status)
+                    else -> Unit
+                }
+            }
+        }
+    }
+
+    private fun setRefundNotice(status: PaymentStatus) {
+        _state.update { current ->
+            if (current is ClientMobileDispatchUiState.Content) current.copy(refundNotice = status) else current
+        }
+    }
 
     fun restore() = launchAction(PendingDispatchAction.START) { repository.restore() }
 
@@ -74,6 +121,7 @@ class ClientMobileDispatchViewModel(
             -> {
                 searchId = UUID.randomUUID().toString()
                 startWithPreciseLocation()
+                watchForRefund()
             }
             else -> restore()
         }
@@ -228,10 +276,13 @@ class ClientMobileDispatchViewModel(
             serviceId: String,
             repository: MobileDispatchRepository,
             locationRepository: DeviceLocationRepository,
+            initialRequestId: String? = null,
+            paymentRepository: PaymentRepository? = null,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                ClientMobileDispatchViewModel(serviceId, repository, locationRepository) as T
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = ClientMobileDispatchViewModel(
+                serviceId, repository, locationRepository, initialRequestId, paymentRepository,
+            ) as T
         }
     }
 }

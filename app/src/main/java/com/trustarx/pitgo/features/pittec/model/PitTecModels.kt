@@ -7,6 +7,7 @@ import com.trustarx.pitgo.core.map.model.MapMarkerSpec
 import com.trustarx.pitgo.core.map.model.MapSurfaceState
 import com.trustarx.pitgo.core.map.model.MapViewport
 import com.trustarx.pitgo.core.map.model.MapViewportCommand
+import com.trustarx.pitgo.features.payment.model.PaymentStatus
 
 /** One anonymized, server-approximated PitTec position on the pre-request discovery map. */
 data class NearbyPitTecMarker(
@@ -155,6 +156,9 @@ sealed interface PitTecUiState {
         val surfaceState: MapSurfaceState = MapSurfaceState(),
         val styleReloadRevision: Long = 0L,
         val dispatch: PitTecDispatchPhase = PitTecDispatchPhase.Restoring,
+        // Set when a payment approved for this call moves to REFUND_PENDING/REFUNDED/
+        // REFUND_FAILED (spec 018, FR-015/FR-017/FR-018) — surfaced as a banner by the screen.
+        val refundNotice: PaymentStatus? = null,
     ) : PitTecUiState {
         val mapMarkers: List<MapMarkerSpec>
             get() {

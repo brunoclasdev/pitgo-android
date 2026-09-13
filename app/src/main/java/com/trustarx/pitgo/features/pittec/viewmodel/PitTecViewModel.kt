@@ -27,6 +27,10 @@ import com.trustarx.pitgo.features.pittec.model.PitTecPendingAction
 import com.trustarx.pitgo.features.pittec.model.PitTecStartCommand
 import com.trustarx.pitgo.features.pittec.model.PitTecUiState
 import com.trustarx.pitgo.features.pittec.repository.PitTecRepository
+import com.trustarx.pitgo.features.payment.model.PaymentEvent
+import com.trustarx.pitgo.features.payment.model.PaymentStatus
+import com.trustarx.pitgo.features.payment.model.RefundResult
+import com.trustarx.pitgo.features.payment.repository.PaymentRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,6 +46,11 @@ class PitTecViewModel(
     private val repository: PitTecRepository,
     private val locationRepository: DeviceLocationRepository,
     private val connectivityObserver: ConnectivityObserver,
+    // Set only when arriving straight from an approved payment (features/payment); the call
+    // starts immediately with that already-paid id instead of waiting for a manual "Chamar
+    // PitTec" tap, and instead of trying to restore an (impossible, brand new) older session.
+    initialRequestId: String? = null,
+    private val paymentRepository: PaymentRepository? = null,
 ) : ViewModel() {
     private val _state = MutableStateFlow<PitTecUiState>(
         if (!isUuid(serviceId)) PitTecUiState.InvalidService
@@ -55,13 +64,16 @@ class PitTecViewModel(
     private var streamJob: Job? = null
     private var pollJob: Job? = null
     private var clockJob: Job? = null
-    private var requestId = UUID.randomUUID().toString()
+    private var requestId = initialRequestId ?: UUID.randomUUID().toString()
     private var cameraRevision = 0L
+
+    private var refundWatcherJob: Job? = null
 
     init {
         if (_state.value is PitTecUiState.Content) {
-            restoreDispatch()
             useDeviceLocation()
+            if (initialRequestId != null) startDispatch() else restoreDispatch()
+            watchForRefund()
         }
         viewModelScope.launch {
             connectivityObserver.state.collect { connectivity ->
@@ -160,8 +172,14 @@ class PitTecViewModel(
             content.dispatch !is PitTecDispatchPhase.Failure
         ) return
         if (actionJob?.isActive == true) return
-        val id = operation.incrementAndGet()
         requestId = UUID.randomUUID().toString()
+        startDispatch()
+        watchForRefund()
+    }
+
+    private fun startDispatch() {
+        if (actionJob?.isActive == true) return
+        val id = operation.incrementAndGet()
         actionJob = viewModelScope.launch {
             setDispatch(PitTecDispatchPhase.Locating)
             val result = when (val location = locationRepository.currentPreciseFix(30_000)) {
@@ -176,6 +194,35 @@ class PitTecViewModel(
             if (id == operation.get()) applyDispatch(result)
         }
     }
+
+    /**
+     * A cancellation or an exhausted search moves an approved payment to REFUND_PENDING
+     * server-side (FR-015/FR-017); this client-initiated call is what actually performs the
+     * Mercado Pago refund (FR-018) — see contracts/payment-rpcs.md.
+     */
+    private fun watchForRefund() {
+        val payments = paymentRepository ?: return
+        refundWatcherJob?.cancel()
+        refundWatcherJob = viewModelScope.launch {
+            payments.observe(requestId).collect { event ->
+                if (event !is PaymentEvent.StatusChanged) return@collect
+                when (event.status) {
+                    PaymentStatus.REFUND_PENDING -> {
+                        setRefundNotice(PaymentStatus.REFUND_PENDING)
+                        val paymentId = event.paymentId ?: return@collect
+                        when (val result = payments.refund(paymentId)) {
+                            is RefundResult.Done -> setRefundNotice(result.status)
+                            is RefundResult.Failure -> Unit // stays REFUND_PENDING; safe to retry later
+                        }
+                    }
+                    PaymentStatus.REFUNDED, PaymentStatus.REFUND_FAILED -> setRefundNotice(event.status)
+                    else -> Unit
+                }
+            }
+        }
+    }
+
+    private fun setRefundNotice(status: PaymentStatus) = update { it.copy(refundNotice = status) }
 
     fun cancelSearch() {
         val active = dispatchActive() ?: return
@@ -338,10 +385,13 @@ class PitTecViewModel(
             repository: PitTecRepository,
             locationRepository: DeviceLocationRepository,
             connectivityObserver: ConnectivityObserver,
+            initialRequestId: String? = null,
+            paymentRepository: PaymentRepository? = null,
         ) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                PitTecViewModel(serviceId, repository, locationRepository, connectivityObserver) as T
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = PitTecViewModel(
+                serviceId, repository, locationRepository, connectivityObserver, initialRequestId, paymentRepository,
+            ) as T
         }
     }
 }

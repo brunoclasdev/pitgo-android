@@ -20,6 +20,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -48,6 +50,7 @@ import com.trustarx.pitgo.core.map.model.MapRenderModel
 import com.trustarx.pitgo.core.map.model.MapViewport
 import com.trustarx.pitgo.core.map.model.MapViewportCommand
 import com.trustarx.pitgo.core.map.ui.MapLibreMapHost
+import com.trustarx.pitgo.features.payment.model.PaymentStatus
 import com.trustarx.pitgo.features.mobiledispatch.model.ClientMobileDispatchUiState
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchFailure
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchStatus
@@ -118,10 +121,24 @@ private fun ClientMobileDispatchScreen(
     onNext: () -> Unit,
     onRequest: () -> Unit,
 ) {
-    Scaffold(topBar = { TopAppBar(
-        title = { Text(stringResource(R.string.mobile_dispatch_title)) },
-        navigationIcon = { IconButton(onBack) { Icon(painterResource(R.drawable.ic_back), stringResource(R.string.map_back)) } },
-    ) }) { padding ->
+    val snackbarHostState = remember { SnackbarHostState() }
+    val refundedMessage = stringResource(R.string.payment_refunded_message)
+    val refundPendingMessage = stringResource(R.string.payment_refund_pending_message)
+    val refundNotice = (state as? ClientMobileDispatchUiState.Content)?.refundNotice
+    LaunchedEffect(refundNotice) {
+        when (refundNotice) {
+            PaymentStatus.REFUNDED -> snackbarHostState.showSnackbar(refundedMessage)
+            PaymentStatus.REFUND_FAILED -> snackbarHostState.showSnackbar(refundPendingMessage)
+            else -> Unit
+        }
+    }
+    Scaffold(
+        topBar = { TopAppBar(
+            title = { Text(stringResource(R.string.mobile_dispatch_title)) },
+            navigationIcon = { IconButton(onBack) { Icon(painterResource(R.drawable.ic_back), stringResource(R.string.map_back)) } },
+        ) },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+    ) { padding ->
         when (state) {
             ClientMobileDispatchUiState.Restoring -> Loading(Modifier.padding(padding), R.string.mobile_dispatch_restoring)
             ClientMobileDispatchUiState.Locating -> Loading(Modifier.padding(padding), R.string.mobile_dispatch_locating)

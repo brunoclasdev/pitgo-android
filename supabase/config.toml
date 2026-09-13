@@ -46,3 +46,20 @@ verify_jwt = false
 
 [functions.pittec-route]
 verify_jwt = true
+
+[functions.mp-create-payment]
+verify_jwt = true
+
+[functions.mp-save-card]
+verify_jwt = true
+
+[functions.mp-remove-card]
+verify_jwt = true
+
+[functions.mp-refund-payment]
+verify_jwt = true
+
+# Called by Mercado Pago itself (no user session); authenticity is verified inside the
+# function via the MP_WEBHOOK_SECRET signature instead of a Supabase JWT.
+[functions.mp-webhook]
+verify_jwt = false

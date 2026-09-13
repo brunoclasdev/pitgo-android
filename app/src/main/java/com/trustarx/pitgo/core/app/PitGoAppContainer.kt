@@ -31,6 +31,8 @@ import com.trustarx.pitgo.features.mobiledispatch.repository.MobileDispatchRepos
 import com.trustarx.pitgo.features.pittec.repository.PitTecRepository
 import com.trustarx.pitgo.core.routing.repository.PitTecRouteRepository
 import com.trustarx.pitgo.core.preferences.ProviderTrackingPreferences
+import com.trustarx.pitgo.features.payment.repository.PaymentRepository
+import com.trustarx.pitgo.features.paymentmethods.repository.SavedCardRepository
 
 class PitGoAppContainer(context: Context) {
     private val supabase = SupabaseClientProvider.client
@@ -57,6 +59,8 @@ class PitGoAppContainer(context: Context) {
     val mobileDispatchRepository = MobileDispatchRepository(supabase)
     val pitTecRepository = PitTecRepository(supabase)
     val pitTecRouteRepository = PitTecRouteRepository(supabase)
+    val paymentRepository = PaymentRepository(supabase)
+    val savedCardRepository = SavedCardRepository(supabase)
     val clientAddressRepository = ClientAddressRepository(supabase)
     val deviceLocationRepository = DeviceLocationRepository(AndroidLocationDataSource(context))
     val onboardingRepository = VehicleOnboardingRepository(context)

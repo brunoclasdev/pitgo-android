@@ -83,6 +83,10 @@ import com.trustarx.pitgo.features.pittec.viewmodel.PitTecProviderViewModel
 import com.trustarx.pitgo.features.pittec.viewmodel.PitTecResumeState
 import com.trustarx.pitgo.features.pittec.viewmodel.PitTecResumeViewModel
 import com.trustarx.pitgo.features.pittec.viewmodel.PitTecViewModel
+import com.trustarx.pitgo.features.payment.ui.PaymentCheckoutRoute
+import com.trustarx.pitgo.features.payment.viewmodel.PaymentCheckoutViewModel
+import com.trustarx.pitgo.features.paymentmethods.ui.PaymentMethodsRoute
+import com.trustarx.pitgo.features.paymentmethods.viewmodel.PaymentMethodsViewModel
 
 private const val TRACKING_WATCHDOG_INTERVAL_MS = 30_000L
 
@@ -113,6 +117,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         PitGoRoutes.Login,
         PitGoRoutes.Profile,
         PitGoRoutes.ClientAddress,
+        PitGoRoutes.PaymentMethods,
         PitGoRoutes.VehicleOnboarding,
         PitGoRoutes.VehicleFormPattern,
         PitGoRoutes.RequestServicePattern,
@@ -128,6 +133,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         PitGoRoutes.MobileDispatch,
         PitGoRoutes.ProviderRequest,
         PitGoRoutes.PitTec,
+        PitGoRoutes.Payment,
     )
     SystemBarIconAppearance(usesAppSurface && !isSystemInDarkTheme())
 
@@ -445,8 +451,11 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         if (!navigationPending) {
                             navigationPending = true
                             val destination = when (service.dispatchKind) {
-                                ServiceDispatchKind.MOBILE_SEQUENTIAL -> PitGoRoutes.mobileDispatchNew(service.id)
-                                ServiceDispatchKind.PITTEC_AUTO_SEQUENTIAL -> PitGoRoutes.pitTec(service.id)
+                                // Payment (spec 018) sits before dispatch for both auto-matched
+                                // kinds; it generates the request_id and, once approved, forwards
+                                // to the same dispatch routes below with that id attached.
+                                ServiceDispatchKind.MOBILE_SEQUENTIAL, ServiceDispatchKind.PITTEC_AUTO_SEQUENTIAL ->
+                                    PitGoRoutes.payment(service.id, service.dispatchKind.name)
                                 ServiceDispatchKind.BROWSE -> PitGoRoutes.serviceMap(service.id)
                             }
                             navController.navigate(destination) {
@@ -533,6 +542,9 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     onOpenGarage = {
                         navController.navigate(PitGoRoutes.Garage) { launchSingleTop = true }
                     },
+                    onOpenPaymentMethods = {
+                        navController.navigate(PitGoRoutes.PaymentMethods) { launchSingleTop = true }
+                    },
                     onBottomItemClick = { item ->
                         when (item) {
                             BottomItemId.HOME -> navController.navigate(PitGoRoutes.Home) {
@@ -547,6 +559,20 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         }
                     },
                     onLogout = sessionViewModel::logout,
+                )
+            }
+        }
+
+        composable(PitGoRoutes.PaymentMethods) {
+            val account = (sessionState as? AppSessionState.Authenticated.Client)?.account
+            if (account != null) {
+                val paymentMethodsViewModel: PaymentMethodsViewModel = viewModel(
+                    factory = PaymentMethodsViewModel.factory(container.savedCardRepository),
+                )
+                PaymentMethodsRoute(
+                    viewModel = paymentMethodsViewModel,
+                    profile = account.profile,
+                    onBack = { navController.popBackStack() },
                 )
             }
         }
@@ -722,10 +748,51 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         }
 
         composable(
+            route = PitGoRoutes.Payment,
+            arguments = listOf(
+                navArgument(PitGoRoutes.PaymentServiceArg) { type = NavType.StringType },
+                navArgument(PitGoRoutes.PaymentDispatchKindArg) { type = NavType.StringType },
+            ),
+        ) { entry ->
+            val serviceId = entry.arguments?.getString(PitGoRoutes.PaymentServiceArg).orEmpty()
+            val dispatchKind = entry.arguments?.getString(PitGoRoutes.PaymentDispatchKindArg).orEmpty()
+            if (sessionState is AppSessionState.Authenticated.Client && serviceId.isNotBlank()) {
+                val paymentViewModel: PaymentCheckoutViewModel = viewModel(
+                    factory = PaymentCheckoutViewModel.factory(
+                        container.serviceCatalogRepository, container.paymentRepository, container.savedCardRepository,
+                    ),
+                )
+                PaymentCheckoutRoute(
+                    viewModel = paymentViewModel,
+                    onBack = { navController.popBackStack() },
+                    onApproved = { requestId ->
+                        val destination = if (dispatchKind == "PITTEC_AUTO_SEQUENTIAL") {
+                            PitGoRoutes.pitTec(serviceId, requestId)
+                        } else {
+                            PitGoRoutes.mobileDispatchNew(serviceId, requestId)
+                        }
+                        navController.navigate(destination) {
+                            popUpTo(PitGoRoutes.Home)
+                            launchSingleTop = true
+                        }
+                    },
+                )
+            }
+        }
+
+        composable(
             route = PitGoRoutes.PitTec,
-            arguments = listOf(navArgument(PitGoRoutes.PitTecServiceArg) { type = NavType.StringType }),
+            arguments = listOf(
+                navArgument(PitGoRoutes.PitTecServiceArg) { type = NavType.StringType },
+                navArgument(PitGoRoutes.PaymentRequestIdArg) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
         ) { entry ->
             val serviceId = entry.arguments?.getString(PitGoRoutes.PitTecServiceArg).orEmpty()
+            val paidRequestId = entry.arguments?.getString(PitGoRoutes.PaymentRequestIdArg)
             if (sessionState is AppSessionState.Authenticated.Client && serviceId.isNotBlank()) {
                 val pitTecViewModel: PitTecViewModel = viewModel(
                     key = serviceId,
@@ -734,6 +801,8 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         container.pitTecRepository,
                         container.deviceLocationRepository,
                         container.connectivityObserver,
+                        paidRequestId,
+                        container.paymentRepository,
                     ),
                 )
                 PitTecRoute(
@@ -747,13 +816,23 @@ fun PitGoNavHost(container: PitGoAppContainer) {
 
         composable(
             route = PitGoRoutes.MobileDispatchNew,
-            arguments = listOf(navArgument(PitGoRoutes.MobileDispatchServiceArg) { type = NavType.StringType }),
+            arguments = listOf(
+                navArgument(PitGoRoutes.MobileDispatchServiceArg) { type = NavType.StringType },
+                navArgument(PitGoRoutes.PaymentRequestIdArg) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
         ) { entry ->
             val serviceId = entry.arguments?.getString(PitGoRoutes.MobileDispatchServiceArg).orEmpty()
+            val paidRequestId = entry.arguments?.getString(PitGoRoutes.PaymentRequestIdArg)
             if (sessionState is AppSessionState.Authenticated.Client && serviceId.isNotBlank()) {
                 val dispatchViewModel: ClientMobileDispatchViewModel = viewModel(
+                    key = serviceId,
                     factory = ClientMobileDispatchViewModel.factory(
                         serviceId, container.mobileDispatchRepository, container.deviceLocationRepository,
+                        paidRequestId, container.paymentRepository,
                     ),
                 )
                 ClientMobileDispatchRoute(

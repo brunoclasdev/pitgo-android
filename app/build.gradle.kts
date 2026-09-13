@@ -173,6 +173,25 @@ private fun isValidSupabaseUrl(value: String): Boolean = runCatching {
 private fun isClientSafeSupabaseKey(value: String): Boolean =
     publishableKeyPattern.matches(value) || isLegacyAnonKey(value)
 
+private val mercadoPagoPublicKeyPattern = Regex("^(TEST-|APP_USR-)[A-Za-z0-9-]+$")
+
+/**
+ * Only the Mercado Pago Public Key ever reaches the app; the Access Token stays in Supabase
+ * Secrets (see supabase/functions/mp-*). Still validated so a placeholder never ships silently.
+ */
+private fun validateMercadoPagoPublicKey(rawKey: String?): String {
+    val key = rawKey?.trim().orEmpty()
+    if (key.isBlank() || key.isPlaceholder() || !mercadoPagoPublicKeyPattern.matches(key)) {
+        throw GradleException(
+            "Invalid Mercado Pago configuration:\n- 'mercadoPagoPublicKey' must be a real " +
+                "TEST-/APP_USR- public key (never the Access Token). Provide it through a " +
+                "Gradle project property, ORG_GRADLE_PROJECT_mercadoPagoPublicKey, or " +
+                "local.properties."
+        )
+    }
+    return key
+}
+
 private fun isLegacyAnonKey(value: String): Boolean {
     if (!legacyJwtPattern.matches(value)) return false
 
@@ -205,6 +224,9 @@ plugins {
 private val supabaseConfiguration = validateSupabaseConfiguration(
     rawUrl = project.environmentProperty("supabaseUrl"),
     rawKey = project.environmentProperty("supabaseKey"),
+)
+private val mercadoPagoPublicKey = validateMercadoPagoPublicKey(
+    project.environmentProperty("mercadoPagoPublicKey"),
 )
 private val mapStyleConfiguration = validateMapStyleConfiguration(
     rawUrl = project.environmentProperty("mapStyleUrl"),
@@ -249,6 +271,11 @@ android {
             "String",
             "MAP_STYLE_ATTRIBUTION_URL",
             javaStringLiteral(mapStyleConfiguration.attributionUrl),
+        )
+        buildConfigField(
+            "String",
+            "MERCADO_PAGO_PUBLIC_KEY",
+            javaStringLiteral(mercadoPagoPublicKey),
         )
     }
 
@@ -296,6 +323,8 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.ktor3)
+    implementation(platform(libs.mercadopago.sdk.bom))
+    implementation(libs.mercadopago.sdk.core.methods)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
