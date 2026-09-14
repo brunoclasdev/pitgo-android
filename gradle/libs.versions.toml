@@ -3,6 +3,7 @@ agp = "9.1.1"
 composeBom = "2026.06.01"
 composeCompiler = "2.2.10"
 coreKtx = "1.19.0"
+coreSplashscreen = "1.0.1"
 activityCompose = "1.13.0"
 lifecycle = "2.10.0"
 navigationCompose = "2.9.8"
@@ -19,6 +20,7 @@ mercadoPagoSdk = "1.0.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "coreSplashscreen" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }

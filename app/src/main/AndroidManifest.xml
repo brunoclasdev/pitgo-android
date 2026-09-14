@@ -24,7 +24,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Pitgo">
+        android:theme="@style/Theme.Pitgo.Starting">
         <service
             android:name=".features.providertracking.service.ProviderLocationTrackingService"
             android:exported="false"

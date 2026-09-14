@@ -1,4 +1,11 @@
 <resources>
+    <style name="Theme.Pitgo.Starting" parent="Theme.SplashScreen">
+        <item name="postSplashScreenTheme">@style/Theme.Pitgo</item>
+        <item name="windowSplashScreenBackground">#6D28D9</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/pitgo_splash_transparent</item>
+        <item name="windowSplashScreenAnimationDuration">500</item>
+    </style>
+
     <style name="Theme.Pitgo" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:colorAccent">#6D28D9</item>
         <item name="android:fontFamily">sans</item>
