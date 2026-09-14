@@ -29,7 +29,17 @@ class AndroidLocationDataSource(context: Context) {
 
     @SuppressLint("MissingPermission")
     suspend fun currentPreciseLocation(): DeviceLocationFix? =
-        preciseUpdates(CURRENT_FIX_INTERVAL_MILLIS).first()
+        try {
+            preciseUpdates(CURRENT_FIX_INTERVAL_MILLIS).first()
+        } catch (_: IllegalStateException) {
+            // Location services can be switched off between the preflight check and the
+            // registration call. Treat that as an unavailable fix instead of crashing the app.
+            null
+        } catch (_: NoSuchElementException) {
+            null
+        } catch (_: SecurityException) {
+            null
+        }
 
     @SuppressLint("MissingPermission")
     suspend fun lastKnownLocation(): DeviceLocationFix? = enabledProviders()

@@ -82,9 +82,16 @@ Deno.serve(async (request) => {
   const status = mpStatusToPitGo(String(mpPayment.status ?? ""));
 
   const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
-  const { data: current } = await admin.from("payments").select("status, approved_at")
+  const { data: current } = await admin.from("payments").select("id,status,approved_at,request_id,client_id,dispatch_kind,appointment_id,quote_version,amount,currency")
     .eq("mp_payment_id", String(dataId)).maybeSingle();
   if (!current) return json(200, { code: "PAYMENT_NOT_FOUND" });
+
+  const externalReference = String(mpPayment.external_reference ?? "");
+  const providerAmount = Number(mpPayment.transaction_amount);
+  if (externalReference !== current.request_id || !Number.isFinite(providerAmount) ||
+      Math.abs(providerAmount - Number(current.amount)) > 0.01 || current.currency !== "BRL") {
+    return json(200, { code: "PAYMENT_CONTEXT_MISMATCH" });
+  }
 
   // Our own refund flow (mp-refund-payment) already moved this out of the live states — never
   // let a stale/duplicate notification revive it back to APPROVED.
@@ -93,11 +100,12 @@ Deno.serve(async (request) => {
     return json(200, { code: "IGNORED_AFTER_REFUND" });
   }
 
-  await admin.from("payments").update({
+  const { error: updateError } = await admin.from("payments").update({
     status,
     approved_at: status === "APPROVED" ? (current.approved_at ?? new Date().toISOString()) : current.approved_at,
     updated_at: new Date().toISOString(),
-  }).eq("mp_payment_id", String(dataId));
+  }).eq("id", current.id).eq("mp_payment_id", String(dataId));
+  if (updateError) return json(200, { code: "PERSIST_FAILED" });
 
   return json(200, { code: "PROCESSED" });
 });

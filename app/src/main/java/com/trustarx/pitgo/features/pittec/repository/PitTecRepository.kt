@@ -8,6 +8,8 @@ import com.trustarx.pitgo.features.pittec.model.PitTecDispatchResult
 import com.trustarx.pitgo.features.pittec.model.PitTecDiscoveryResult
 import com.trustarx.pitgo.features.pittec.model.PitTecFailure
 import com.trustarx.pitgo.features.pittec.model.PitTecStartCommand
+import com.trustarx.pitgo.features.pittec.model.PitTecQuoteOutcome
+import com.trustarx.pitgo.features.pittec.model.PitTecQuoteResult
 import com.trustarx.pitgo.features.pittec.model.isUuid
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.exceptions.HttpRequestException
@@ -90,6 +92,38 @@ class PitTecRepository(private val client: SupabaseClient) {
             put("p_search_id", searchId)
             put("p_expected_revision", revision)
         })
+    }
+
+    suspend fun respondToQuote(
+        requestId: String,
+        appointmentId: String,
+        quoteVersion: Long,
+        accept: Boolean,
+        revision: Long,
+    ): PitTecQuoteResult {
+        if (!requestId.isUuid() || !appointmentId.isUuid() || quoteVersion <= 0 || revision <= 0) {
+            return PitTecQuoteResult.Failure(PitTecFailure.CONTRACT)
+        }
+        return try {
+            val dto = withTimeout(RPC_TIMEOUT_MILLIS) {
+                client.postgrest.rpc("respond_to_pittec_quote", buildJsonObject {
+                    put("p_request_id", requestId)
+                    put("p_appointment_id", appointmentId)
+                    put("p_quote_version", quoteVersion)
+                    put("p_accept", accept)
+                    put("p_expected_revision", revision)
+                }).decodeAs<PitTecDispatchEnvelopeDto>()
+            }
+            val outcome = dto.outcome?.let { runCatching { PitTecQuoteOutcome.valueOf(it) }.getOrNull() }
+                ?: return PitTecQuoteResult.Failure(PitTecFailure.CONTRACT)
+            PitTecQuoteResult.Success(outcome, dto.domainOrNull())
+        } catch (_: TimeoutCancellationException) {
+            PitTecQuoteResult.Failure(PitTecFailure.TIMEOUT)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: Throwable) {
+            PitTecQuoteResult.Failure(classify(error))
+        }
     }
 
     /**

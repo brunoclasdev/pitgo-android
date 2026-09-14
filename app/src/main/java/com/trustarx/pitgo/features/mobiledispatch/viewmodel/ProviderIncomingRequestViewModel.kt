@@ -41,6 +41,16 @@ class ProviderIncomingRequestViewModel(
         viewModelScope.launch {
             while (true) { updateCountdown(); delay(1_000) }
         }
+        // Realtime is only a notification channel.  Keep the screen authoritative even when the
+        // websocket is silently stale (a common case after backgrounding or changing networks).
+        // The repository restore is status-aware and moves Request -> Active/None as soon as the
+        // server changes the appointment, so the UI never remains indefinitely on PENDING.
+        viewModelScope.launch {
+            while (true) {
+                delay(POLL_INTERVAL_MS)
+                refresh()
+            }
+        }
         viewModelScope.launch {
             state.collect { current ->
                 val appointmentId = (current as? ProviderIncomingUiState.Active)?.snapshot?.appointment?.id
@@ -157,6 +167,8 @@ class ProviderIncomingRequestViewModel(
     }
 
     companion object {
+        private const val POLL_INTERVAL_MS = 5_000L
+
         fun factory(
             providerId: String,
             repository: MobileDispatchRepository,

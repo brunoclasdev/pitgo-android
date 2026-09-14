@@ -8,6 +8,7 @@ import com.trustarx.pitgo.core.map.model.MapSurfaceState
 import com.trustarx.pitgo.core.map.model.MapViewport
 import com.trustarx.pitgo.core.map.model.MapViewportCommand
 import com.trustarx.pitgo.features.payment.model.PaymentStatus
+import java.math.BigDecimal
 
 /** One anonymized, server-approximated PitTec position on the pre-request discovery map. */
 data class NearbyPitTecMarker(
@@ -48,20 +49,43 @@ sealed interface PitTecDiscoveryResult {
 }
 
 /** Mirrors the shared `service_searches`/`appointments` status enums PitTec reuses server-side. */
-enum class PitTecDispatchStatus { SEARCHING, AWAITING_PROVIDER, ACCEPTED, IN_PROGRESS, CANCELLED, COMPLETED, EXHAUSTED }
+enum class PitTecDispatchStatus {
+    SEARCHING, AWAITING_PROVIDER, AWAITING_CLIENT_CONFIRMATION, AWAITING_PAYMENT,
+    ACCEPTED, IN_PROGRESS, CANCELLED, COMPLETED, EXHAUSTED,
+}
 
-enum class PitTecAppointmentStatus { PENDING, ACCEPTED, IN_PROGRESS, COMPLETED, CANCELLED, PROVIDER_REJECTED, EXPIRED }
+enum class PitTecAppointmentStatus {
+    PENDING, AWAITING_CLIENT_CONFIRMATION, AWAITING_PAYMENT,
+    ACCEPTED, IN_PROGRESS, COMPLETED, CANCELLED, PROVIDER_REJECTED, EXPIRED,
+}
 
-enum class PitTecDispatchAction { CANCEL, ACCEPT, DECLINE, ARRIVE, COMPLETE }
+enum class PitTecDispatchAction {
+    CANCEL, ACCEPT, DECLINE, CONFIRM_QUOTE, DECLINE_QUOTE, OPEN_PAYMENT, OPEN_TRACKING,
+    ARRIVE, COMPLETE,
+}
 
-enum class PitTecLastEvent { PROVIDER_REJECTED, OFFER_EXPIRED, PROVIDER_CANCELLED }
+enum class PitTecLastEvent {
+    PROVIDER_REJECTED, OFFER_EXPIRED, PROVIDER_CANCELLED, SEARCH_CONTINUES,
+    CLIENT_CONFIRMATION_TIMEOUT, QUOTE_DECLINED,
+}
+
+data class PitTecQuote(
+    val amount: BigDecimal,
+    val currency: String,
+    val version: Long,
+    val clientConfirmationDeadlineEpochMillis: Long?,
+    val clientConfirmedAtEpochMillis: Long?,
+) {
+    fun isValid() = amount.signum() > 0 && currency == "BRL" && version > 0
+}
 
 /** Approximate, decision-safe offer metadata shown only to the currently offered provider. */
 data class PitTecOffer(
     val approximateDistanceMeters: Int,
     val region: String,
+    val quote: PitTecQuote,
 ) {
-    fun isValid() = approximateDistanceMeters >= 0 && region.isNotBlank()
+    fun isValid() = approximateDistanceMeters >= 0 && region.isNotBlank() && quote.isValid()
 }
 
 data class PitTecProvider(
@@ -69,18 +93,6 @@ data class PitTecProvider(
     val displayName: String,
 ) {
     fun isValid() = providerId.isUuid() && displayName.isNotBlank()
-}
-
-/**
- * Candidato ainda não aceito, visível só ao cliente enquanto `appointment.status == PENDING`
- * (`019-pittec-request-flow`) — espelha `PitTecOffer` (que mostra a mesma distância ao prestador),
- * nunca coexiste com `PitTecProvider` no mesmo snapshot (mutuamente exclusivos por status).
- */
-data class PitTecCandidate(
-    val providerName: String,
-    val approximateDistanceMeters: Int,
-) {
-    fun isValid() = providerName.isNotBlank() && approximateDistanceMeters >= 0
 }
 
 data class PitTecAppointment(
@@ -91,8 +103,9 @@ data class PitTecAppointment(
     val acceptedAtEpochMillis: Long?,
     val arrivedAtEpochMillis: Long?,
     val cancelledBy: String?,
+    val quote: PitTecQuote?,
 ) {
-    fun isValid() = id.isUuid() && revision > 0
+    fun isValid() = id.isUuid() && revision > 0 && quote?.isValid() != false
 }
 
 data class PitTecDispatchSnapshot(
@@ -103,23 +116,39 @@ data class PitTecDispatchSnapshot(
     val radiusMeters: Int,
     val revision: Long,
     val serverNowEpochMillis: Long,
+    val nextDispatchAtEpochMillis: Long?,
     val lastEvent: PitTecLastEvent?,
     val lastEventAtEpochMillis: Long?,
     val allowedActions: Set<PitTecDispatchAction>,
     val offer: PitTecOffer?,
-    val candidate: PitTecCandidate?,
     val provider: PitTecProvider?,
     val appointment: PitTecAppointment?,
+    val paymentStatus: PaymentStatus?,
+    val trackingAuthorized: Boolean,
 ) {
     fun isValid() = searchId.isUuid() && serviceId.isUuid() && serviceName.isNotBlank() &&
         radiusMeters in setOf(10_000, 25_000, 50_000) && revision > 0 && serverNowEpochMillis > 0 &&
-        offer?.isValid() != false && candidate?.isValid() != false &&
+        offer?.isValid() != false &&
         provider?.isValid() != false && appointment?.isValid() != false
 }
 
 enum class PitTecFailure {
     LOCATION_REQUIRED, LOCATION_UNAVAILABLE, OFFLINE, TIMEOUT, SESSION_EXPIRED,
-    SERVICE_UNAVAILABLE, UNSUPPORTED_DISPATCH, CONTRACT, UNKNOWN,
+    SERVICE_UNAVAILABLE, UNSUPPORTED_DISPATCH, CONFIRMATION_EXPIRED, REVISION_CONFLICT,
+    INVALID_TRANSITION, CONTRACT, UNKNOWN,
+}
+
+enum class PitTecQuoteOutcome {
+    CONFIRMED, DECLINED, CONFIRMATION_EXPIRED, REVISION_CONFLICT, INVALID_TRANSITION, NOT_FOUND,
+}
+
+sealed interface PitTecQuoteResult {
+    data class Success(
+        val outcome: PitTecQuoteOutcome,
+        val snapshot: PitTecDispatchSnapshot?,
+    ) : PitTecQuoteResult
+
+    data class Failure(val reason: PitTecFailure) : PitTecQuoteResult
 }
 
 sealed interface PitTecDispatchResult {
@@ -133,50 +162,36 @@ sealed interface PitTecDispatchEvent {
     data class Failure(val reason: PitTecFailure) : PitTecDispatchEvent
 }
 
-enum class PitTecPendingAction { START, CANCEL }
+enum class PitTecPendingAction { START, CANCEL, CONFIRM_QUOTE, DECLINE_QUOTE }
 
 data class PitTecPending(val kind: PitTecPendingAction, val operationId: Long)
 
-/**
- * Pre-accept dispatch overlay shown on top of the discovery map. Once the appointment's payment is
- * confirmed (`ConfirmingValues` resolved) the screen navigates away to the shared
- * AppointmentTracking flow (US3), so this phase never needs to model ACCEPTED/IN_PROGRESS beyond
- * that one transitional card (`019-pittec-request-flow`).
- */
+/** Server-derived, mutually exclusive client phases for the complete PitTec call flow. */
 sealed interface PitTecDispatchPhase {
     data object None : PitTecDispatchPhase
     data object Restoring : PitTecDispatchPhase
     data object Locating : PitTecDispatchPhase
     data object StartingSearch : PitTecDispatchPhase
-    data class Active(
+    data class Searching(
         val snapshot: PitTecDispatchSnapshot,
         val pending: PitTecPending? = null,
         val failure: PitTecFailure? = null,
         val remainingSeconds: Long? = null,
     ) : PitTecDispatchPhase
 
-    /**
-     * `AWAITING_PROVIDER` com um candidato específico (`snapshot.candidate` não nulo) — o cliente vê
-     * nome e distância e pode confirmar (continua aguardando o prestador) ou recusar (cancela este
-     * appointment; a busca segue para o próximo candidato). Nenhuma cobrança acontece aqui.
-     */
-    data class CandidateFound(
+    data class AwaitingClientConfirmation(
         val snapshot: PitTecDispatchSnapshot,
         val pending: PitTecPending? = null,
+        val failure: PitTecFailure? = null,
+        val remainingSeconds: Long,
     ) : PitTecDispatchPhase
 
-    /**
-     * `ACCEPTED` — sinaliza que a tela de pagamento real (`018`, reaproveitada sem alteração) deve
-     * ser aberta antes de prosseguir para o acompanhamento. `snapshot.provider` já está preenchido
-     * aqui. `paymentApproved` só vira `true` quando `PitTecViewModel` observa
-     * `payments.status = APPROVED` para este `search_id` — é o gatilho para `onAccepted(...)`.
-     */
-    data class ConfirmingValues(
+    data class AwaitingPayment(
         val snapshot: PitTecDispatchSnapshot,
-        val paymentApproved: Boolean = false,
+        val failure: PitTecFailure? = null,
     ) : PitTecDispatchPhase
 
-    data class NoProvider(val serviceName: String) : PitTecDispatchPhase
+    data class TrackingReady(val snapshot: PitTecDispatchSnapshot) : PitTecDispatchPhase
     data class Terminal(val status: PitTecDispatchStatus) : PitTecDispatchPhase
     data class Failure(val reason: PitTecFailure) : PitTecDispatchPhase
 }

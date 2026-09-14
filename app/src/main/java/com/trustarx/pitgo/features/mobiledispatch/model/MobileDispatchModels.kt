@@ -10,7 +10,8 @@ import com.trustarx.pitgo.features.payment.model.PaymentStatus
 import java.math.BigDecimal
 
 enum class MobileDispatchStatus {
-    SEARCHING, OPTION_FOUND, AWAITING_PROVIDER, ACCEPTED, IN_PROGRESS,
+    SEARCHING, OPTION_FOUND, AWAITING_PROVIDER, AWAITING_CLIENT_CONFIRMATION, AWAITING_PAYMENT,
+    ACCEPTED, IN_PROGRESS,
     CANCELLED, COMPLETED, EXHAUSTED,
 }
 
@@ -26,13 +27,23 @@ enum class MobileDispatchKind { MOBILE_SEQUENTIAL, PITTEC_AUTO_SEQUENTIAL }
 data class PitTecOfferSummary(
     val approximateDistanceMeters: Int,
     val region: String,
-)
-
-enum class MobileAppointmentStatus {
-    PENDING, ACCEPTED, IN_PROGRESS, COMPLETED, CANCELLED, PROVIDER_REJECTED, EXPIRED,
+    val quotedPrice: BigDecimal,
+    val currency: String,
+    val quoteVersion: Long,
+) {
+    fun isValid() = approximateDistanceMeters >= 0 && region.isNotBlank() &&
+        quotedPrice.signum() > 0 && currency == "BRL" && quoteVersion > 0
 }
 
-enum class MobileDispatchAction { NEXT, REQUEST, CANCEL, ACCEPT, DECLINE, START, COMPLETE }
+enum class MobileAppointmentStatus {
+    PENDING, AWAITING_CLIENT_CONFIRMATION, AWAITING_PAYMENT,
+    ACCEPTED, IN_PROGRESS, COMPLETED, CANCELLED, PROVIDER_REJECTED, EXPIRED,
+}
+
+enum class MobileDispatchAction {
+    NEXT, REQUEST, CANCEL, ACCEPT, DECLINE, CONFIRM_QUOTE, DECLINE_QUOTE,
+    OPEN_PAYMENT, OPEN_TRACKING, START, ARRIVE, COMPLETE,
+}
 
 data class MobileCandidate(
     val id: String,
@@ -57,6 +68,9 @@ data class MobileAppointment(
     val responseDeadlineEpochMillis: Long?,
     val revision: Long,
     val cancelledBy: String?,
+    val quoteVersion: Long = 1,
+    val clientConfirmationDeadlineEpochMillis: Long? = null,
+    val clientConfirmedAtEpochMillis: Long? = null,
 ) {
     fun isValid() = id.isUuid() && quotedPrice.signum() >= 0 && revision > 0 &&
         (responseDeadlineEpochMillis == null || responseDeadlineEpochMillis > 0)
@@ -75,10 +89,13 @@ data class MobileDispatchSnapshot(
     val appointment: MobileAppointment?,
     val dispatchKind: MobileDispatchKind = MobileDispatchKind.MOBILE_SEQUENTIAL,
     val offer: PitTecOfferSummary? = null,
+    val paymentStatus: PaymentStatus? = null,
+    val trackingAuthorized: Boolean = false,
 ) {
     fun isValid() = searchId.isUuid() && serviceId.isUuid() && serviceName.isNotBlank() &&
         radiusMeters in setOf(10_000, 25_000, 50_000) && revision > 0 &&
-        serverNowEpochMillis > 0 && candidate?.isValid() != false && appointment?.isValid() != false
+        serverNowEpochMillis > 0 && candidate?.isValid() != false && appointment?.isValid() != false &&
+        offer?.isValid() != false
 }
 
 enum class MobileDispatchFailure {
@@ -161,7 +178,7 @@ data class ProviderMapState(
                         id = "provider-self",
                         coordinate = it,
                         kind = MapMarkerKind.LIVE,
-                        accessibilityLabel = "Sua posição",
+                        accessibilityLabel = "PitTec — sua posição",
                     )
                 )
             }
@@ -171,7 +188,7 @@ data class ProviderMapState(
                         id = "provider-client",
                         coordinate = it,
                         kind = MapMarkerKind.CLIENT_LOCATION,
-                        accessibilityLabel = "Posição do cliente",
+                        accessibilityLabel = "Local do atendimento",
                     )
                 )
             }

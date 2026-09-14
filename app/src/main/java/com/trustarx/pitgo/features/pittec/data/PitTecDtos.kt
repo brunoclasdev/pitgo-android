@@ -5,15 +5,19 @@ import com.trustarx.pitgo.core.map.model.MapCoordinate
 import com.trustarx.pitgo.features.pittec.model.NearbyPitTecMarker
 import com.trustarx.pitgo.features.pittec.model.PitTecAppointment
 import com.trustarx.pitgo.features.pittec.model.PitTecAppointmentStatus
-import com.trustarx.pitgo.features.pittec.model.PitTecCandidate
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchAction
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchSnapshot
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchStatus
 import com.trustarx.pitgo.features.pittec.model.PitTecLastEvent
 import com.trustarx.pitgo.features.pittec.model.PitTecOffer
 import com.trustarx.pitgo.features.pittec.model.PitTecProvider
+import com.trustarx.pitgo.features.pittec.model.PitTecQuote
+import com.trustarx.pitgo.features.payment.model.PaymentStatus
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.jsonPrimitive
+import java.math.BigDecimal
 
 @Serializable
 internal data class NearbyPitTecMarkerDto(
@@ -46,17 +50,33 @@ internal data class PitTecDispatchEnvelopeDto(
     @SerialName("radius_meters") val radiusMeters: Int? = null,
     val revision: Long? = null,
     @SerialName("server_now") val serverNow: String? = null,
+    @SerialName("next_dispatch_at") val nextDispatchAt: String? = null,
     @SerialName("last_event") val lastEvent: String? = null,
     @SerialName("last_event_at") val lastEventAt: String? = null,
     @SerialName("allowed_actions") val allowedActions: List<String> = emptyList(),
     val offer: PitTecOfferDto? = null,
-    val candidate: PitTecCandidateDto? = null,
     val provider: PitTecProviderDto? = null,
     val appointment: PitTecAppointmentDto? = null,
+    val payment: PitTecPaymentDto? = null,
+    @SerialName("tracking_authorized") val trackingAuthorized: Boolean = false,
 ) {
     fun domainOrNull(): PitTecDispatchSnapshot? = (snapshot ?: PitTecDispatchSnapshotDto(
-        searchId, serviceId, serviceName, status, radiusMeters, revision, serverNow,
-        lastEvent, lastEventAt, allowedActions, offer, candidate, provider, appointment,
+        searchId = searchId,
+        serviceId = serviceId,
+        serviceName = serviceName,
+        status = status,
+        radiusMeters = radiusMeters,
+        revision = revision,
+        serverNow = serverNow,
+        nextDispatchAt = nextDispatchAt,
+        lastEvent = lastEvent,
+        lastEventAt = lastEventAt,
+        allowedActions = allowedActions,
+        offer = offer,
+        provider = provider,
+        appointment = appointment,
+        payment = payment,
+        trackingAuthorized = trackingAuthorized,
     )).toDomainOrNull()
 }
 
@@ -69,13 +89,15 @@ internal data class PitTecDispatchSnapshotDto(
     @SerialName("radius_meters") val radiusMeters: Int? = null,
     val revision: Long? = null,
     @SerialName("server_now") val serverNow: String? = null,
+    @SerialName("next_dispatch_at") val nextDispatchAt: String? = null,
     @SerialName("last_event") val lastEvent: String? = null,
     @SerialName("last_event_at") val lastEventAt: String? = null,
     @SerialName("allowed_actions") val allowedActions: List<String> = emptyList(),
     val offer: PitTecOfferDto? = null,
-    val candidate: PitTecCandidateDto? = null,
     val provider: PitTecProviderDto? = null,
     val appointment: PitTecAppointmentDto? = null,
+    val payment: PitTecPaymentDto? = null,
+    @SerialName("tracking_authorized") val trackingAuthorized: Boolean = false,
 ) {
     fun toDomainOrNull(): PitTecDispatchSnapshot? = runCatching {
         PitTecDispatchSnapshot(
@@ -86,15 +108,17 @@ internal data class PitTecDispatchSnapshotDto(
             radiusMeters = requireNotNull(radiusMeters),
             revision = requireNotNull(revision),
             serverNowEpochMillis = parseSupabaseInstant(requireNotNull(serverNow)).toEpochMilli(),
+            nextDispatchAtEpochMillis = nextDispatchAt?.let { parseSupabaseInstant(it).toEpochMilli() },
             lastEvent = lastEvent?.let { runCatching { PitTecLastEvent.valueOf(it) }.getOrNull() },
             lastEventAtEpochMillis = lastEventAt?.let { parseSupabaseInstant(it).toEpochMilli() },
             allowedActions = allowedActions.mapNotNull {
                 runCatching { PitTecDispatchAction.valueOf(it) }.getOrNull()
             }.toSet(),
             offer = offer?.toDomain(),
-            candidate = candidate?.toDomain(),
             provider = provider?.toDomain(),
             appointment = appointment?.toDomain(),
+            paymentStatus = payment?.toStatusOrNull(),
+            trackingAuthorized = trackingAuthorized,
         ).takeIf(PitTecDispatchSnapshot::isValid)
     }.getOrNull()
 }
@@ -103,16 +127,21 @@ internal data class PitTecDispatchSnapshotDto(
 internal data class PitTecOfferDto(
     @SerialName("approximate_distance_meters") val approximateDistanceMeters: Int,
     val region: String,
+    @SerialName("quoted_price") val quotedPrice: JsonElement,
+    val currency: String,
+    @SerialName("quote_version") val quoteVersion: Long,
 ) {
-    fun toDomain() = PitTecOffer(approximateDistanceMeters, region)
-}
-
-@Serializable
-internal data class PitTecCandidateDto(
-    @SerialName("provider_name") val providerName: String,
-    @SerialName("approximate_distance_meters") val approximateDistanceMeters: Int,
-) {
-    fun toDomain() = PitTecCandidate(providerName, approximateDistanceMeters)
+    fun toDomain() = PitTecOffer(
+        approximateDistanceMeters,
+        region,
+        PitTecQuote(
+            amount = BigDecimal(quotedPrice.jsonPrimitive.content),
+            currency = currency,
+            version = quoteVersion,
+            clientConfirmationDeadlineEpochMillis = null,
+            clientConfirmedAtEpochMillis = null,
+        ),
+    )
 }
 
 @Serializable
@@ -132,6 +161,7 @@ internal data class PitTecAppointmentDto(
     @SerialName("accepted_at") val acceptedAt: String? = null,
     @SerialName("arrived_at") val arrivedAt: String? = null,
     @SerialName("cancelled_by") val cancelledBy: String? = null,
+    val quote: PitTecQuoteDto? = null,
 ) {
     fun toDomain() = PitTecAppointment(
         id = id,
@@ -141,5 +171,30 @@ internal data class PitTecAppointmentDto(
         acceptedAtEpochMillis = acceptedAt?.let { parseSupabaseInstant(it).toEpochMilli() },
         arrivedAtEpochMillis = arrivedAt?.let { parseSupabaseInstant(it).toEpochMilli() },
         cancelledBy = cancelledBy,
+        quote = quote?.toDomain(),
     )
+}
+
+@Serializable
+internal data class PitTecQuoteDto(
+    val amount: JsonElement,
+    val currency: String,
+    val version: Long,
+    @SerialName("client_confirmation_deadline") val clientConfirmationDeadline: String? = null,
+    @SerialName("client_confirmed_at") val clientConfirmedAt: String? = null,
+) {
+    fun toDomain() = PitTecQuote(
+        amount = BigDecimal(amount.jsonPrimitive.content),
+        currency = currency,
+        version = version,
+        clientConfirmationDeadlineEpochMillis = clientConfirmationDeadline
+            ?.let { parseSupabaseInstant(it).toEpochMilli() },
+        clientConfirmedAtEpochMillis = clientConfirmedAt
+            ?.let { parseSupabaseInstant(it).toEpochMilli() },
+    )
+}
+
+@Serializable
+internal data class PitTecPaymentDto(val status: String) {
+    fun toStatusOrNull(): PaymentStatus? = runCatching { PaymentStatus.valueOf(status) }.getOrNull()
 }

@@ -13,7 +13,9 @@ import kotlinx.serialization.Serializable
 internal data class CreatePaymentRequestDto(
     @SerialName("request_id") val requestId: String,
     @SerialName("dispatch_kind") val dispatchKind: String,
-    val amount: Double,
+    val amount: Double? = null,
+    @SerialName("appointment_id") val appointmentId: String? = null,
+    @SerialName("quote_version") val quoteVersion: Long? = null,
     val method: String,
     @SerialName("saved_card_id") val savedCardId: String? = null,
     @SerialName("card_security_code_token") val cardSecurityCodeToken: String? = null,
@@ -45,6 +47,8 @@ internal data class CreatePaymentResponseDto(
             dispatchKind = command.dispatchKind,
             method = command.method,
             amount = command.amount,
+            appointmentId = command.appointmentId,
+            quoteVersion = command.quoteVersion,
             status = PaymentStatus.valueOf(status),
             pix = pix?.toDomain(),
         ).takeIf(Payment::isValid)

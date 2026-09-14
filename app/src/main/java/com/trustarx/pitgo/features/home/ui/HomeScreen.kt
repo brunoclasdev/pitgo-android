@@ -36,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -49,6 +50,7 @@ import coil3.compose.AsyncImage
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.account.model.Profile
 import com.trustarx.pitgo.core.catalog.model.HomeService
+import com.trustarx.pitgo.core.catalog.model.ServiceDispatchKind
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 import com.trustarx.pitgo.core.ui.BottomItemId
@@ -300,18 +302,28 @@ private fun AddressRow(address: ClientAddress?, onClick: () -> Unit) {
 
 @Composable
 fun ServiceCard(service: HomeService, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val enabled = service.dispatchKind == ServiceDispatchKind.PITTEC_AUTO_SEQUENTIAL
     PitGoOutlinedCard(
-        onClick = onClick,
-        modifier = modifier.sizeIn(minHeight = PitGoSize.MinimumTouchTarget),
+        onClick = onClick.takeIf { enabled },
+        modifier = modifier
+            .sizeIn(minHeight = PitGoSize.MinimumTouchTarget)
+            .alpha(if (enabled) 1f else 0.55f),
     ) {
         IconContainer(R.drawable.ic_service_mechanic)
         Spacer(Modifier.height(PitGoSpacing.Medium))
         Text(service.name, style = MaterialTheme.typography.titleMedium)
-        Text(
-            service.minimumPrice?.let { stringResource(R.string.service_map_price, it) }
-                ?: service.categoryName,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (enabled) {
+            Text(
+                service.minimumPrice?.let { stringResource(R.string.service_map_price, it) }
+                    ?: service.categoryName,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                stringResource(R.string.home_service_maintenance),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

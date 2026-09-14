@@ -136,7 +136,7 @@ data class AppointmentTrackingUiState(
                             else -> MapMarkerKind.LIVE
                         },
                         accessibilityLabel = if (data is TrackingDataState.Live) {
-                            "Prestador ao vivo"
+                            if (isPitTec) "PitTec ao vivo" else "Prestador ao vivo"
                         } else "Última posição do prestador, desatualizada",
                     )
                 )
@@ -147,7 +147,7 @@ data class AppointmentTrackingUiState(
                         id = "appointment-client",
                         coordinate = location.coordinate,
                         kind = MapMarkerKind.CLIENT_LOCATION,
-                        accessibilityLabel = "Sua posição",
+                        accessibilityLabel = if (isPitTec) "Local do atendimento" else "Sua posição",
                     )
                 )
             }

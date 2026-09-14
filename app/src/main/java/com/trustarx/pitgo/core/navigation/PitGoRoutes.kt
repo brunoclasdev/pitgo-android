@@ -18,6 +18,9 @@ object PitGoRoutes {
     const val ServiceMap = "service-map/{$ServiceMapArg}"
     const val PitTecServiceArg = "pittecServiceId"
     const val PaymentRequestIdArg = "requestId"
+    const val PaymentAppointmentIdArg = "appointmentId"
+    const val PaymentQuoteVersionArg = "quoteVersion"
+    const val PaymentAmountArg = "quotedAmount"
     // (019) Sem requestId de pagamento prévio — a busca do PitTec sempre gera seu próprio id
     // internamente agora; o pagamento acontece depois do aceite, não antes da busca.
     const val PitTec = "pittec/{$PitTecServiceArg}"
@@ -32,7 +35,8 @@ object PitGoRoutes {
     // (PitTec, pago só depois do aceite) em vez de gerar um novo id (caminho original, guincho
     // móvel, pago antes do despacho).
     const val Payment =
-        "payment/{$PaymentServiceArg}/{$PaymentDispatchKindArg}?$PaymentRequestIdArg={$PaymentRequestIdArg}"
+        "payment/{$PaymentServiceArg}/{$PaymentDispatchKindArg}?$PaymentRequestIdArg={$PaymentRequestIdArg}" +
+            "&$PaymentAppointmentIdArg={$PaymentAppointmentIdArg}&$PaymentQuoteVersionArg={$PaymentQuoteVersionArg}&$PaymentAmountArg={$PaymentAmountArg}"
     const val ProviderRequest = "provider-request/{$AppointmentIdArg}"
     const val Home = "home"
     const val VehicleOnboarding = "vehicle-onboarding"
@@ -70,8 +74,23 @@ object PitGoRoutes {
 
     fun mobileDispatch(searchId: String) = "mobile-dispatch/${Uri.encode(searchId)}"
     fun providerRequest(appointmentId: String) = "provider-request/${Uri.encode(appointmentId)}"
-    fun payment(serviceId: String, dispatchKind: String, requestId: String? = null): String {
+    fun payment(
+        serviceId: String,
+        dispatchKind: String,
+        requestId: String? = null,
+        appointmentId: String? = null,
+        quoteVersion: Long? = null,
+        quotedAmount: String? = null,
+    ): String {
         val base = "payment/${Uri.encode(serviceId)}/${Uri.encode(dispatchKind)}"
-        return if (requestId != null) "$base?$PaymentRequestIdArg=${Uri.encode(requestId)}" else base
+        val args = listOfNotNull(
+            requestId?.let { PaymentRequestIdArg to it },
+            appointmentId?.let { PaymentAppointmentIdArg to it },
+            quoteVersion?.let { PaymentQuoteVersionArg to it.toString() },
+            quotedAmount?.let { PaymentAmountArg to it },
+        )
+        return if (args.isEmpty()) base else base + "?" + args.joinToString("&") { (key, value) ->
+            "$key=${Uri.encode(value)}"
+        }
     }
 }

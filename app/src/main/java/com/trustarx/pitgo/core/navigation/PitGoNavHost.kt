@@ -75,6 +75,7 @@ import com.trustarx.pitgo.features.mobiledispatch.viewmodel.ProviderIncomingRequ
 import com.trustarx.pitgo.features.mobiledispatch.viewmodel.DispatchResumeViewModel
 import com.trustarx.pitgo.features.mobiledispatch.viewmodel.DispatchResumeState
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchKind
 import com.trustarx.pitgo.features.pittec.model.PitTecAppointmentStatus
 import com.trustarx.pitgo.features.pittec.model.PitTecDispatchStatus
 import com.trustarx.pitgo.features.pittec.ui.PitTecProviderDashboardRoute
@@ -255,8 +256,15 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     navController.navigate(PitGoRoutes.appointmentTracking(appointment.id)) { launchSingleTop = true }
                 } else navController.navigate(PitGoRoutes.mobileDispatch(active.snapshot.searchId)) { launchSingleTop = true }
             }
-            is AppSessionState.Authenticated.ProviderReady -> active.snapshot.appointment?.let {
-                navController.navigate(PitGoRoutes.providerRequest(it.id)) { launchSingleTop = true }
+            is AppSessionState.Authenticated.ProviderReady -> {
+                // PitTec requests are rendered as the dashboard's incoming card. The legacy
+                // ProviderRequest screen is only for MOBILE dispatches; navigating to it here
+                // duplicated the same PitTec confirmation (screen + card).
+                if (active.snapshot.dispatchKind != MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) {
+                    active.snapshot.appointment?.let {
+                        navController.navigate(PitGoRoutes.providerRequest(it.id)) { launchSingleTop = true }
+                    }
+                }
             }
             else -> Unit
         }
@@ -761,6 +769,9 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     nullable = true
                     defaultValue = null
                 },
+                navArgument(PitGoRoutes.PaymentAppointmentIdArg) { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument(PitGoRoutes.PaymentQuoteVersionArg) { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument(PitGoRoutes.PaymentAmountArg) { type = NavType.StringType; nullable = true; defaultValue = null },
             ),
         ) { entry ->
             val serviceId = entry.arguments?.getString(PitGoRoutes.PaymentServiceArg).orEmpty()
@@ -771,9 +782,28 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         container.serviceCatalogRepository, container.paymentRepository, container.savedCardRepository,
                     ),
                 )
+                val pitTecViewModel = if (dispatchKind == "PITTEC_AUTO_SEQUENTIAL") {
+                    navController.previousBackStackEntry?.let { pitTecEntry ->
+                        viewModel<PitTecViewModel>(
+                            viewModelStoreOwner = pitTecEntry,
+                            key = serviceId,
+                            factory = PitTecViewModel.factory(
+                                serviceId,
+                                container.pitTecRepository,
+                                container.deviceLocationRepository,
+                                container.connectivityObserver,
+                                container.paymentRepository,
+                            ),
+                        )
+                    }
+                } else null
                 PaymentCheckoutRoute(
                     viewModel = paymentViewModel,
                     onBack = { navController.popBackStack() },
+                    onCancel = {
+                        pitTecViewModel?.cancelSearch()
+                        navController.popBackStack()
+                    },
                     onApproved = { requestId ->
                         // (019) PitTec já chega aqui com uma busca/appointment ACEITO em
                         // andamento (requestId = search_id, ver PitTecRoute.onNeedsPayment) — só
@@ -813,9 +843,12 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                 PitTecRoute(
                     viewModel = pitTecViewModel,
                     onBack = { navController.popBackStack() },
-                    onNeedsPayment = { requestId ->
+                    onNeedsPayment = { requestId, appointmentId, quoteVersion, amount ->
                         navController.navigate(
-                            PitGoRoutes.payment(serviceId, "PITTEC_AUTO_SEQUENTIAL", requestId),
+                            PitGoRoutes.payment(
+                                serviceId, "PITTEC_AUTO_SEQUENTIAL", requestId, appointmentId,
+                                quoteVersion, amount.toPlainString(),
+                            ),
                         )
                     },
                     onAccepted = { navController.navigate(PitGoRoutes.appointmentTracking(it)) { launchSingleTop = true } },

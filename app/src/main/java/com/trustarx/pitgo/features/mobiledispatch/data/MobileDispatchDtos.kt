@@ -10,6 +10,7 @@ import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchKind
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchSnapshot
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchStatus
 import com.trustarx.pitgo.features.mobiledispatch.model.PitTecOfferSummary
+import com.trustarx.pitgo.features.payment.model.PaymentStatus
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -32,10 +33,24 @@ internal data class MobileDispatchEnvelopeDto(
     val candidate: MobileCandidateDto? = null,
     val appointment: MobileAppointmentDto? = null,
     val offer: PitTecOfferSummaryDto? = null,
+    val payment: MobilePaymentSummaryDto? = null,
+    @SerialName("tracking_authorized") val trackingAuthorized: Boolean = false,
 ) {
     fun domainOrNull(): MobileDispatchSnapshot? = (snapshot ?: MobileDispatchSnapshotDto(
-        searchId, serviceId, serviceName, dispatchKind, status, radiusMeters, revision, serverNow,
-        allowedActions, candidate, appointment, offer,
+        searchId = searchId,
+        serviceId = serviceId,
+        serviceName = serviceName,
+        dispatchKind = dispatchKind,
+        status = status,
+        radiusMeters = radiusMeters,
+        revision = revision,
+        serverNow = serverNow,
+        allowedActions = allowedActions,
+        candidate = candidate,
+        appointment = appointment,
+        offer = offer,
+        payment = payment,
+        trackingAuthorized = trackingAuthorized,
     )).toDomainOrNull()
 }
 
@@ -53,6 +68,8 @@ internal data class MobileDispatchSnapshotDto(
     val candidate: MobileCandidateDto? = null,
     val appointment: MobileAppointmentDto? = null,
     val offer: PitTecOfferSummaryDto? = null,
+    val payment: MobilePaymentSummaryDto? = null,
+    @SerialName("tracking_authorized") val trackingAuthorized: Boolean = false,
 ) {
     fun toDomainOrNull(): MobileDispatchSnapshot? = runCatching {
         MobileDispatchSnapshot(
@@ -72,6 +89,8 @@ internal data class MobileDispatchSnapshotDto(
                 ?.let { runCatching { MobileDispatchKind.valueOf(it) }.getOrNull() }
                 ?: MobileDispatchKind.MOBILE_SEQUENTIAL,
             offer = offer?.toDomain(),
+            paymentStatus = payment?.toStatusOrNull(),
+            trackingAuthorized = trackingAuthorized,
         ).takeIf(MobileDispatchSnapshot::isValid)
     }.getOrNull()
 
@@ -81,8 +100,17 @@ internal data class MobileDispatchSnapshotDto(
 internal data class PitTecOfferSummaryDto(
     @SerialName("approximate_distance_meters") val approximateDistanceMeters: Int,
     val region: String,
+    @SerialName("quoted_price") val quotedPrice: JsonElement,
+    val currency: String,
+    @SerialName("quote_version") val quoteVersion: Long,
 ) {
-    fun toDomain() = PitTecOfferSummary(approximateDistanceMeters, region)
+    fun toDomain() = PitTecOfferSummary(
+        approximateDistanceMeters,
+        region,
+        BigDecimal(quotedPrice.jsonPrimitive.content),
+        currency,
+        quoteVersion,
+    )
 }
 
 @Serializable
@@ -114,6 +142,9 @@ internal data class MobileAppointmentDto(
     @SerialName("response_deadline") val responseDeadline: String? = null,
     val revision: Long,
     @SerialName("cancelled_by") val cancelledBy: String? = null,
+    @SerialName("quote_version") val quoteVersion: Long = 1,
+    @SerialName("client_confirmation_deadline") val clientConfirmationDeadline: String? = null,
+    @SerialName("client_confirmed_at") val clientConfirmedAt: String? = null,
 ) {
     fun toDomain() = MobileAppointment(
         id = id,
@@ -123,5 +154,15 @@ internal data class MobileAppointmentDto(
         responseDeadlineEpochMillis = responseDeadline?.let { parseSupabaseInstant(it).toEpochMilli() },
         revision = revision,
         cancelledBy = cancelledBy,
+        quoteVersion = quoteVersion,
+        clientConfirmationDeadlineEpochMillis = clientConfirmationDeadline
+            ?.let { parseSupabaseInstant(it).toEpochMilli() },
+        clientConfirmedAtEpochMillis = clientConfirmedAt
+            ?.let { parseSupabaseInstant(it).toEpochMilli() },
     )
+}
+
+@Serializable
+internal data class MobilePaymentSummaryDto(val status: String) {
+    fun toStatusOrNull(): PaymentStatus? = runCatching { PaymentStatus.valueOf(status) }.getOrNull()
 }

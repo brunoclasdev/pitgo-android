@@ -46,7 +46,9 @@ import kotlinx.serialization.json.put
  */
 class PaymentRepository(private val client: SupabaseClient) {
     suspend fun createPayment(command: CreatePaymentCommand): CreatePaymentResult {
-        if (!command.requestId.isUuid() || command.amount.signum() <= 0) {
+        val pitTecContextValid = command.dispatchKind.name != "PITTEC_AUTO_SEQUENTIAL" ||
+            (command.appointmentId?.isUuid() == true && (command.quoteVersion ?: 0) > 0)
+        if (!command.requestId.isUuid() || command.amount.signum() <= 0 || !pitTecContextValid) {
             return CreatePaymentResult.Failure(PaymentFailure.CONTRACT)
         }
         return try {
@@ -56,7 +58,11 @@ class PaymentRepository(private val client: SupabaseClient) {
                     body = CreatePaymentRequestDto(
                         requestId = command.requestId,
                         dispatchKind = command.dispatchKind.name,
-                        amount = command.amount.toDouble(),
+                        amount = command.amount.toDouble().takeUnless {
+                            command.dispatchKind.name == "PITTEC_AUTO_SEQUENTIAL"
+                        },
+                        appointmentId = command.appointmentId,
+                        quoteVersion = command.quoteVersion,
                         method = command.method.name,
                         savedCardId = command.savedCardId,
                         cardSecurityCodeToken = command.cardSecurityCodeToken,
@@ -164,6 +170,9 @@ class PaymentRepository(private val client: SupabaseClient) {
             body?.code == "CARD_REJECTED" -> PaymentFailure.CARD_REJECTED
             body?.code == "CARD_NOT_FOUND" -> PaymentFailure.CARD_NOT_FOUND
             body?.code == "PAYER_DOCUMENT_REQUIRED" -> PaymentFailure.PAYER_DOCUMENT_REQUIRED
+            body?.code == "QUOTE_EXPIRED" -> PaymentFailure.QUOTE_EXPIRED
+            body?.code == "QUOTE_CONFLICT" -> PaymentFailure.QUOTE_CONFLICT
+            body?.code == "INVALID_PAYMENT_CONTEXT" -> PaymentFailure.INVALID_PAYMENT_CONTEXT
             error.statusCode == 400 -> PaymentFailure.CONTRACT
             error.statusCode >= 500 -> PaymentFailure.SERVICE_UNAVAILABLE
             else -> PaymentFailure.CONTRACT

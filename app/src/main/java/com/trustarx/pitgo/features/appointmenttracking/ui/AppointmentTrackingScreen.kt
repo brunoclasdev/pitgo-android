@@ -236,6 +236,10 @@ private fun PitTecDistanceLine(state: AppointmentTrackingUiState) {
         Text(stringResource(R.string.pittec_route_unavailable))
         return
     }
+    if (meters <= 50) {
+        Text(stringResource(R.string.pittec_arrived_nearby))
+        return
+    }
     val distanceText = if (meters < 1000) {
         stringResource(R.string.service_map_distance, meters.toInt())
     } else {

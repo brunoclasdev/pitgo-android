@@ -95,26 +95,32 @@ class MobileDispatchRepository(private val client: SupabaseClient) {
     fun observeSearch(searchId: String): Flow<MobileDispatchEvent> = observe(
         topic = "mobile-dispatch:$searchId",
         valid = searchId.isUuid(),
+        restoreSnapshot = ::restore,
     )
 
     fun observeProvider(providerId: String): Flow<MobileDispatchEvent> = observe(
         topic = "provider-dispatch:$providerId",
         valid = providerId.isUuid(),
+        restoreSnapshot = ::restoreAnyDispatchKind,
     )
 
-    private fun observe(topic: String, valid: Boolean): Flow<MobileDispatchEvent> = channelFlow {
+    private fun observe(
+        topic: String,
+        valid: Boolean,
+        restoreSnapshot: suspend () -> MobileDispatchResult,
+    ): Flow<MobileDispatchEvent> = channelFlow {
         if (!valid) { send(MobileDispatchEvent.Failure(MobileDispatchFailure.CONTRACT)); return@channelFlow }
         val channel = client.channel(topic) { isPrivate = true }
         try {
             client.realtime.setAuth()
             val changed = channel.broadcastFlow<kotlinx.serialization.json.JsonObject>("CHANGED")
-            launch { changed.collect { send(restore().toEvent()) } }
+            launch { changed.collect { send(restoreSnapshot().toEvent()) } }
             launch {
                 channel.status.filter { it == RealtimeChannel.Status.SUBSCRIBED }
-                    .collect { send(restore().toEvent()) }
+                    .collect { send(restoreSnapshot().toEvent()) }
             }
             channel.subscribe(blockUntilSubscribed = true)
-            send(restore().toEvent())
+            send(restoreSnapshot().toEvent())
             awaitCancellation()
         } catch (cancel: CancellationException) { throw cancel }
         catch (error: Throwable) { send(MobileDispatchEvent.Failure(classify(error))) }
@@ -144,7 +150,7 @@ class MobileDispatchRepository(private val client: SupabaseClient) {
         val dto = withTimeout(RPC_TIMEOUT_MILLIS) {
             client.postgrest.rpc(function, params).decodeAs<MobileDispatchEnvelopeDto>()
         }
-        if (dto.outcome == "NONE") MobileDispatchResult.None
+        if (dto.outcome == "NONE" || dto.outcome == "DECLINED") MobileDispatchResult.None
         else dto.domainOrNull()?.let(MobileDispatchResult::Success) ?: contractFailure()
     } catch (_: TimeoutCancellationException) {
         MobileDispatchResult.Failure(MobileDispatchFailure.TIMEOUT)

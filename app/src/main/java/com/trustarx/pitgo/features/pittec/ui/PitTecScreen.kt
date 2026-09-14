@@ -59,7 +59,7 @@ import com.trustarx.pitgo.features.pittec.viewmodel.PitTecViewModel
 fun PitTecRoute(
     viewModel: PitTecViewModel,
     onBack: () -> Unit,
-    onNeedsPayment: (requestId: String) -> Unit,
+    onNeedsPayment: (requestId: String, appointmentId: String, quoteVersion: Long, amount: java.math.BigDecimal) -> Unit,
     onAccepted: (appointmentId: String) -> Unit,
     onSessionExpired: () -> Unit,
 ) {
@@ -93,22 +93,26 @@ fun PitTecRoute(
     LaunchedEffect(content?.discoveryState) {
         if (content?.discoveryState == PitTecDiscoveryState.SessionExpired) onSessionExpired()
     }
-    // (019) Duas etapas guardadas por id, cada uma disparando só uma vez: abrir o pagamento real
-    // assim que o prestador aceita (ConfirmingValues ainda não aprovado), e só então seguir para o
-    // acompanhamento quando o próprio PitTecViewModel confirmar a aprovação do pagamento.
-    var paymentRequestedForSearchId by remember { mutableStateOf<String?>(null) }
+    var paymentRequestedForAppointmentId by remember { mutableStateOf<String?>(null) }
     var navigatedAppointmentId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(content?.dispatch) {
-        val dispatch = content?.dispatch as? PitTecDispatchPhase.ConfirmingValues ?: return@LaunchedEffect
-        val appointment = dispatch.snapshot.appointment ?: return@LaunchedEffect
-        if (dispatch.paymentApproved) {
-            if (navigatedAppointmentId == appointment.id) return@LaunchedEffect
-            navigatedAppointmentId = appointment.id
-            onAccepted(appointment.id)
-        } else {
-            if (paymentRequestedForSearchId == dispatch.snapshot.searchId) return@LaunchedEffect
-            paymentRequestedForSearchId = dispatch.snapshot.searchId
-            onNeedsPayment(dispatch.snapshot.searchId)
+        when (val dispatch = content?.dispatch) {
+            is PitTecDispatchPhase.AwaitingPayment -> {
+                val appointment = dispatch.snapshot.appointment ?: return@LaunchedEffect
+                val quote = appointment.quote ?: dispatch.snapshot.offer?.quote ?: return@LaunchedEffect
+                if (paymentRequestedForAppointmentId == appointment.id) return@LaunchedEffect
+                paymentRequestedForAppointmentId = appointment.id
+                onNeedsPayment(dispatch.snapshot.searchId, appointment.id, quote.version, quote.amount)
+            }
+            is PitTecDispatchPhase.TrackingReady -> {
+                val appointment = dispatch.snapshot.appointment ?: return@LaunchedEffect
+                if (!dispatch.snapshot.trackingAuthorized || navigatedAppointmentId == appointment.id) {
+                    return@LaunchedEffect
+                }
+                navigatedAppointmentId = appointment.id
+                onAccepted(appointment.id)
+            }
+            else -> Unit
         }
     }
     val hasFinePermission = ContextCompat.checkSelfPermission(
@@ -133,8 +137,8 @@ fun PitTecRoute(
         },
         onCancelSearch = viewModel::cancelSearch,
         onRetryDispatch = viewModel::retryDispatch,
-        onConfirmCandidate = viewModel::confirmCandidate,
-        onDeclineCandidate = viewModel::declineCandidate,
+        onConfirmQuote = viewModel::confirmQuote,
+        onDeclineQuote = viewModel::declineQuote,
     )
 }
 
@@ -152,8 +156,8 @@ private fun PitTecScreen(
     onRequestPitTec: () -> Unit,
     onCancelSearch: () -> Unit,
     onRetryDispatch: () -> Unit,
-    onConfirmCandidate: () -> Unit,
-    onDeclineCandidate: () -> Unit,
+    onConfirmQuote: () -> Unit,
+    onDeclineQuote: () -> Unit,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val refundedMessage = stringResource(R.string.payment_refunded_message)
@@ -219,15 +223,13 @@ private fun PitTecScreen(
                     ) { Text(stringResource(R.string.service_map_my_location)) }
                 }
             }
-            // (019) Sem card de estimativa fictícia — DispatchOverlay já cobre None com o botão
-            // real de "Solicitar" (pittec_call) até o card final de valores/pagamento real.
             DispatchOverlay(
                 phase = state.dispatch,
                 onRequestPitTec = onRequestPitTec,
                 onCancelSearch = onCancelSearch,
                 onRetryDispatch = onRetryDispatch,
-                onConfirmCandidate = onConfirmCandidate,
-                onDeclineCandidate = onDeclineCandidate,
+                onConfirmQuote = onConfirmQuote,
+                onDeclineQuote = onDeclineQuote,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }

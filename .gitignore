@@ -295,4 +295,7 @@ fabric.properties
 
 ### AndroidStudio Patch ###
 
+# Kotlin compiler working directory
+.kotlin/
+
 !/gradle/wrapper/gradle-wrapper.jar

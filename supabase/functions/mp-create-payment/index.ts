@@ -50,24 +50,50 @@ Deno.serve(async (request) => {
   try { payload = await request.json(); } catch { return json(400, { code: "INVALID_INPUT" }); }
   const requestId = payload.request_id;
   const dispatchKind = payload.dispatch_kind;
-  const amount = Number(payload.amount);
+  const requestedAmount = Number(payload.amount);
+  const appointmentId = payload.appointment_id;
+  const requestedQuoteVersion = Number(payload.quote_version);
   const method = payload.method;
   const savedCardId = payload.saved_card_id;
   const cardSecurityCodeToken = payload.card_security_code_token;
   if (
     !isUuid(requestId) ||
     typeof dispatchKind !== "string" || !DISPATCH_KINDS.has(dispatchKind) ||
-    !Number.isFinite(amount) || amount <= 0 ||
+    (dispatchKind === "MOBILE_SEQUENTIAL" && (!Number.isFinite(requestedAmount) || requestedAmount <= 0)) ||
+    (dispatchKind === "PITTEC_AUTO_SEQUENTIAL" && (!isUuid(appointmentId) || !Number.isInteger(requestedQuoteVersion) || requestedQuoteVersion <= 0)) ||
     (method !== "PIX" && method !== "SAVED_CARD") ||
     (method === "SAVED_CARD" && !isUuid(savedCardId))
   ) {
     return json(400, { code: "INVALID_INPUT" });
   }
 
+  let amount = requestedAmount;
+  let resolvedAppointmentId: string | null = null;
+  let resolvedQuoteVersion: number | null = null;
+  if (dispatchKind === "PITTEC_AUTO_SEQUENTIAL") {
+    const { data: appointment } = await admin.from("appointments")
+      .select("id,client_id,dispatch_search_id,status,quoted_price,quote_version,client_confirmed_quote_version")
+      .eq("id", appointmentId).eq("client_id", userData.user.id).maybeSingle();
+    const { data: search } = await admin.from("service_searches")
+      .select("id,client_id,dispatch_kind,status").eq("id", requestId).maybeSingle();
+    if (!appointment || !search || search.client_id !== userData.user.id ||
+      search.dispatch_kind !== dispatchKind || appointment.dispatch_search_id !== requestId ||
+      appointment.status !== "AWAITING_PAYMENT" || appointment.quote_version !== requestedQuoteVersion ||
+      appointment.client_confirmed_quote_version !== requestedQuoteVersion ||
+      !Number.isFinite(Number(appointment.quoted_price)) || Number(appointment.quoted_price) <= 0) {
+      return json(409, { code: "INVALID_PAYMENT_CONTEXT" });
+    }
+    amount = Number(appointment.quoted_price);
+    resolvedAppointmentId = appointment.id;
+    resolvedQuoteVersion = appointment.quote_version;
+  }
+
   // Idempotency (FR-011/SC-006): a live payment for this request already exists — never charge
   // twice for the same solicitation. Refresh it from Mercado Pago instead of creating a new one.
-  const { data: existing } = await admin.from("payments").select("*")
-    .eq("request_id", requestId).eq("client_id", userData.user.id)
+  let existingQuery = admin.from("payments").select("*")
+    .eq("request_id", requestId).eq("client_id", userData.user.id);
+  if (dispatchKind === "PITTEC_AUTO_SEQUENTIAL") existingQuery = existingQuery.eq("appointment_id", appointmentId);
+  const { data: existing } = await existingQuery
     .order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (existing && LIVE_STATUSES.has(existing.status)) {
     if (existing.status !== "PENDING" || !existing.mp_payment_id) {
@@ -143,6 +169,9 @@ Deno.serve(async (request) => {
     card_brand: cardBrand,
     card_last_four_digits: cardLastFour,
     amount,
+    appointment_id: resolvedAppointmentId,
+    quote_version: resolvedQuoteVersion,
+    currency: "BRL",
     status: mpStatusToPitGo(mpPayment.status ?? "pending"),
     mp_payment_id: String(mpPayment.id),
     idempotency_key: attempt,

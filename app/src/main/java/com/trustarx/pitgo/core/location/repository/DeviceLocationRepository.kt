@@ -32,9 +32,17 @@ class DeviceLocationRepository(private val dataSource: AndroidLocationDataSource
         dataSource.lastKnownLocation()
             ?.takeIf { it.isHighQuality(System.currentTimeMillis()) }
             ?.let { return DeviceLocationResult.Success(it) }
-        val fix = withTimeoutOrNull(timeoutMillis) {
-            dataSource.preciseUpdates(PRECISE_ACQUISITION_INTERVAL_MILLIS)
-                .first { it.isHighQuality(System.currentTimeMillis()) }
+        val fix = try {
+            withTimeoutOrNull(timeoutMillis) {
+                dataSource.preciseUpdates(PRECISE_ACQUISITION_INTERVAL_MILLIS)
+                    .first { it.isHighQuality(System.currentTimeMillis()) }
+            }
+        } catch (_: IllegalStateException) {
+            null
+        } catch (_: NoSuchElementException) {
+            null
+        } catch (_: SecurityException) {
+            null
         } ?: return DeviceLocationResult.Timeout
         return DeviceLocationResult.Success(fix)
     }

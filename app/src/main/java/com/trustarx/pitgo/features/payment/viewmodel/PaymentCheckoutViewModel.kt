@@ -46,6 +46,11 @@ class PaymentCheckoutViewModel(
     private val dispatchKind = runCatching {
         MobileDispatchKind.valueOf(savedStateHandle.get<String>(PitGoRoutes.PaymentDispatchKindArg).orEmpty())
     }.getOrDefault(MobileDispatchKind.MOBILE_SEQUENTIAL)
+    private val appointmentId: String? = savedStateHandle.get<String>(PitGoRoutes.PaymentAppointmentIdArg)
+    private val quoteVersion: Long? = savedStateHandle.get<String>(PitGoRoutes.PaymentQuoteVersionArg)
+        ?.toLongOrNull()
+    private val quotedAmount: BigDecimal? = savedStateHandle.get<String>(PitGoRoutes.PaymentAmountArg)
+        ?.let { runCatching { BigDecimal(it) }.getOrNull() }
 
     /**
      * The id the dispatch screen will reuse to start once this payment is approved. Normally a
@@ -70,9 +75,13 @@ class PaymentCheckoutViewModel(
     private fun loadService() {
         _uiState.value = PaymentCheckoutUiState.Loading
         viewModelScope.launch {
-            val service = (catalogRepository.service(serviceId) as? CatalogItemResult.Success)?.item
-            val parsedAmount = service?.minimumPrice?.let { runCatching { BigDecimal(it) }.getOrNull() }
-            if (service == null || parsedAmount == null || parsedAmount.signum() <= 0) {
+            val service = if (dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) null
+                else (catalogRepository.service(serviceId) as? CatalogItemResult.Success)?.item
+            val parsedAmount = quotedAmount ?: service?.minimumPrice?.let { runCatching { BigDecimal(it) }.getOrNull() }
+            if ((dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL &&
+                    (appointmentId == null || quoteVersion == null)) ||
+                parsedAmount == null || parsedAmount.signum() <= 0
+            ) {
                 _uiState.value = PaymentCheckoutUiState.InvalidService
                 return@launch
             }
@@ -92,7 +101,15 @@ class PaymentCheckoutViewModel(
         viewModelScope.launch {
             when (
                 val result = paymentRepository.createPayment(
-                    CreatePaymentCommand(requestId, dispatchKind, amount, method, savedCardId),
+                    CreatePaymentCommand(
+                        requestId = requestId,
+                        dispatchKind = dispatchKind,
+                        amount = amount,
+                        method = method,
+                        appointmentId = appointmentId,
+                        quoteVersion = quoteVersion,
+                        savedCardId = savedCardId,
+                    ),
                 )
             ) {
                 is CreatePaymentResult.Success -> applyPayment(result.payment)

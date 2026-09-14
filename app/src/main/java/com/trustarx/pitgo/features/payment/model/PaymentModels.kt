@@ -35,8 +35,12 @@ data class Payment(
     val dispatchKind: MobileDispatchKind,
     val method: PaymentMethod,
     val amount: BigDecimal,
+    val appointmentId: String? = null,
+    val quoteVersion: Long? = null,
     val status: PaymentStatus,
     val pix: PixCharge? = null,
 ) {
-    fun isValid() = id.isUuid() && requestId.isUuid() && amount.signum() > 0
+    fun isValid() = id.isUuid() && requestId.isUuid() && amount.signum() > 0 &&
+        (appointmentId == null || appointmentId.isUuid()) &&
+        (quoteVersion == null || quoteVersion > 0)
 }

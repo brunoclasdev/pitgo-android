@@ -63,6 +63,7 @@ private fun formatBrl(amount: BigDecimal): String = brlAmountFormat.format(amoun
 fun PaymentCheckoutRoute(
     viewModel: PaymentCheckoutViewModel,
     onBack: () -> Unit,
+    onCancel: () -> Unit = onBack,
     onApproved: (requestId: String) -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -73,6 +74,7 @@ fun PaymentCheckoutRoute(
     PaymentCheckoutScreen(
         uiState = uiState,
         onBack = onBack,
+        onCancel = onCancel,
         onPayWithPix = viewModel::payWithPix,
         onPayWithSavedCard = viewModel::payWithSavedCard,
         onRetry = viewModel::retry,
@@ -85,6 +87,7 @@ fun PaymentCheckoutRoute(
 private fun PaymentCheckoutScreen(
     uiState: PaymentCheckoutUiState,
     onBack: () -> Unit,
+    onCancel: () -> Unit,
     onPayWithPix: () -> Unit,
     onPayWithSavedCard: (String) -> Unit,
     onRetry: () -> Unit,
@@ -141,6 +144,15 @@ private fun PaymentCheckoutScreen(
                 PaymentCheckoutUiState.Declined -> DeclinedContent(onChooseAnotherMethod)
                 PaymentCheckoutUiState.Expired -> ExpiredContent(onRetry, onChooseAnotherMethod)
                 PaymentCheckoutUiState.Approved -> Unit // handled by the Route before reaching here
+            }
+
+            // The top app-bar back icon is not sufficiently discoverable during checkout. Keep an
+            // explicit cancellation action in the content so the client can leave before paying.
+            if (uiState !is PaymentCheckoutUiState.Approved) {
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = PitGoSize.MinimumTouchTarget),
+                ) { Text(stringResource(R.string.payment_cancel)) }
             }
         }
     }

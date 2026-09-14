@@ -8,6 +8,8 @@ data class CreatePaymentCommand(
     val dispatchKind: MobileDispatchKind,
     val amount: BigDecimal,
     val method: PaymentMethod,
+    val appointmentId: String? = null,
+    val quoteVersion: Long? = null,
     val savedCardId: String? = null,
     val cardSecurityCodeToken: String? = null,
 )
@@ -15,6 +17,7 @@ data class CreatePaymentCommand(
 enum class PaymentFailure {
     OFFLINE, TIMEOUT, SESSION_EXPIRED,
     CARD_REJECTED, CARD_NOT_FOUND, PAYER_DOCUMENT_REQUIRED,
+    QUOTE_EXPIRED, QUOTE_CONFLICT, INVALID_PAYMENT_CONTEXT,
     SERVICE_UNAVAILABLE, CONTRACT, UNKNOWN,
 }
 

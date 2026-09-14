@@ -25,6 +25,8 @@ import com.trustarx.pitgo.features.pittec.model.PitTecFailure
 import com.trustarx.pitgo.features.pittec.model.PitTecLocationState
 import com.trustarx.pitgo.features.pittec.model.PitTecPending
 import com.trustarx.pitgo.features.pittec.model.PitTecPendingAction
+import com.trustarx.pitgo.features.pittec.model.PitTecQuoteOutcome
+import com.trustarx.pitgo.features.pittec.model.PitTecQuoteResult
 import com.trustarx.pitgo.features.pittec.model.PitTecStartCommand
 import com.trustarx.pitgo.features.pittec.model.PitTecUiState
 import com.trustarx.pitgo.features.pittec.repository.PitTecRepository
@@ -65,11 +67,6 @@ class PitTecViewModel(
     private var cameraRevision = 0L
 
     private var refundWatcherJob: Job? = null
-    private var servicePaymentWatcherJob: Job? = null
-    // (019) Um candidato já confirmado pelo cliente não deve reabrir o card "PitTec encontrado" a
-    // cada snapshot novo enquanto o mesmo appointment continuar PENDING — só um candidato NOVO
-    // (id diferente, ex.: depois de uma recusa) volta a mostrar o card.
-    private var confirmedCandidateAppointmentId: String? = null
 
     init {
         if (_state.value is PitTecUiState.Content) {
@@ -159,28 +156,21 @@ class PitTecViewModel(
         locationRepository.endVisibleUse(ClientLocationPurpose.PROVIDER_DISCOVERY)
     }
 
-    // -- Dispatch (US2) --------------------------------------------------------------------
+    // -- Dispatch --------------------------------------------------------------------------
 
     private fun restoreDispatch() {
         setDispatch(PitTecDispatchPhase.Restoring)
         actionJob = viewModelScope.launch { applyDispatch(repository.restore()) }
     }
 
-    /**
-     * `019`: busca sempre gratuita para iniciar — nenhum pagamento é exigido antes daqui
-     * (`start_pittec_dispatch` não tem mais essa guarda). O pagamento real só é cobrado depois de
-     * um prestador aceitar (ver `ConfirmingValues`).
-     */
     fun requestPitTec() {
         val content = _state.value as? PitTecUiState.Content ?: return
         if (content.dispatch !is PitTecDispatchPhase.None &&
-            content.dispatch !is PitTecDispatchPhase.NoProvider &&
             content.dispatch !is PitTecDispatchPhase.Terminal &&
             content.dispatch !is PitTecDispatchPhase.Failure
         ) return
         if (actionJob?.isActive == true) return
         requestId = UUID.randomUUID().toString()
-        confirmedCandidateAppointmentId = null
         startDispatch()
         watchForRefund()
     }
@@ -203,52 +193,51 @@ class PitTecViewModel(
         }
     }
 
-    /**
-     * Candidato localizado (`CandidateFound`) — o cliente só confirma que quer continuar
-     * aguardando a resposta do prestador; o appointment já está `PENDING` no backend, então
-     * nenhuma chamada de RPC é feita aqui. Marca o candidato como já confirmado para que o
-     * próximo snapshot (polling/Realtime) não reabra o mesmo card.
-     */
-    fun confirmCandidate() {
-        val current = dispatchPhase() as? PitTecDispatchPhase.CandidateFound ?: return
-        confirmedCandidateAppointmentId = current.snapshot.appointment?.id
-        setDispatch(PitTecDispatchPhase.Active(current.snapshot, pending = current.pending))
-    }
+    fun confirmQuote() = respondToQuote(accept = true)
 
-    /**
-     * Recusa o candidato encontrado — reaproveita a mesma RPC de cancelamento pré-aceite já usada
-     * por `cancelSearch()`; `advance_pittec_dispatch` já tenta o próximo candidato sozinho quando
-     * este appointment é cancelado. Nenhuma cobrança ocorre (o pagamento só existe a partir de
-     * `ConfirmingValues`).
-     */
-    fun declineCandidate() {
-        val current = dispatchPhase() as? PitTecDispatchPhase.CandidateFound ?: return
-        if (current.pending != null) return
-        if (actionJob?.isActive == true) return
-        val id = operation.incrementAndGet()
-        setDispatch(current.copy(pending = PitTecPending(PitTecPendingAction.CANCEL, id)))
+    fun declineQuote() = respondToQuote(accept = false)
+
+    private fun respondToQuote(accept: Boolean) {
+        val current = dispatchPhase() as? PitTecDispatchPhase.AwaitingClientConfirmation ?: return
+        if (current.pending != null || actionJob?.isActive == true) return
+        val appointment = current.snapshot.appointment ?: return
+        val quote = appointment.quote ?: current.snapshot.offer?.quote ?: return
+        val operationId = operation.incrementAndGet()
+        val pendingAction = if (accept) PitTecPendingAction.CONFIRM_QUOTE else PitTecPendingAction.DECLINE_QUOTE
+        setDispatch(current.copy(pending = PitTecPending(pendingAction, operationId), failure = null))
         actionJob = viewModelScope.launch {
-            val result = repository.cancel(current.snapshot.searchId, current.snapshot.revision)
-            if (id == operation.get()) applyDispatch(result)
-        }
-    }
-
-    /**
-     * `019`: prestador aceitou (`ConfirmingValues`, `paymentApproved = false`) e a Route acabou de
-     * abrir a tela de pagamento real (`018`) para este mesmo `search_id` — observa a aprovação e
-     * libera `onAccepted(...)` assim que ela chegar. Reaproveita `PaymentRepository.observe`, o
-     * mesmo mecanismo já usado por `watchForRefund()`.
-     */
-    private fun watchForServicePayment(searchId: String) {
-        val payments = paymentRepository ?: return
-        if (servicePaymentWatcherJob?.isActive == true) return
-        servicePaymentWatcherJob = viewModelScope.launch {
-            payments.observe(searchId).collect { event ->
-                if (event !is PaymentEvent.StatusChanged || event.status != PaymentStatus.APPROVED) return@collect
-                val current = dispatchPhase() as? PitTecDispatchPhase.ConfirmingValues ?: return@collect
-                setDispatch(current.copy(paymentApproved = true))
+            when (val result = repository.respondToQuote(
+                requestId = current.snapshot.searchId,
+                appointmentId = appointment.id,
+                quoteVersion = quote.version,
+                accept = accept,
+                revision = current.snapshot.revision,
+            )) {
+                is PitTecQuoteResult.Success -> when (result.outcome) {
+                    PitTecQuoteOutcome.CONFIRMED,
+                    PitTecQuoteOutcome.DECLINED,
+                    -> result.snapshot?.let { applyDispatch(PitTecDispatchResult.Success(it)) }
+                        ?: applyDispatch(PitTecDispatchResult.None)
+                    PitTecQuoteOutcome.CONFIRMATION_EXPIRED -> applyQuoteFailure(PitTecFailure.CONFIRMATION_EXPIRED)
+                    PitTecQuoteOutcome.REVISION_CONFLICT -> {
+                        applyQuoteFailure(PitTecFailure.REVISION_CONFLICT)
+                        applyDispatch(repository.restore())
+                    }
+                    PitTecQuoteOutcome.INVALID_TRANSITION,
+                    PitTecQuoteOutcome.NOT_FOUND,
+                    -> {
+                        applyQuoteFailure(PitTecFailure.INVALID_TRANSITION)
+                        applyDispatch(repository.restore())
+                    }
+                }
+                is PitTecQuoteResult.Failure -> applyQuoteFailure(result.reason)
             }
         }
+    }
+
+    private fun applyQuoteFailure(reason: PitTecFailure) {
+        val current = dispatchPhase() as? PitTecDispatchPhase.AwaitingClientConfirmation ?: return
+        setDispatch(current.copy(pending = null, failure = reason))
     }
 
     /**
@@ -281,21 +270,29 @@ class PitTecViewModel(
     private fun setRefundNotice(status: PaymentStatus) = update { it.copy(refundNotice = status) }
 
     fun cancelSearch() {
-        val active = dispatchActive() ?: return
-        if (active.pending != null) return
+        val snapshot = currentSnapshot() ?: return
+        val pending = when (val phase = dispatchPhase()) {
+            is PitTecDispatchPhase.Searching -> phase.pending
+            is PitTecDispatchPhase.AwaitingClientConfirmation -> phase.pending
+            else -> null
+        }
+        if (pending != null) return
         if (actionJob?.isActive == true) return
         val id = operation.incrementAndGet()
-        setDispatch(active.copy(pending = PitTecPending(PitTecPendingAction.CANCEL, id)))
+        when (val phase = dispatchPhase()) {
+            is PitTecDispatchPhase.Searching -> setDispatch(phase.copy(pending = PitTecPending(PitTecPendingAction.CANCEL, id)))
+            is PitTecDispatchPhase.AwaitingClientConfirmation -> setDispatch(phase.copy(pending = PitTecPending(PitTecPendingAction.CANCEL, id)))
+            is PitTecDispatchPhase.AwaitingPayment -> setDispatch(PitTecDispatchPhase.Restoring)
+            else -> Unit
+        }
         actionJob = viewModelScope.launch {
-            val result = repository.cancel(active.snapshot.searchId, active.snapshot.revision)
+            val result = repository.cancel(snapshot.searchId, snapshot.revision)
             if (id == operation.get()) applyDispatch(result)
         }
     }
 
-    /** "Tentar novamente" from a no-provider/terminal/failure card starts a brand-new request. */
     fun retryDispatch() {
         when (dispatchPhase()) {
-            is PitTecDispatchPhase.NoProvider,
             is PitTecDispatchPhase.Terminal,
             is PitTecDispatchPhase.Failure,
             -> requestPitTec()
@@ -305,8 +302,13 @@ class PitTecViewModel(
 
     private fun dispatchPhase(): PitTecDispatchPhase? = (_state.value as? PitTecUiState.Content)?.dispatch
 
-    private fun dispatchActive(): PitTecDispatchPhase.Active? =
-        (_state.value as? PitTecUiState.Content)?.dispatch as? PitTecDispatchPhase.Active
+    private fun currentSnapshot() = when (val phase = dispatchPhase()) {
+        is PitTecDispatchPhase.Searching -> phase.snapshot
+        is PitTecDispatchPhase.AwaitingClientConfirmation -> phase.snapshot
+        is PitTecDispatchPhase.AwaitingPayment -> phase.snapshot
+        is PitTecDispatchPhase.TrackingReady -> phase.snapshot
+        else -> null
+    }
 
     private fun applyDispatch(result: PitTecDispatchResult) {
         when (result) {
@@ -319,38 +321,49 @@ class PitTecViewModel(
                     update { it.copy(discoveryState = PitTecDiscoveryState.SessionExpired) }
                     return
                 }
-                val active = dispatchActive()
-                if (active != null) {
-                    setDispatch(active.copy(pending = null, failure = result.reason))
-                } else {
-                    setDispatch(PitTecDispatchPhase.Failure(result.reason))
+                when (val phase = dispatchPhase()) {
+                    is PitTecDispatchPhase.Searching -> setDispatch(phase.copy(pending = null, failure = result.reason))
+                    is PitTecDispatchPhase.AwaitingClientConfirmation ->
+                        setDispatch(phase.copy(pending = null, failure = result.reason))
+                    is PitTecDispatchPhase.AwaitingPayment -> setDispatch(phase.copy(failure = result.reason))
+                    else -> setDispatch(PitTecDispatchPhase.Failure(result.reason))
                 }
             }
             is PitTecDispatchResult.Success -> {
                 val snapshot = result.snapshot
+                if (snapshot.status == PitTecDispatchStatus.CANCELLED) {
+                    setDispatch(PitTecDispatchPhase.None)
+                    stopObservers()
+                    return
+                }
                 val phase = when {
-                    snapshot.status == PitTecDispatchStatus.EXHAUSTED -> PitTecDispatchPhase.NoProvider(snapshot.serviceName)
-                    snapshot.status == PitTecDispatchStatus.CANCELLED || snapshot.status == PitTecDispatchStatus.COMPLETED ->
+                    snapshot.status in setOf(
+                        PitTecDispatchStatus.COMPLETED,
+                        PitTecDispatchStatus.EXHAUSTED,
+                    ) ->
                         PitTecDispatchPhase.Terminal(snapshot.status)
-                    snapshot.appointment?.status == PitTecAppointmentStatus.PENDING &&
-                        snapshot.candidate != null &&
-                        snapshot.appointment.id != confirmedCandidateAppointmentId ->
-                        PitTecDispatchPhase.CandidateFound(snapshot)
-                    snapshot.status == PitTecDispatchStatus.ACCEPTED -> {
-                        // Preserva paymentApproved se já estava true — nunca reabre um pagamento
-                        // já aprovado por causa de um snapshot novo (ex.: outra atualização de
-                        // revision enquanto o cliente ainda está na tela de pagamento).
-                        val previous = dispatchPhase() as? PitTecDispatchPhase.ConfirmingValues
-                        PitTecDispatchPhase.ConfirmingValues(snapshot, paymentApproved = previous?.paymentApproved == true)
-                    }
-                    else -> PitTecDispatchPhase.Active(snapshot)
+                    snapshot.trackingAuthorized && snapshot.appointment?.status in setOf(
+                        PitTecAppointmentStatus.ACCEPTED,
+                        PitTecAppointmentStatus.IN_PROGRESS,
+                    ) -> PitTecDispatchPhase.TrackingReady(snapshot)
+                    snapshot.status == PitTecDispatchStatus.AWAITING_CLIENT_CONFIRMATION ||
+                        snapshot.appointment?.status == PitTecAppointmentStatus.AWAITING_CLIENT_CONFIRMATION ->
+                        PitTecDispatchPhase.AwaitingClientConfirmation(
+                            snapshot = snapshot,
+                            remainingSeconds = remainingConfirmationSeconds(snapshot),
+                        )
+                    snapshot.status == PitTecDispatchStatus.AWAITING_PAYMENT ||
+                        snapshot.appointment?.status == PitTecAppointmentStatus.AWAITING_PAYMENT ->
+                        PitTecDispatchPhase.AwaitingPayment(snapshot)
+                    else -> PitTecDispatchPhase.Searching(snapshot)
                 }
                 setDispatch(phase)
-                observeSearch(snapshot.searchId)
-                startClock()
-                startPolling()
-                if (phase is PitTecDispatchPhase.ConfirmingValues && !phase.paymentApproved) {
-                    watchForServicePayment(snapshot.searchId)
+                if (phase is PitTecDispatchPhase.Terminal) {
+                    stopObservers()
+                } else {
+                    observeSearch(snapshot.searchId)
+                    startClock()
+                    startPolling()
                 }
             }
         }
@@ -368,9 +381,11 @@ class PitTecViewModel(
         pollJob = viewModelScope.launch {
             while (true) {
                 delay(POLL_INTERVAL_MS)
-                val active = dispatchActive() ?: return@launch
+                val active = currentSnapshot() ?: return@launch
                 val result = repository.restore()
-                if (result is PitTecDispatchResult.Success && result.snapshot.revision > active.snapshot.revision) {
+                if (result is PitTecDispatchResult.Success &&
+                    (result.snapshot.revision > active.revision || result.snapshot != active)
+                ) {
                     applyDispatch(result)
                 } else if (result is PitTecDispatchResult.None) {
                     applyDispatch(result)
@@ -387,8 +402,8 @@ class PitTecViewModel(
                     repository.observeSearch(searchId).collect { event ->
                         when (event) {
                             is PitTecDispatchEvent.Snapshot -> event.value?.let { incoming ->
-                                val active = dispatchActive()
-                                if (active == null || incoming.revision > active.snapshot.revision) {
+                                val active = currentSnapshot()
+                                if (active == null || incoming.revision > active.revision || incoming != active) {
                                     applyDispatch(PitTecDispatchResult.Success(incoming))
                                 }
                             }
@@ -403,7 +418,7 @@ class PitTecViewModel(
                 } catch (_: Throwable) {
                     // observeSearch() already classifies/emits failures as events.
                 }
-                if (dispatchActive() == null) return@launch
+                if (currentSnapshot() == null) return@launch
                 delay(SEARCH_RESUBSCRIBE_DELAY_MS)
             }
         }
@@ -413,12 +428,9 @@ class PitTecViewModel(
         if (clockJob?.isActive == true) return
         clockJob = viewModelScope.launch {
             while (true) {
-                val active = dispatchActive()
-                val deadline = active?.snapshot?.appointment?.responseDeadlineEpochMillis
-                if (active != null && deadline != null) {
-                    val offset = active.snapshot.serverNowEpochMillis - System.currentTimeMillis()
-                    val seconds = ceil((deadline - (System.currentTimeMillis() + offset)) / 1000.0)
-                        .toLong().coerceAtLeast(0)
+                val active = dispatchPhase() as? PitTecDispatchPhase.AwaitingClientConfirmation
+                if (active != null) {
+                    val seconds = remainingConfirmationSeconds(active.snapshot)
                     setDispatch(active.copy(remainingSeconds = seconds))
                     if (seconds == 0L) restoreDispatch()
                 }
@@ -429,6 +441,15 @@ class PitTecViewModel(
 
     private fun stopObservers() {
         streamJob?.cancel(); pollJob?.cancel(); clockJob?.cancel()
+        streamJob = null; pollJob = null; clockJob = null
+    }
+
+    private fun remainingConfirmationSeconds(snapshot: com.trustarx.pitgo.features.pittec.model.PitTecDispatchSnapshot): Long {
+        val deadline = snapshot.appointment?.quote?.clientConfirmationDeadlineEpochMillis
+            ?: return 0L
+        val offset = snapshot.serverNowEpochMillis - System.currentTimeMillis()
+        return ceil((deadline - (System.currentTimeMillis() + offset)) / 1000.0)
+            .toLong().coerceAtLeast(0)
     }
 
     override fun onCleared() {
