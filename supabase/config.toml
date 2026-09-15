@@ -59,7 +59,14 @@ verify_jwt = true
 [functions.mp-refund-payment]
 verify_jwt = true
 
+[functions.mp-cancel-payment]
+verify_jwt = true
+
 # Called by Mercado Pago itself (no user session); authenticity is verified inside the
 # function via the MP_WEBHOOK_SECRET signature instead of a Supabase JWT.
 [functions.mp-webhook]
+verify_jwt = false
+
+# Dedicated Vault-backed secret; a user JWT does not authorize this worker.
+[functions.mp-reconcile-payments]
 verify_jwt = false

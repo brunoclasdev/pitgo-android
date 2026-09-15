@@ -41,7 +41,7 @@ class PaymentMethodsViewModel(private val repository: SavedCardRepository) : Vie
         viewModelScope.launch {
             _uiState.value = when (val result = repository.save(cardToken)) {
                 is SaveCardResult.Success -> {
-                    cards = cards + result.card
+                    cards = cards.filterNot { it.id == result.card.id } + result.card
                     PaymentMethodsUiState.Listing(cards)
                 }
                 is SaveCardResult.Failure -> PaymentMethodsUiState.RegisterFailed(cards)
@@ -55,6 +55,7 @@ class PaymentMethodsViewModel(private val repository: SavedCardRepository) : Vie
     }
 
     fun removeCard(cardId: String) {
+        if (_uiState.value is PaymentMethodsUiState.Removing) return
         _uiState.value = PaymentMethodsUiState.Removing(cards, cardId)
         viewModelScope.launch {
             _uiState.value = when (repository.remove(cardId)) {
@@ -62,7 +63,7 @@ class PaymentMethodsViewModel(private val repository: SavedCardRepository) : Vie
                     cards = cards.filterNot { it.id == cardId }
                     PaymentMethodsUiState.Listing(cards)
                 }
-                is RemoveCardResult.Failure -> PaymentMethodsUiState.Listing(cards)
+                is RemoveCardResult.Failure -> PaymentMethodsUiState.Listing(cards, removalFailed = true)
             }
         }
     }

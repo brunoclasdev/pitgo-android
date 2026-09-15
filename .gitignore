@@ -299,3 +299,7 @@ fabric.properties
 .kotlin/
 
 !/gradle/wrapper/gradle-wrapper.jar
+
+# Edge-function tooling
+node_modules/
+dist/

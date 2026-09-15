@@ -10,12 +10,13 @@ import java.math.BigDecimal
  * (FR-019).
  */
 enum class PaymentMethod { PIX, SAVED_CARD }
+enum class PaymentSyncState { CREATING, VERIFYING, CURRENT }
 
 /**
  * Mirrors the `payments.status` state machine in
  * specs/018-mercadopago-payments/data-model.md. `REFUND_PENDING` is transient: the backend sets
  * it the instant a paid solicitation is cancelled/exhausted with nothing delivered, and the app
- * follows up by calling `mp-refund-payment`, which resolves it to `REFUNDED` or `REFUND_FAILED`.
+ * observes the autonomous backend until `REFUNDED` or `REFUND_FAILED`.
  */
 enum class PaymentStatus {
     PENDING, APPROVED, REJECTED, EXPIRED, CANCELLED,
@@ -39,7 +40,19 @@ data class Payment(
     val quoteVersion: Long? = null,
     val status: PaymentStatus,
     val pix: PixCharge? = null,
+    val serviceId: String? = null,
+    val syncState: PaymentSyncState = PaymentSyncState.CURRENT,
+    val revision: Long = 0,
+    val cancelRequested: Boolean = false,
+    val supportRequired: Boolean = false,
+    val createdAt: String? = null,
+    val cardBrand: String? = null,
+    val cardLastFourDigits: String? = null,
 ) {
+    val canProceed get() = status == PaymentStatus.APPROVED && syncState == PaymentSyncState.CURRENT && !cancelRequested
+    val blocksNewAttempt get() = syncState != PaymentSyncState.CURRENT || status in setOf(
+        PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REFUND_PENDING, PaymentStatus.REFUND_FAILED,
+    )
     fun isValid() = id.isUuid() && requestId.isUuid() && amount.signum() > 0 &&
         (appointmentId == null || appointmentId.isUuid()) &&
         (quoteVersion == null || quoteVersion > 0)

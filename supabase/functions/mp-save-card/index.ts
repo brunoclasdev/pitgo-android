@@ -43,6 +43,7 @@ Deno.serve(async (request) => {
     if (!customerEmail) return json(422, { code: "CUSTOMER_EMAIL_REQUIRED" });
     const createCustomer = await fetch("https://api.mercadopago.com/v1/customers", {
       method: "POST",
+      signal: AbortSignal.timeout(7000),
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ email: customerEmail }),
     });
@@ -67,7 +68,8 @@ Deno.serve(async (request) => {
     if (!customerId && createCustomer.status === 400) {
       const searchCustomer = await fetch(
         `https://api.mercadopago.com/v1/customers/search?email=${encodeURIComponent(customerEmail)}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } },
+        { signal: AbortSignal.timeout(7000),
+      headers: { Authorization: `Bearer ${accessToken}` } },
       );
       if (searchCustomer.ok) {
         const searchBody = await searchCustomer.json();
@@ -87,7 +89,8 @@ Deno.serve(async (request) => {
 
   const addCard = await fetch(`https://api.mercadopago.com/v1/customers/${customerId}/cards`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(7000),
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({ token: cardToken }),
   });
   if (!addCard.ok) {
@@ -100,15 +103,24 @@ Deno.serve(async (request) => {
   }
   const card = await addCard.json();
   const brand = String(card.payment_method?.id ?? card.payment_method?.name ?? "unknown");
-  const lastFour = String(card.last_four_digits ?? "0000");
+  const lastFour = String(card.last_four_digits ?? "");
+  const paymentType = card.payment_method?.payment_type_id;
+  if (!card.id || !/^[0-9]{4}$/.test(lastFour) || !["credit_card","debit_card"].includes(paymentType)) {
+    return json(502, { code: "INVALID_CARD_RESPONSE" });
+  }
+  const { data: previous } = await admin.from("saved_cards").select("id,client_id").eq("mp_card_id", String(card.id)).maybeSingle();
+  if (previous && previous.client_id !== userData.user.id) return json(409, { code: "INVALID_PAYMENT_CONTEXT" });
 
-  const { data: saved, error: insertError } = await admin.from("saved_cards").insert({
+  const { data: saved, error: insertError } = await admin.from("saved_cards").upsert({
+    ...(previous ? { id: previous.id } : {}),
     client_id: userData.user.id,
     mp_customer_id: customerId,
     mp_card_id: String(card.id),
     brand,
     last_four_digits: lastFour,
-  }).select().single();
+    payment_method_id: String(card.payment_method.id),
+    payment_type_id: paymentType,
+  }, { onConflict: "mp_card_id" }).select().single();
   if (insertError || !saved) {
     return json(502, { code: "PROVIDER_UNAVAILABLE", stage: "CARD_STORE" });
   }

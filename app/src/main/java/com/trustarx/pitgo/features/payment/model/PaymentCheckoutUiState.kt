@@ -15,6 +15,9 @@ sealed interface PaymentCheckoutUiState {
     ) : PaymentCheckoutUiState
 
     data object CreatingPayment : PaymentCheckoutUiState
+    data object Verifying : PaymentCheckoutUiState
+    data class FinancialStatus(val payment: Payment) : PaymentCheckoutUiState
+    data class ConfirmingCard(val context: com.trustarx.pitgo.features.paymentmethods.model.SavedCardTokenizationContext) : PaymentCheckoutUiState
     data class AwaitingPix(val pix: PixCharge) : PaymentCheckoutUiState
     data object AwaitingCardConfirmation : PaymentCheckoutUiState
     data object Approved : PaymentCheckoutUiState

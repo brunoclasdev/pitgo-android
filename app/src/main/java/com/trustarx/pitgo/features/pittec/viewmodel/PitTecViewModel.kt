@@ -32,7 +32,6 @@ import com.trustarx.pitgo.features.pittec.model.PitTecUiState
 import com.trustarx.pitgo.features.pittec.repository.PitTecRepository
 import com.trustarx.pitgo.features.payment.model.PaymentEvent
 import com.trustarx.pitgo.features.payment.model.PaymentStatus
-import com.trustarx.pitgo.features.payment.model.RefundResult
 import com.trustarx.pitgo.features.payment.repository.PaymentRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -254,11 +253,7 @@ class PitTecViewModel(
                 when (event.status) {
                     PaymentStatus.REFUND_PENDING -> {
                         setRefundNotice(PaymentStatus.REFUND_PENDING)
-                        val paymentId = event.paymentId ?: return@collect
-                        when (val result = payments.refund(paymentId)) {
-                            is RefundResult.Done -> setRefundNotice(result.status)
-                            is RefundResult.Failure -> Unit // stays REFUND_PENDING; safe to retry later
-                        }
+                        // Cancellation scheduled the refund atomically; only observe the server.
                     }
                     PaymentStatus.REFUNDED, PaymentStatus.REFUND_FAILED -> setRefundNotice(event.status)
                     else -> Unit

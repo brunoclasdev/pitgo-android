@@ -305,97 +305,111 @@ private fun MapTab(
     onDecline: () -> Unit,
     isAvailable: Boolean,
 ) {
-    when (val gate = homeState.locationGate) {
-        ProviderLocationGate.CheckingPermission -> LocationGateMessage(
-            message = stringResource(R.string.pittec_mock_checking_permission),
-            loading = true,
-        )
-        ProviderLocationGate.PermissionRequired -> LocationGateMessage(
-            message = stringResource(R.string.pittec_mock_permission_required),
-            actionLabel = stringResource(R.string.pittec_mock_grant_permission),
-            onAction = onGrantLocationPermission,
-        )
-        ProviderLocationGate.ApproximateOnly -> LocationGateMessage(
-            message = stringResource(R.string.pittec_mock_approximate_only),
-            actionLabel = stringResource(R.string.pittec_mock_grant_permission),
-            onAction = onOpenAppSettings,
-        )
-        ProviderLocationGate.ServicesDisabled -> LocationGateMessage(
-            message = stringResource(R.string.pittec_mock_services_disabled),
-            actionLabel = stringResource(R.string.pittec_mock_open_location_settings),
-            onAction = onOpenLocationSettings,
-        )
-        ProviderLocationGate.Locating -> LocationGateMessage(
-            message = stringResource(R.string.pittec_mock_locating),
-            loading = true,
-        )
-        ProviderLocationGate.Unavailable -> LocationGateMessage(
-            message = stringResource(R.string.pittec_mock_unavailable),
-            actionLabel = stringResource(R.string.action_retry),
-            onAction = onRetryLocation,
-        )
-        is ProviderLocationGate.Ready -> Box(Modifier.fillMaxSize()) {
-            MapLibreMapHost(
-                configuration = PitGoManagedMapStyle.configuration,
-                renderModel = MapRenderModel(
-                    listOf(
-                        MapMarkerSpec(
-                            id = "pittec-self",
-                            coordinate = gate.deviceLocation.coordinate,
-                            kind = MapMarkerKind.LIVE,
-                            accessibilityLabel = stringResource(R.string.pittec_mock_available_title),
+    // The incoming-offer card must never be hidden behind the location gate: the gate flips back
+    // to Locating on every ON_START (screen wake, app foregrounded again, ...) even when a fix was
+    // already held (PitTecProviderViewModel.onPermissionChecked -> locate()), which used to hide a
+    // real, ticking PitTec offer for up to 20s at a time behind a "localizando..." message — enough
+    // to eat the whole 60s response window across a couple of screen-wake cycles. The card is now a
+    // sibling drawn on top of whatever the gate shows, computed once outside the `when`.
+    val request = (incomingState as? ProviderIncomingUiState.Request)
+        ?.takeIf { it.snapshot.dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL }
+    Box(Modifier.fillMaxSize()) {
+        when (val gate = homeState.locationGate) {
+            ProviderLocationGate.CheckingPermission -> LocationGateMessage(
+                message = stringResource(R.string.pittec_mock_checking_permission),
+                loading = true,
+            )
+            ProviderLocationGate.PermissionRequired -> LocationGateMessage(
+                message = stringResource(R.string.pittec_mock_permission_required),
+                actionLabel = stringResource(R.string.pittec_mock_grant_permission),
+                onAction = onGrantLocationPermission,
+            )
+            ProviderLocationGate.ApproximateOnly -> LocationGateMessage(
+                message = stringResource(R.string.pittec_mock_approximate_only),
+                actionLabel = stringResource(R.string.pittec_mock_grant_permission),
+                onAction = onOpenAppSettings,
+            )
+            ProviderLocationGate.ServicesDisabled -> LocationGateMessage(
+                message = stringResource(R.string.pittec_mock_services_disabled),
+                actionLabel = stringResource(R.string.pittec_mock_open_location_settings),
+                onAction = onOpenLocationSettings,
+            )
+            ProviderLocationGate.Locating -> LocationGateMessage(
+                message = stringResource(R.string.pittec_mock_locating),
+                loading = true,
+            )
+            ProviderLocationGate.Unavailable -> LocationGateMessage(
+                message = stringResource(R.string.pittec_mock_unavailable),
+                actionLabel = stringResource(R.string.action_retry),
+                onAction = onRetryLocation,
+            )
+            is ProviderLocationGate.Ready -> {
+                MapLibreMapHost(
+                    configuration = PitGoManagedMapStyle.configuration,
+                    renderModel = MapRenderModel(
+                        listOf(
+                            MapMarkerSpec(
+                                id = "pittec-self",
+                                coordinate = gate.deviceLocation.coordinate,
+                                kind = MapMarkerKind.LIVE,
+                                accessibilityLabel = stringResource(R.string.pittec_mock_available_title),
+                            ),
                         ),
                     ),
-                ),
-                viewport = MapViewport(gate.deviceLocation.coordinate, 15.0),
-                cameraCommand = null,
-                styleReloadRevision = homeState.styleReloadRevision,
-                online = true,
-                styleController = styleController,
-                onViewportIdle = onViewportIdle,
-                onFeatureClick = {},
-                onSurfaceState = onSurfaceState,
-                modifier = Modifier.fillMaxSize(),
-            )
+                    viewport = MapViewport(gate.deviceLocation.coordinate, 15.0),
+                    cameraCommand = null,
+                    styleReloadRevision = homeState.styleReloadRevision,
+                    online = true,
+                    styleController = styleController,
+                    onViewportIdle = onViewportIdle,
+                    onFeatureClick = {},
+                    onSurfaceState = onSurfaceState,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                if (request == null) {
+                    Column(
+                        modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(PitGoSpacing.Small),
+                        verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
+                    ) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+                        ) {
+                            Column(
+                                Modifier.padding(PitGoSpacing.Medium),
+                                verticalArrangement = Arrangement.spacedBy(PitGoSpacing.ExtraSmall),
+                            ) {
+                                Text(
+                                    stringResource(
+                                        if (isAvailable) R.string.pittec_mock_available_title else R.string.provider_dashboard_available_off,
+                                    ),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.semantics { heading() },
+                                )
+                                Text(
+                                    stringResource(
+                                        if (isAvailable) R.string.pittec_mock_available_hint else R.string.pittec_home_unavailable_hint,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (request != null) {
             Column(
                 modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(PitGoSpacing.Small),
                 verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
             ) {
-                val request = (incomingState as? ProviderIncomingUiState.Request)
-                    ?.takeIf { it.snapshot.dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL }
-                if (request != null) {
-                    RealIncomingRequestCard(
-                        offer = request.snapshot.offer,
-                        revision = request.snapshot.revision,
-                        pending = request.pending,
-                        onAccept = onAccept,
-                        onDecline = onDecline,
-                    )
-                } else {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-                        modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
-                    ) {
-                        Column(
-                            Modifier.padding(PitGoSpacing.Medium),
-                            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.ExtraSmall),
-                        ) {
-                            Text(
-                                stringResource(
-                                    if (isAvailable) R.string.pittec_mock_available_title else R.string.provider_dashboard_available_off,
-                                ),
-                                style = MaterialTheme.typography.titleMedium,
-                                modifier = Modifier.semantics { heading() },
-                            )
-                            Text(
-                                stringResource(
-                                    if (isAvailable) R.string.pittec_mock_available_hint else R.string.pittec_home_unavailable_hint,
-                                ),
-                            )
-                        }
-                    }
-                }
+                RealIncomingRequestCard(
+                    offer = request.snapshot.offer,
+                    revision = request.snapshot.revision,
+                    pending = request.pending,
+                    onAccept = onAccept,
+                    onDecline = onDecline,
+                )
             }
         }
     }

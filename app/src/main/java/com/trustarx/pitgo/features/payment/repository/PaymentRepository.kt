@@ -33,6 +33,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import com.trustarx.pitgo.features.payment.model.Payment
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.buildJsonObject
@@ -45,6 +49,24 @@ import kotlinx.serialization.json.put
  * [com.trustarx.pitgo.features.mobiledispatch.repository.MobileDispatchRepository] for [observe].
  */
 class PaymentRepository(private val client: SupabaseClient) {
+    suspend fun recoverable(): PaymentEvent = try {
+        val dto = withTimeout(RPC_TIMEOUT_MILLIS) {
+            client.postgrest.rpc("get_recoverable_payment").decodeAs<PaymentStatusProbeDto>()
+        }
+        if (dto.outcome == "NOT_FOUND") PaymentEvent.NotFound else dto.toDomainOrNull()?.let {
+            PaymentEvent.StatusChanged(it.status, it.id, it)
+        } ?: PaymentEvent.Failure(PaymentFailure.CONTRACT)
+    } catch (_: TimeoutCancellationException) { PaymentEvent.Failure(PaymentFailure.TIMEOUT)
+    } catch (cancel: CancellationException) { throw cancel
+    } catch (error: Throwable) { PaymentEvent.Failure(classifyRpcError(error)) }
+
+    suspend fun history(before: Payment? = null): List<Payment> = withTimeout(RPC_TIMEOUT_MILLIS) {
+        val rows = client.postgrest.rpc("get_payment_history", buildJsonObject {
+            put("p_limit", 20)
+            before?.createdAt?.let { put("p_before", it); put("p_before_id", before.id) }
+        }).decodeList<PaymentStatusProbeDto>()
+        rows.map { requireNotNull(it.toDomainOrNull()) }
+    }
     suspend fun createPayment(command: CreatePaymentCommand): CreatePaymentResult {
         val pitTecContextValid = command.dispatchKind.name != "PITTEC_AUTO_SEQUENTIAL" ||
             (command.appointmentId?.isUuid() == true && (command.quoteVersion ?: 0) > 0)
@@ -58,7 +80,8 @@ class PaymentRepository(private val client: SupabaseClient) {
                     body = CreatePaymentRequestDto(
                         requestId = command.requestId,
                         dispatchKind = command.dispatchKind.name,
-                        amount = command.amount.toDouble().takeUnless {
+                        serviceId = command.serviceId,
+                        amount = command.amount.toPlainString().takeUnless {
                             command.dispatchKind.name == "PITTEC_AUTO_SEQUENTIAL"
                         },
                         appointmentId = command.appointmentId,
@@ -72,10 +95,10 @@ class PaymentRepository(private val client: SupabaseClient) {
             val dto = response.body<CreatePaymentResponseDto>()
             dto.toDomainOrNull(command)?.let(CreatePaymentResult::Success)
                 ?: CreatePaymentResult.Failure(PaymentFailure.CONTRACT)
-        } catch (cancel: CancellationException) {
-            throw cancel
         } catch (_: TimeoutCancellationException) {
             CreatePaymentResult.Failure(PaymentFailure.TIMEOUT)
+        } catch (cancel: CancellationException) {
+            throw cancel
         } catch (_: HttpRequestTimeoutException) {
             CreatePaymentResult.Failure(PaymentFailure.TIMEOUT)
         } catch (_: HttpRequestException) {
@@ -87,7 +110,21 @@ class PaymentRepository(private val client: SupabaseClient) {
         }
     }
 
-    /** Called right after a cancel/exhausted-search RPC leaves a payment `REFUND_PENDING` (FR-018). */
+    suspend fun cancel(paymentId: String): CreatePaymentResult {
+        if (!paymentId.isUuid()) return CreatePaymentResult.Failure(PaymentFailure.CONTRACT)
+        return try {
+            val response = withTimeout(RPC_TIMEOUT_MILLIS) {
+                client.functions.invoke("mp-cancel-payment", body = RefundPaymentRequestDto(paymentId))
+            }
+            response.body<PaymentStatusProbeDto>().toDomainOrNull()?.let(CreatePaymentResult::Success)
+                ?: CreatePaymentResult.Failure(PaymentFailure.CONTRACT)
+        } catch (_: TimeoutCancellationException) { CreatePaymentResult.Failure(PaymentFailure.TIMEOUT)
+        } catch (cancel: CancellationException) { throw cancel
+        } catch (error: RestException) { CreatePaymentResult.Failure(classifyEdgeFunctionError(error))
+        } catch (_: Exception) { CreatePaymentResult.Failure(PaymentFailure.UNKNOWN) }
+    }
+
+    /** Optional scheduling command; backend cancellation already schedules autonomous refunds. */
     suspend fun refund(paymentId: String): RefundResult {
         if (!paymentId.isUuid()) return RefundResult.Failure(PaymentFailure.CONTRACT)
         return try {
@@ -96,10 +133,10 @@ class PaymentRepository(private val client: SupabaseClient) {
             }
             response.body<RefundPaymentResponseDto>().toStatusOrNull()?.let(RefundResult::Done)
                 ?: RefundResult.Failure(PaymentFailure.CONTRACT)
-        } catch (cancel: CancellationException) {
-            throw cancel
         } catch (_: TimeoutCancellationException) {
             RefundResult.Failure(PaymentFailure.TIMEOUT)
+        } catch (cancel: CancellationException) {
+            throw cancel
         } catch (_: HttpRequestTimeoutException) {
             RefundResult.Failure(PaymentFailure.TIMEOUT)
         } catch (_: HttpRequestException) {
@@ -120,12 +157,13 @@ class PaymentRepository(private val client: SupabaseClient) {
                     put("p_request_id", requestId)
                 }).decodeAs<PaymentStatusProbeDto>()
             }
-            dto.toStatusOrNull()?.let { PaymentEvent.StatusChanged(it, dto.paymentId) }
+            if (dto.outcome == "NOT_FOUND") PaymentEvent.NotFound
+            else dto.toDomainOrNull()?.let { PaymentEvent.StatusChanged(it.status, it.id, it) }
                 ?: PaymentEvent.Failure(PaymentFailure.CONTRACT)
-        } catch (cancel: CancellationException) {
-            throw cancel
         } catch (_: TimeoutCancellationException) {
             PaymentEvent.Failure(PaymentFailure.TIMEOUT)
+        } catch (cancel: CancellationException) {
+            throw cancel
         } catch (error: Throwable) {
             PaymentEvent.Failure(classifyRpcError(error))
         }
@@ -139,25 +177,39 @@ class PaymentRepository(private val client: SupabaseClient) {
         }
         val topic = "payment:$requestId"
         val channel = client.channel(topic) { isPrivate = true }
+        val lock = Mutex()
+        var latestId: String? = null
+        var latestRevision = -1L
+        suspend fun refresh() = lock.withLock {
+            val event = getStatus(requestId)
+            val payment = (event as? PaymentEvent.StatusChanged)?.payment
+            if (payment != null) {
+                if (payment.id == latestId && payment.revision <= latestRevision) return@withLock
+                latestId = payment.id; latestRevision = payment.revision
+            }
+            send(event)
+        }
+        launch { while (true) { refresh(); delay(10_000L) } }
         try {
             client.realtime.setAuth()
             val changed = channel.broadcastFlow<PaymentRealtimeEventDto>("CHANGED")
             launch {
                 changed.collect { event ->
-                    event.toStatusOrNull()?.let { send(PaymentEvent.StatusChanged(it, event.paymentId)) }
+                    if (event.requestId == requestId) refresh()
                 }
             }
             launch {
                 channel.status.filter { it == RealtimeChannel.Status.SUBSCRIBED }
-                    .collect { send(getStatus(requestId)) }
+                    .collect { refresh() }
             }
             channel.subscribe(blockUntilSubscribed = true)
-            send(getStatus(requestId))
+            refresh()
             awaitCancellation()
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (error: Throwable) {
             send(PaymentEvent.Failure(classifyRpcError(error)))
+            awaitCancellation() // The single 10-second fallback survives a Realtime outage.
         } finally {
             withContext(NonCancellable) { runCatching { client.realtime.removeChannel(channel) } }
         }
@@ -194,7 +246,6 @@ class PaymentRepository(private val client: SupabaseClient) {
     private companion object {
         const val RPC_TIMEOUT_MILLIS = 15_000L
 
-        // mp-refund-payment retries internally with backoff up to ~30s (research.md §7).
-        const val REFUND_TIMEOUT_MILLIS = 45_000L
+        const val REFUND_TIMEOUT_MILLIS = 15_000L
     }
 }

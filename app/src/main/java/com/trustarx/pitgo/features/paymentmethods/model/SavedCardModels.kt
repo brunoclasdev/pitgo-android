@@ -31,3 +31,12 @@ enum class SavedCardFailure {
     OFFLINE, TIMEOUT, SESSION_EXPIRED, CARD_REJECTED, CARD_NOT_FOUND,
     SERVICE_UNAVAILABLE, CONTRACT, UNKNOWN,
 }
+
+data class SavedCardTokenizationContext(
+    val savedCardId: String, val cardId: String, val holderName: String,
+    val documentNumber: String?, val documentType: String,
+)
+sealed interface CardContextResult {
+    data class Success(val context: SavedCardTokenizationContext) : CardContextResult
+    data class Failure(val reason: SavedCardFailure) : CardContextResult
+}

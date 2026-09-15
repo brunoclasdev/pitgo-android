@@ -636,4 +636,21 @@
     <string name="pittec_mock_values_total">Total: %1$s</string>
 
     <string name="pittec_mock_profile_title">Perfil</string>
+    <string name="payment_verifying">Estamos verificando o pagamento. Não pague novamente. Você pode sair e acompanhar depois.</string>
+    <string name="payment_check_status">Consultar pagamento</string>
+    <string name="payment_pix_valid_until">Pix válido até %1$s. Após esse horário, aguarde a confirmação de expiração.</string>
+    <string name="payment_card_token_error">Não foi possível confirmar o cartão. Confira o código de segurança e tente novamente, ou escolha Pix.</string>
+    <string name="payment_card_confirm">Confirmar pagamento</string>
+    <string name="payment_card_remove_error">Não foi possível remover o cartão. Atualize a lista ou tente novamente.</string>
+    <string name="payment_resume">Acompanhar pagamento</string>
+    <string name="payment_history">Histórico de pagamentos</string>
+    <string name="payment_history_empty">Nenhum pagamento encontrado.</string>
+    <string name="payment_history_more">Carregar mais</string>
+    <string name="payment_confirmed">Pagamento confirmado</string>
+    <string name="payment_pending">Aguardando pagamento</string>
+    <string name="payment_cancelled">Pagamento cancelado</string>
+    <string name="payment_cancelling">Cancelamento solicitado. Estamos verificando o resultado.</string>
+    <string name="payment_refund_pending">Reembolso em andamento. Você pode fechar o aplicativo.</string>
+    <string name="payment_refunded">Reembolso confirmado</string>
+    <string name="payment_support">Este pagamento precisa de acompanhamento do suporte. Continuamos verificando o resultado.</string>
 </resources>

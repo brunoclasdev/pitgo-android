@@ -74,6 +74,12 @@ object PitGoRoutes {
 
     fun mobileDispatch(searchId: String) = "mobile-dispatch/${Uri.encode(searchId)}"
     fun providerRequest(appointmentId: String) = "provider-request/${Uri.encode(appointmentId)}"
+    const val PaymentHistory = "payment-history"
+
+    fun resumePayment(payment: com.trustarx.pitgo.features.payment.model.Payment): String =
+        payment(payment.serviceId ?: "legacy", payment.dispatchKind.name, payment.requestId,
+            payment.appointmentId, payment.quoteVersion, payment.amount.toPlainString())
+
     fun payment(
         serviceId: String,
         dispatchKind: String,

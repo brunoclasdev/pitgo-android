@@ -28,6 +28,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -41,6 +42,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleStartEffect
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
@@ -67,14 +69,21 @@ fun PaymentCheckoutRoute(
     onApproved: (requestId: String) -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    LifecycleStartEffect(viewModel) {
+        viewModel.onActive()
+        onStopOrDispose { viewModel.onInactive() }
+    }
+    (uiState as? PaymentCheckoutUiState.ConfirmingCard)?.let {
+        SavedCardSecurityCodeSheet(it.context, viewModel::chooseAnotherMethod, viewModel::confirmCard)
+    }
     if (uiState is PaymentCheckoutUiState.Approved) {
-        onApproved(viewModel.requestId)
+        LaunchedEffect(viewModel.requestId) { onApproved(viewModel.requestId) }
         return
     }
     PaymentCheckoutScreen(
         uiState = uiState,
         onBack = onBack,
-        onCancel = onCancel,
+        onCancel = { viewModel.cancelPayment(onCancel) },
         onPayWithPix = viewModel::payWithPix,
         onPayWithSavedCard = viewModel::payWithSavedCard,
         onRetry = viewModel::retry,
@@ -129,8 +138,18 @@ private fun PaymentCheckoutScreen(
             verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
         ) {
             when (uiState) {
+                is PaymentCheckoutUiState.FinancialStatus -> {
+                    Text(paymentStatusLabel(uiState.payment))
+                    OutlinedButton(onClick = onRetry) { Text(stringResource(R.string.payment_check_status)) }
+                }
+                is PaymentCheckoutUiState.ConfirmingCard -> Unit
                 PaymentCheckoutUiState.Loading, PaymentCheckoutUiState.CreatingPayment ->
                     CircularProgressIndicator(modifier = Modifier.padding(top = PitGoSpacing.Large))
+
+                PaymentCheckoutUiState.Verifying -> {
+                    Text(stringResource(R.string.payment_verifying))
+                    OutlinedButton(onClick = onRetry) { Text(stringResource(R.string.payment_check_status)) }
+                }
 
                 PaymentCheckoutUiState.InvalidService, PaymentCheckoutUiState.Failure -> FailureContent(onRetry)
 
@@ -148,7 +167,8 @@ private fun PaymentCheckoutScreen(
 
             // The top app-bar back icon is not sufficiently discoverable during checkout. Keep an
             // explicit cancellation action in the content so the client can leave before paying.
-            if (uiState !is PaymentCheckoutUiState.Approved) {
+            if (uiState !is PaymentCheckoutUiState.Approved && uiState !is PaymentCheckoutUiState.FinancialStatus
+                && uiState !is PaymentCheckoutUiState.CreatingPayment && uiState !is PaymentCheckoutUiState.Loading) {
                 OutlinedButton(
                     onClick = onCancel,
                     modifier = Modifier.fillMaxWidth().heightIn(min = PitGoSize.MinimumTouchTarget),
@@ -196,6 +216,9 @@ private fun AwaitingPixContent(
     onChooseAnotherMethod: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
+    Text(stringResource(R.string.payment_pix_valid_until,
+        java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+            .format(java.util.Date(state.pix.expiresAtEpochMillis))))
     val bitmap = remember(state.pix.qrCodeBase64) {
         runCatching {
             val bytes = Base64.decode(state.pix.qrCodeBase64, Base64.DEFAULT)

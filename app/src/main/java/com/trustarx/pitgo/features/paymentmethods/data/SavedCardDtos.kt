@@ -33,3 +33,16 @@ internal data class SaveCardResponseDto(
 /** Body sent to `mp-remove-card`. */
 @Serializable
 internal data class RemoveCardRequestDto(@SerialName("saved_card_id") val savedCardId: String)
+
+@Serializable
+internal data class SavedCardContextDto(
+    @SerialName("saved_card_id") val savedCardId: String,
+    @SerialName("card_id") val cardId: String,
+    @SerialName("holder_name") val holderName: String,
+    @SerialName("document_number") val documentNumber: String? = null,
+    @SerialName("document_type") val documentType: String,
+) {
+    fun toDomain() = com.trustarx.pitgo.features.paymentmethods.model.SavedCardTokenizationContext(
+        savedCardId, cardId, holderName, documentNumber, documentType,
+    )
+}

@@ -22,9 +22,24 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import com.trustarx.pitgo.features.paymentmethods.data.SavedCardContextDto
+import com.trustarx.pitgo.features.paymentmethods.model.CardContextResult
 
 /** Cadastro opcional de cartão (FR-004/FR-006/FR-007) — área dedicada, sem checkout inline. */
 class SavedCardRepository(private val client: SupabaseClient) {
+    suspend fun tokenizationContext(savedCardId: String): CardContextResult = try {
+        val dto = withTimeout(RPC_TIMEOUT_MILLIS) {
+            client.postgrest.rpc("get_saved_card_tokenization_context", buildJsonObject {
+                put("p_saved_card_id", savedCardId)
+            }).decodeAs<SavedCardContextDto>()
+        }
+        CardContextResult.Success(dto.toDomain())
+    } catch (_: TimeoutCancellationException) {
+        CardContextResult.Failure(SavedCardFailure.TIMEOUT)
+    } catch (cancel: CancellationException) { throw cancel
+    } catch (error: Throwable) { CardContextResult.Failure(classifyRpcError(error)) }
+
     suspend fun list(): SavedCardsResult = try {
         val rows = withTimeout(RPC_TIMEOUT_MILLIS) {
             client.postgrest.rpc("list_saved_cards").decodeList<SavedCardDto>()

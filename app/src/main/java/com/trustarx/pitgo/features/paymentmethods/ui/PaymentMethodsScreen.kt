@@ -121,8 +121,9 @@ private fun PaymentMethodsScreen(
                     Text(stringResource(R.string.payment_failure_message))
                     Button(onClick = onRetryLoad) { Text(stringResource(R.string.payment_retry)) }
                 }
-                is PaymentMethodsUiState.Listing -> CardsList(uiState.cards, onRemove, null) {
-                    showRegistrationForm = true
+                is PaymentMethodsUiState.Listing -> {
+                    CardsList(uiState.cards, onRemove, null) { showRegistrationForm = true }
+                    if (uiState.removalFailed) Text(stringResource(R.string.payment_card_remove_error))
                 }
                 is PaymentMethodsUiState.Removing -> CardsList(uiState.cards, onRemove, uiState.removingId) {
                     showRegistrationForm = true
@@ -203,6 +204,7 @@ private fun CardRegistrationForm(
 ) {
     val scope = rememberCoroutineScope()
     var isTokenizing by remember { mutableStateOf(false) }
+    var tokenizationFailed by remember { mutableStateOf(false) }
     val cardNumberState = remember { PCIFieldState.Companion.create() }
     val expirationDateState = remember { PCIFieldState.Companion.create() }
     val securityCodeState = remember { PCIFieldState.Companion.create() }
@@ -220,6 +222,7 @@ private fun CardRegistrationForm(
     Text(stringResource(R.string.payment_methods_security_code_label), style = MaterialTheme.typography.labelLarge)
     SecurityCodeTextField(modifier = Modifier.fillMaxWidth(), state = securityCodeState, onEvent = {})
 
+    if (tokenizationFailed) Text(stringResource(R.string.payment_card_token_error))
     if (isTokenizing) {
         CircularProgressIndicator()
     } else {
@@ -234,9 +237,8 @@ private fun CardRegistrationForm(
                             cardNumberState, expirationDateState, securityCodeState, buyer,
                         )
                         isTokenizing = false
-                        // Error branch intentionally left as a no-op: the form stays up so the
-                        // client can fix the input or use onCancel to bail out (US2 cenário 2).
                         val token = (result as? CoreMethodsResult.Success<*>)?.data as? CardToken
+                        tokenizationFailed = token?.token.isNullOrBlank()
                         token?.token?.let(onTokenGenerated)
                     }
                 },

@@ -66,14 +66,17 @@ import com.trustarx.pitgo.features.home.viewmodel.HomeViewModel
 @Composable
 fun HomeRoute(
     viewModel: HomeViewModel,
+    onResumePayment: (com.trustarx.pitgo.features.payment.model.Payment) -> Unit,
     onServiceClick: (HomeService) -> Unit,
     onOpenGarage: () -> Unit,
     onOpenAddress: () -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val recoverable by viewModel.recoverable.collectAsStateWithLifecycle()
     HomeScreen(
         state = state,
+        onResumePayment = recoverable?.let { { onResumePayment(it) } },
         onDiagnosticClick = {},
         onServiceClick = onServiceClick,
         onOpenGarage = onOpenGarage,
@@ -85,6 +88,7 @@ fun HomeRoute(
 @Composable
 fun HomeScreen(
     state: HomeUiState,
+    onResumePayment: (() -> Unit)? = null,
     onDiagnosticClick: () -> Unit,
     onServiceClick: (HomeService) -> Unit,
     onOpenGarage: () -> Unit,
@@ -92,6 +96,14 @@ fun HomeScreen(
     onBottomItemClick: (BottomItemId) -> Unit,
 ) {
     Scaffold(
+        topBar = {
+            onResumePayment?.let { resume ->
+                androidx.compose.material3.OutlinedButton(onClick = resume,
+                    modifier = Modifier.fillMaxWidth().padding(PitGoSpacing.Medium)) {
+                    Text(stringResource(R.string.payment_resume))
+                }
+            }
+        },
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets.safeDrawing.only(
             WindowInsetsSides.Horizontal + WindowInsetsSides.Top,

@@ -4,6 +4,10 @@ import com.trustarx.pitgo.core.common.time.parseSupabaseInstant
 import com.trustarx.pitgo.features.payment.model.CreatePaymentCommand
 import com.trustarx.pitgo.features.payment.model.Payment
 import com.trustarx.pitgo.features.payment.model.PaymentStatus
+import com.trustarx.pitgo.features.payment.model.PaymentSyncState
+import com.trustarx.pitgo.features.payment.model.PaymentMethod
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchKind
+import java.math.BigDecimal
 import com.trustarx.pitgo.features.payment.model.PixCharge
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -13,7 +17,8 @@ import kotlinx.serialization.Serializable
 internal data class CreatePaymentRequestDto(
     @SerialName("request_id") val requestId: String,
     @SerialName("dispatch_kind") val dispatchKind: String,
-    val amount: Double? = null,
+    val amount: String? = null,
+    @SerialName("service_id") val serviceId: String? = null,
     @SerialName("appointment_id") val appointmentId: String? = null,
     @SerialName("quote_version") val quoteVersion: Long? = null,
     val method: String,
@@ -39,19 +44,30 @@ internal data class CreatePaymentResponseDto(
     @SerialName("payment_id") val paymentId: String,
     val status: String,
     val pix: PixChargeDto? = null,
+    val amount: String? = null,
+    val currency: String = "BRL",
+    val method: String? = null,
+    @SerialName("service_id") val serviceId: String? = null,
+    @SerialName("sync_state") val syncState: String = "CURRENT",
+    val revision: Long = 0,
+    @SerialName("cancel_requested") val cancelRequested: Boolean = false,
+    @SerialName("support_required") val supportRequired: Boolean = false,
 ) {
     fun toDomainOrNull(command: CreatePaymentCommand): Payment? = runCatching {
         Payment(
             id = paymentId,
             requestId = command.requestId,
             dispatchKind = command.dispatchKind,
-            method = command.method,
-            amount = command.amount,
+            method = method?.let(PaymentMethod::valueOf) ?: command.method,
+            amount = amount?.let(::BigDecimal) ?: command.amount,
             appointmentId = command.appointmentId,
             quoteVersion = command.quoteVersion,
             status = PaymentStatus.valueOf(status),
             pix = pix?.toDomain(),
-        ).takeIf(Payment::isValid)
+            serviceId = serviceId ?: command.serviceId,
+            syncState = PaymentSyncState.valueOf(syncState), revision = revision,
+            cancelRequested = cancelRequested, supportRequired = supportRequired,
+        ).takeIf { it.isValid() && currency == "BRL" }
     }.getOrNull()
 }
 
@@ -76,7 +92,32 @@ internal data class PaymentStatusProbeDto(
     @SerialName("payment_id") val paymentId: String? = null,
     val status: String? = null,
     val method: String? = null,
+    @SerialName("request_id") val requestId: String? = null,
+    @SerialName("service_id") val serviceId: String? = null,
+    @SerialName("dispatch_kind") val dispatchKind: String? = null,
+    @SerialName("appointment_id") val appointmentId: String? = null,
+    @SerialName("quote_version") val quoteVersion: Long? = null,
+    @SerialName("sync_state") val syncState: String = "CURRENT",
+    val revision: Long = 0,
+    val amount: String? = null,
+    val currency: String = "BRL",
+    val pix: PixChargeDto? = null,
+    @SerialName("cancel_requested") val cancelRequested: Boolean = false,
+    @SerialName("support_required") val supportRequired: Boolean = false,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("card_brand") val cardBrand: String? = null,
+    @SerialName("card_last_four_digits") val cardLastFourDigits: String? = null,
 ) {
+    fun toDomainOrNull(): Payment? = runCatching {
+        Payment(id = requireNotNull(paymentId), requestId = requireNotNull(requestId),
+            dispatchKind = MobileDispatchKind.valueOf(requireNotNull(dispatchKind)),
+            method = PaymentMethod.valueOf(requireNotNull(method)), amount = BigDecimal(requireNotNull(amount)),
+            status = PaymentStatus.valueOf(requireNotNull(status)), appointmentId = appointmentId, quoteVersion = quoteVersion,
+            pix = pix?.toDomain(), serviceId = serviceId, syncState = PaymentSyncState.valueOf(syncState),
+            revision = revision, cancelRequested = cancelRequested, supportRequired = supportRequired,
+            createdAt = createdAt, cardBrand = cardBrand, cardLastFourDigits = cardLastFourDigits,
+        ).takeIf { it.isValid() && currency == "BRL" }
+    }.getOrNull()
     fun toStatusOrNull(): PaymentStatus? =
         status?.let { runCatching { PaymentStatus.valueOf(it) }.getOrNull() }
 }

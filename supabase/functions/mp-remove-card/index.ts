@@ -38,8 +38,8 @@ Deno.serve(async (request) => {
   if (!card) return json(404, { code: "CARD_NOT_FOUND" });
 
   const upstream = await fetch(
-    `https://api.mercadopago.com/v1/customers/${card.mp_customer_id}/cards/${card.mp_card_id}`,
-    { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } },
+    `https://api.mercadopago.com/v1/customers/${encodeURIComponent(card.mp_customer_id)}/cards/${encodeURIComponent(card.mp_card_id)}`,
+    { method: "DELETE", signal: AbortSignal.timeout(7000), headers: { Authorization: `Bearer ${accessToken}` } },
   );
   if (!upstream.ok && upstream.status !== 404) return json(502, { code: "PROVIDER_UNAVAILABLE" });
 

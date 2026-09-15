@@ -37,7 +37,7 @@ import java.util.UUID
  * and only lets the caller proceed once a payment is `APPROVED` (FR-009/FR-014).
  */
 class PaymentCheckoutViewModel(
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
     private val catalogRepository: ServiceCatalogRepository,
     private val paymentRepository: PaymentRepository,
     private val savedCardRepository: SavedCardRepository,
@@ -61,11 +61,15 @@ class PaymentCheckoutViewModel(
      */
     val requestId: String = savedStateHandle.get<String>(PitGoRoutes.PaymentRequestIdArg)
         ?.takeIf(String::isUuid)
-        ?: UUID.randomUUID().toString()
+        ?: savedStateHandle.get<String>("payment_request_id")
+        ?: UUID.randomUUID().toString().also { savedStateHandle["payment_request_id"] = it }
 
     private var amount: BigDecimal = BigDecimal.ZERO
     private var savedCards: List<SavedCard> = emptyList()
     private var observeJob: Job? = null
+    private var currentPayment: Payment? = null
+    private var screenActive = false
+    private var cancelling = false
 
     private val _uiState = MutableStateFlow<PaymentCheckoutUiState>(PaymentCheckoutUiState.Loading)
     val uiState: StateFlow<PaymentCheckoutUiState> = _uiState.asStateFlow()
@@ -75,6 +79,13 @@ class PaymentCheckoutViewModel(
     private fun loadService() {
         _uiState.value = PaymentCheckoutUiState.Loading
         viewModelScope.launch {
+            when (val existing = paymentRepository.getStatus(requestId)) {
+                is PaymentEvent.StatusChanged -> {
+                    existing.payment?.let { amount = it.amount; applyPayment(it); observeApproval(); return@launch }
+                }
+                is PaymentEvent.Failure -> { _uiState.value = PaymentCheckoutUiState.Failure; return@launch }
+                PaymentEvent.NotFound -> Unit
+            }
             val service = if (dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) null
                 else (catalogRepository.service(serviceId) as? CatalogItemResult.Success)?.item
             val parsedAmount = quotedAmount ?: service?.minimumPrice?.let { runCatching { BigDecimal(it) }.getOrNull() }
@@ -93,68 +104,131 @@ class PaymentCheckoutViewModel(
 
     fun payWithPix() = createPayment(PaymentMethod.PIX, savedCardId = null)
 
-    fun payWithSavedCard(savedCardId: String) = createPayment(PaymentMethod.SAVED_CARD, savedCardId)
+    fun payWithSavedCard(savedCardId: String) {
+        if (_uiState.value !is PaymentCheckoutUiState.SelectingMethod) return
+        _uiState.value = PaymentCheckoutUiState.Loading
+        viewModelScope.launch {
+            when (val result = savedCardRepository.tokenizationContext(savedCardId)) {
+                is com.trustarx.pitgo.features.paymentmethods.model.CardContextResult.Success ->
+                    _uiState.value = PaymentCheckoutUiState.ConfirmingCard(result.context)
+                is com.trustarx.pitgo.features.paymentmethods.model.CardContextResult.Failure ->
+                    _uiState.value = PaymentCheckoutUiState.Failure
+            }
+        }
+    }
+    fun confirmCard(token: String) {
+        val state = _uiState.value as? PaymentCheckoutUiState.ConfirmingCard ?: return
+        _uiState.value = PaymentCheckoutUiState.SelectingMethod(amount, savedCards)
+        createPayment(PaymentMethod.SAVED_CARD, state.context.savedCardId, token)
+    }
 
-    private fun createPayment(method: PaymentMethod, savedCardId: String?) {
-        if (_uiState.value == PaymentCheckoutUiState.CreatingPayment || amount.signum() <= 0) return
+    private fun createPayment(method: PaymentMethod, savedCardId: String?, token: String? = null) {
+        if (_uiState.value !is PaymentCheckoutUiState.SelectingMethod || amount.signum() <= 0) return
         _uiState.value = PaymentCheckoutUiState.CreatingPayment
         viewModelScope.launch {
             when (
                 val result = paymentRepository.createPayment(
                     CreatePaymentCommand(
                         requestId = requestId,
+                        serviceId = serviceId,
                         dispatchKind = dispatchKind,
                         amount = amount,
                         method = method,
                         appointmentId = appointmentId,
                         quoteVersion = quoteVersion,
                         savedCardId = savedCardId,
+                        cardSecurityCodeToken = token,
                     ),
                 )
             ) {
-                is CreatePaymentResult.Success -> applyPayment(result.payment)
-                is CreatePaymentResult.Failure -> _uiState.value = PaymentCheckoutUiState.Failure
-            }
-        }
-    }
-
-    private fun applyPayment(payment: Payment) {
-        when (payment.status) {
-            PaymentStatus.APPROVED -> _uiState.value = PaymentCheckoutUiState.Approved
-            PaymentStatus.REJECTED -> _uiState.value = PaymentCheckoutUiState.Declined
-            PaymentStatus.EXPIRED -> _uiState.value = PaymentCheckoutUiState.Expired
-            PaymentStatus.PENDING -> {
-                _uiState.value = payment.pix?.let(PaymentCheckoutUiState::AwaitingPix)
-                    ?: PaymentCheckoutUiState.AwaitingCardConfirmation
-                observeApproval()
-            }
-            PaymentStatus.CANCELLED, PaymentStatus.REFUND_PENDING,
-            PaymentStatus.REFUNDED, PaymentStatus.REFUND_FAILED,
-            -> _uiState.value = PaymentCheckoutUiState.Failure
-        }
-    }
-
-    private fun observeApproval() {
-        observeJob?.cancel()
-        observeJob = viewModelScope.launch {
-            paymentRepository.observe(requestId).collect { event ->
-                if (event !is PaymentEvent.StatusChanged) return@collect
-                when (event.status) {
-                    PaymentStatus.APPROVED -> _uiState.value = PaymentCheckoutUiState.Approved
-                    PaymentStatus.REJECTED -> _uiState.value = PaymentCheckoutUiState.Declined
-                    PaymentStatus.EXPIRED -> _uiState.value = PaymentCheckoutUiState.Expired
-                    else -> Unit // still pending, or a post-dispatch refund state that can't occur here
+                is CreatePaymentResult.Success -> { applyPayment(result.payment); observeApproval() }
+                is CreatePaymentResult.Failure -> {
+                    _uiState.value = PaymentCheckoutUiState.Verifying
+                    observeApproval()
                 }
             }
         }
     }
 
+    private fun applyPayment(payment: Payment) {
+        if (currentPayment?.id == payment.id && payment.revision < (currentPayment?.revision ?: 0)) return
+        currentPayment = payment
+        amount = payment.amount
+        if (payment.cancelRequested || (payment.status == PaymentStatus.APPROVED && payment.serviceId == null)
+            || payment.status in setOf(PaymentStatus.REFUND_PENDING, PaymentStatus.REFUNDED, PaymentStatus.REFUND_FAILED)) {
+            _uiState.value = PaymentCheckoutUiState.FinancialStatus(payment)
+            return
+        }
+        if (payment.syncState != com.trustarx.pitgo.features.payment.model.PaymentSyncState.CURRENT) {
+            _uiState.value = PaymentCheckoutUiState.Verifying
+            return
+        }
+        when (payment.status) {
+            PaymentStatus.APPROVED -> _uiState.value = if (payment.canProceed) PaymentCheckoutUiState.Approved else PaymentCheckoutUiState.Verifying
+            PaymentStatus.REJECTED -> _uiState.value = PaymentCheckoutUiState.Declined
+            PaymentStatus.EXPIRED -> _uiState.value = PaymentCheckoutUiState.Expired
+            PaymentStatus.PENDING -> {
+                _uiState.value = payment.pix?.let(PaymentCheckoutUiState::AwaitingPix)
+                    ?: PaymentCheckoutUiState.AwaitingCardConfirmation
+            }
+            PaymentStatus.CANCELLED, PaymentStatus.REFUND_PENDING,
+            PaymentStatus.REFUNDED, PaymentStatus.REFUND_FAILED,
+            -> _uiState.value = PaymentCheckoutUiState.FinancialStatus(payment)
+        }
+    }
+
+    private fun observeApproval() {
+        if (!screenActive) return
+        observeJob?.cancel()
+        observeJob = viewModelScope.launch {
+            paymentRepository.observe(requestId).collect { event ->
+                if (event is PaymentEvent.StatusChanged) event.payment?.let(::applyPayment)
+                else if (event is PaymentEvent.NotFound && _uiState.value == PaymentCheckoutUiState.Verifying)
+                    _uiState.value = PaymentCheckoutUiState.Failure
+            }
+        }
+    }
+
+    fun onActive() { screenActive = true; observeApproval() }
+    fun onInactive() { screenActive = false; observeJob?.cancel(); observeJob = null }
+
+    fun cancelPayment(onNoPayment: () -> Unit) {
+        if (cancelling || _uiState.value == PaymentCheckoutUiState.CreatingPayment) return
+        cancelling = true
+        viewModelScope.launch {
+            try {
+                when (val existing = paymentRepository.getStatus(requestId)) {
+                    PaymentEvent.NotFound -> onNoPayment()
+                    is PaymentEvent.Failure -> _uiState.value = PaymentCheckoutUiState.Failure
+                    is PaymentEvent.StatusChanged -> {
+                        val id = existing.paymentId ?: return@launch
+                        when (val result = paymentRepository.cancel(id)) {
+                            is CreatePaymentResult.Success -> { applyPayment(result.payment); observeApproval() }
+                            is CreatePaymentResult.Failure -> { _uiState.value = PaymentCheckoutUiState.Verifying; observeApproval() }
+                        }
+                    }
+                }
+            } finally { cancelling = false }
+        }
+    }
+
     /** After an expired Pix code or a failure — generates a fresh charge, same [requestId]. */
-    fun retry() = createPayment(PaymentMethod.PIX, savedCardId = null)
+    fun retry() = chooseAnotherMethod()
 
     fun chooseAnotherMethod() {
-        observeJob?.cancel()
-        _uiState.value = PaymentCheckoutUiState.SelectingMethod(amount, savedCards)
+        if (_uiState.value == PaymentCheckoutUiState.CreatingPayment) return
+        viewModelScope.launch {
+            when (val result = paymentRepository.getStatus(requestId)) {
+                is PaymentEvent.StatusChanged -> result.payment?.let {
+                    if (it.blocksNewAttempt) { applyPayment(it); observeApproval() }
+                    else { observeJob?.cancel()
+                        savedCards = (savedCardRepository.list() as? SavedCardsResult.Success)?.cards.orEmpty()
+                        _uiState.value = PaymentCheckoutUiState.SelectingMethod(amount, savedCards) }
+                }
+                PaymentEvent.NotFound -> loadService()
+                is PaymentEvent.Failure -> _uiState.value = PaymentCheckoutUiState.Failure
+            }
+        }
     }
 
     override fun onCleared() {

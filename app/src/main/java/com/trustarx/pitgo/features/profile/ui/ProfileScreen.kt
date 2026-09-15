@@ -59,6 +59,7 @@ fun ProfileRoute(
     onOpenAddress: () -> Unit,
     onOpenGarage: () -> Unit,
     onOpenPaymentMethods: () -> Unit,
+    onOpenPaymentHistory: () -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -71,6 +72,7 @@ fun ProfileRoute(
         onOpenAddress = onOpenAddress,
         onOpenGarage = onOpenGarage,
         onOpenPaymentMethods = onOpenPaymentMethods,
+        onOpenPaymentHistory = onOpenPaymentHistory,
         onAppearanceSelected = viewModel::setAppearanceMode,
         onBottomItemClick = onBottomItemClick,
         onLogout = onLogout,
@@ -86,6 +88,7 @@ private fun ProfileScreen(
     onOpenAddress: () -> Unit,
     onOpenGarage: () -> Unit,
     onOpenPaymentMethods: () -> Unit,
+    onOpenPaymentHistory: () -> Unit,
     onAppearanceSelected: (AppearanceMode) -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
     onLogout: () -> Unit,
@@ -123,6 +126,9 @@ private fun ProfileScreen(
             ProfileAddressCard(profileState.address, profileState.addressLoading, onOpenAddress)
             ProfileVehicleCard(account.primaryVehicle, onOpenGarage)
             ProfilePaymentMethodsCard(onOpenPaymentMethods)
+            OutlinedButton(onClick = onOpenPaymentHistory, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.payment_history))
+            }
             ProfileAppearanceCard(profileState.appearanceMode, onAppearanceSelected)
 
             if (legacyProviderMigrationAvailable) {

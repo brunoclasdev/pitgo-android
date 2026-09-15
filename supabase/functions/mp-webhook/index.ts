@@ -1,111 +1,52 @@
-// Public endpoint called by Mercado Pago itself (no Supabase session — see
-// supabase/config.toml's `verify_jwt = false` for this function). Authenticity comes from the
-// x-signature header instead. See specs/018-mercadopago-payments/research.md §5 and
-// contracts/mercadopago-edge-functions.md.
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { object, secureEqual } from '../_shared/mercadopago-http.ts';
+import { rpc, serviceClient } from '../_shared/payment-reconciliation.ts';
+import { json } from '../_shared/payment-response.ts';
 
-const json = (status: number, body: unknown) => new Response(JSON.stringify(body), {
-  status,
-  headers: { "content-type": "application/json; charset=utf-8" },
-});
-
-const mpStatusToPitGo = (mpStatus: string): string => {
-  switch (mpStatus) {
-    case "approved": return "APPROVED";
-    case "rejected": return "REJECTED";
-    case "cancelled": return "CANCELLED";
-    case "refunded": return "REFUNDED";
-    default: return "PENDING";
+async function limitedBody(req: Request): Promise<string> {
+  if (Number(req.headers.get('content-length') ?? 0) > 65536) throw new Error('BODY_TOO_LARGE');
+  const reader = req.body?.getReader();
+  if (!reader) return '';
+  const chunks: Uint8Array[] = []; let size = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > 65536) { await reader.cancel(); throw new Error('BODY_TOO_LARGE'); }
+    chunks.push(value);
   }
-};
-
-async function hmacSha256Hex(secret: string, message: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
-  return Array.from(new Uint8Array(signature)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  const all = new Uint8Array(size); let offset = 0;
+  for (const chunk of chunks) { all.set(chunk, offset); offset += chunk.byteLength; }
+  return new TextDecoder().decode(all);
 }
-
-/** Mercado Pago's documented `x-signature: ts=...,v1=...` manifest format. */
-async function isValidSignature(
-  secret: string,
-  signatureHeader: string | null,
-  requestId: string | null,
-  dataId: string | null,
-): Promise<boolean> {
-  if (!signatureHeader || !dataId) return false;
-  const parts = Object.fromEntries(
-    signatureHeader.split(",").map((part) => part.trim().split("=").map((s) => s.trim())),
-  );
-  const ts = parts.ts;
-  const v1 = parts.v1;
-  if (!ts || !v1) return false;
-  const manifest = `id:${dataId.toLowerCase()};request-id:${requestId ?? ""};ts:${ts};`;
-  const expected = await hmacSha256Hex(secret, manifest);
-  return expected === v1;
-}
-
-Deno.serve(async (request) => {
-  if (request.method !== "POST") return json(405, { code: "METHOD_NOT_ALLOWED" });
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const accessToken = Deno.env.get("MP_ACCESS_TOKEN");
-  const webhookSecret = Deno.env.get("MP_WEBHOOK_SECRET");
-  if (!supabaseUrl || !serviceKey || !accessToken || !webhookSecret) {
-    return json(503, { code: "SERVICE_UNAVAILABLE" });
+Deno.serve(async req => {
+  if (req.method !== 'POST') return json(405, { code: 'METHOD_NOT_ALLOWED' });
+  const secret = Deno.env.get('MP_WEBHOOK_SECRET');
+  if (!secret) return json(503, { code: 'SERVICE_UNAVAILABLE' });
+  let body;
+  try { body = object(JSON.parse(await limitedBody(req))); }
+  catch (error) { return json(error instanceof Error && error.message === 'BODY_TOO_LARGE' ? 413 : 400, { code: 'INVALID_INPUT' }); }
+  const url = new URL(req.url), id = url.searchParams.get('data.id');
+  const type = String(body.type ?? url.searchParams.get('type') ?? '');
+  const requestId = req.headers.get('x-request-id');
+  const parts = Object.fromEntries((req.headers.get('x-signature') ?? '').split(',').map(x => x.trim().split('=')));
+  if (!id || !/^[a-zA-Z0-9_-]{1,128}$/.test(id) || !parts.ts || !/^\d+$/.test(parts.ts)
+    || !/^[a-f0-9]{64}$/i.test(parts.v1 ?? '') || (type === 'order' && !requestId)) {
+    return json(401, { code: 'INVALID_SIGNATURE' });
   }
-
-  let payload: Record<string, unknown>;
-  try { payload = await request.json(); } catch { return json(400, { code: "INVALID_INPUT" }); }
-  const url = new URL(request.url);
-  const dataId = (payload.data as Record<string, unknown> | undefined)?.id as string | undefined
-    ?? url.searchParams.get("data.id")
-    ?? url.searchParams.get("id");
-  const type = (payload.type as string | undefined) ?? url.searchParams.get("type");
-  if (type !== "payment" || !dataId) return json(200, { code: "IGNORED" });
-
-  const validSignature = await isValidSignature(
-    webhookSecret,
-    request.headers.get("x-signature"),
-    request.headers.get("x-request-id"),
-    String(dataId),
-  );
-  if (!validSignature) return json(401, { code: "INVALID_SIGNATURE" });
-
-  // Never trust the notification body for the actual status/amount — always refetch.
-  const upstream = await fetch(`https://api.mercadopago.com/v1/payments/${dataId}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!upstream.ok) return json(200, { code: "PAYMENT_LOOKUP_FAILED" });
-  const mpPayment = await upstream.json();
-  const status = mpStatusToPitGo(String(mpPayment.status ?? ""));
-
-  const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
-  const { data: current } = await admin.from("payments").select("id,status,approved_at,request_id,client_id,dispatch_kind,appointment_id,quote_version,amount,currency")
-    .eq("mp_payment_id", String(dataId)).maybeSingle();
-  if (!current) return json(200, { code: "PAYMENT_NOT_FOUND" });
-
-  const externalReference = String(mpPayment.external_reference ?? "");
-  const providerAmount = Number(mpPayment.transaction_amount);
-  if (externalReference !== current.request_id || !Number.isFinite(providerAmount) ||
-      Math.abs(providerAmount - Number(current.amount)) > 0.01 || current.currency !== "BRL") {
-    return json(200, { code: "PAYMENT_CONTEXT_MISMATCH" });
+  const manifest = 'id:' + id.toLowerCase() + ';' + (requestId ? 'request-id:' + requestId + ';' : '') + 'ts:' + parts.ts + ';';
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(manifest));
+  const expected = Array.from(new Uint8Array(signature), b => b.toString(16).padStart(2,'0')).join('');
+  if (!await secureEqual(expected, parts.v1.toLowerCase())
+    || String(object(body.data).id ?? '').toLowerCase() !== id.toLowerCase()
+    || (url.searchParams.has('type') && url.searchParams.get('type') !== type)) {
+    return json(401, { code: 'INVALID_SIGNATURE' });
   }
-
-  // Our own refund flow (mp-refund-payment) already moved this out of the live states — never
-  // let a stale/duplicate notification revive it back to APPROVED.
-  const refundStates = new Set(["REFUND_PENDING", "REFUNDED", "REFUND_FAILED"]);
-  if (refundStates.has(current.status) && !refundStates.has(status)) {
-    return json(200, { code: "IGNORED_AFTER_REFUND" });
-  }
-
-  const { error: updateError } = await admin.from("payments").update({
-    status,
-    approved_at: status === "APPROVED" ? (current.approved_at ?? new Date().toISOString()) : current.approved_at,
-    updated_at: new Date().toISOString(),
-  }).eq("id", current.id).eq("mp_payment_id", String(dataId));
-  if (updateError) return json(200, { code: "PERSIST_FAILED" });
-
-  return json(200, { code: "PROCESSED" });
+  if (!['order','payment'].includes(type)) return json(200, { code: 'IGNORED' });
+  try {
+    await rpc(serviceClient(), 'mp_store_webhook', { p_api: type === 'order' ? 'ORDERS' : 'PAYMENTS',
+      p_resource: id, p_event: String(body.action ?? type),
+      p_key: type + ':' + id + ':' + parts.ts + ':' + expected });
+    return json(200, { code: 'RECEIVED' });
+  } catch { return json(503, { code: 'PERSIST_FAILED' }); }
 });

@@ -12,6 +12,7 @@ data class CreatePaymentCommand(
     val quoteVersion: Long? = null,
     val savedCardId: String? = null,
     val cardSecurityCodeToken: String? = null,
+    val serviceId: String? = null,
 )
 
 enum class PaymentFailure {
@@ -27,7 +28,8 @@ sealed interface CreatePaymentResult {
 }
 
 sealed interface PaymentEvent {
-    data class StatusChanged(val status: PaymentStatus, val paymentId: String? = null) : PaymentEvent
+    data class StatusChanged(val status: PaymentStatus, val paymentId: String? = null, val payment: Payment? = null) : PaymentEvent
+    data object NotFound : PaymentEvent
     data class Failure(val reason: PaymentFailure) : PaymentEvent
 }
 

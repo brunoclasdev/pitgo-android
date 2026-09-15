@@ -119,6 +119,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         PitGoRoutes.Profile,
         PitGoRoutes.ClientAddress,
         PitGoRoutes.PaymentMethods,
+        PitGoRoutes.PaymentHistory,
         PitGoRoutes.VehicleOnboarding,
         PitGoRoutes.VehicleFormPattern,
         PitGoRoutes.RequestServicePattern,
@@ -445,6 +446,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         container.sessionRepository,
                         container.serviceCatalogRepository,
                         container.clientAddressRepository,
+                        container.paymentRepository,
                     ),
                 )
                 var navigationPending by remember { mutableStateOf(false) }
@@ -453,6 +455,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     navigationPending = false
                     selectedService = null
                     homeViewModel.refreshAddress()
+                    homeViewModel.refreshPayment()
                 }
                 val performNavigation = dropUnlessResumed {
                     selectedService?.let { service ->
@@ -478,6 +481,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                 }
                 HomeRoute(
                     viewModel = homeViewModel,
+                    onResumePayment = { payment -> navController.navigate(PitGoRoutes.resumePayment(payment)) { launchSingleTop = true } },
                     onServiceClick = { service ->
                         selectedService = service
                         performNavigation()
@@ -557,6 +561,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     onOpenPaymentMethods = {
                         navController.navigate(PitGoRoutes.PaymentMethods) { launchSingleTop = true }
                     },
+                    onOpenPaymentHistory = { navController.navigate(PitGoRoutes.PaymentHistory) { launchSingleTop = true } },
                     onBottomItemClick = { item ->
                         when (item) {
                             BottomItemId.HOME -> navController.navigate(PitGoRoutes.Home) {
@@ -575,6 +580,16 @@ fun PitGoNavHost(container: PitGoAppContainer) {
             }
         }
 
+        composable(PitGoRoutes.PaymentHistory) {
+            if (sessionState is AppSessionState.Authenticated.Client) {
+                val historyViewModel: com.trustarx.pitgo.features.payment.viewmodel.PaymentHistoryViewModel = viewModel(
+                    factory = com.trustarx.pitgo.features.payment.viewmodel.PaymentHistoryViewModel.factory(container.paymentRepository),
+                )
+                com.trustarx.pitgo.features.payment.ui.PaymentHistoryScreen(historyViewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpen = { navController.navigate(PitGoRoutes.resumePayment(it)) { launchSingleTop = true } })
+            }
+        }
         composable(PitGoRoutes.PaymentMethods) {
             val account = (sessionState as? AppSessionState.Authenticated.Client)?.account
             if (account != null) {
@@ -783,7 +798,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     ),
                 )
                 val pitTecViewModel = if (dispatchKind == "PITTEC_AUTO_SEQUENTIAL") {
-                    navController.previousBackStackEntry?.let { pitTecEntry ->
+                    navController.previousBackStackEntry?.takeIf { it.destination.route == PitGoRoutes.PitTec }?.let { pitTecEntry ->
                         viewModel<PitTecViewModel>(
                             viewModelStoreOwner = pitTecEntry,
                             key = serviceId,
@@ -810,7 +825,8 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         // volta para a mesma tela, que já detecta a aprovação sozinha. Guincho
                         // móvel continua indo para o despacho com o requestId recém-gerado.
                         if (dispatchKind == "PITTEC_AUTO_SEQUENTIAL") {
-                            navController.popBackStack()
+                            if (navController.previousBackStackEntry?.destination?.route == PitGoRoutes.PitTec) navController.popBackStack()
+                            else navController.navigate(PitGoRoutes.pitTec(serviceId)) { launchSingleTop = true }
                         } else {
                             navController.navigate(PitGoRoutes.mobileDispatchNew(serviceId, requestId)) {
                                 popUpTo(PitGoRoutes.Home)

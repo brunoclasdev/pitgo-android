@@ -5,7 +5,7 @@ sealed interface PaymentMethodsUiState {
     data object Loading : PaymentMethodsUiState
 
     /** Empty state is just `cards.isEmpty()` — same screen, no separate state needed (FR-005). */
-    data class Listing(val cards: List<SavedCard>) : PaymentMethodsUiState
+    data class Listing(val cards: List<SavedCard>, val removalFailed: Boolean = false) : PaymentMethodsUiState
 
     data object Registering : PaymentMethodsUiState
     data class RegisterFailed(val cards: List<SavedCard>) : PaymentMethodsUiState
