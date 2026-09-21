@@ -44,7 +44,7 @@ class PaymentMethodsViewModel(private val repository: SavedCardRepository) : Vie
                     cards = cards.filterNot { it.id == result.card.id } + result.card
                     PaymentMethodsUiState.Listing(cards)
                 }
-                is SaveCardResult.Failure -> PaymentMethodsUiState.RegisterFailed(cards)
+                is SaveCardResult.Failure -> PaymentMethodsUiState.RegisterFailed(cards, result.reason)
             }
         }
     }

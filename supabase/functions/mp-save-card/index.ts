@@ -8,13 +8,23 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
   headers: { "content-type": "application/json; charset=utf-8" },
 });
 
+const providerFailure = (stage: string, providerStatus?: number) => {
+  console.error(JSON.stringify({ function: "mp-save-card", stage, providerStatus }));
+  return json(502, {
+    code: "PROVIDER_UNAVAILABLE",
+    stage,
+    ...(providerStatus == null ? {} : { provider_status: providerStatus }),
+  });
+};
+
 Deno.serve(async (request) => {
   if (request.method !== "POST") return json(405, { code: "METHOD_NOT_ALLOWED" });
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const accessToken = Deno.env.get("MP_ACCESS_TOKEN");
+  const accessToken = Deno.env.get("MP_ACCESS_TOKEN")?.trim();
   if (!supabaseUrl || !anonKey || !serviceKey || !accessToken) {
+    console.error(JSON.stringify({ function: "mp-save-card", stage: "CONFIG" }));
     return json(503, { code: "SERVICE_UNAVAILABLE" });
   }
 
@@ -48,11 +58,7 @@ Deno.serve(async (request) => {
       body: JSON.stringify({ email: customerEmail }),
     });
     if (!createCustomer.ok && createCustomer.status !== 400) {
-      return json(502, {
-        code: "PROVIDER_UNAVAILABLE",
-        stage: "CUSTOMER_CREATE",
-        provider_status: createCustomer.status,
-      });
+      return providerFailure("CUSTOMER_CREATE", createCustomer.status);
     }
     const customerBody = await createCustomer.json();
     // Depending on the API response version, an existing customer's id can be returned either
@@ -79,15 +85,11 @@ Deno.serve(async (request) => {
       }
     }
     if (!customerId) {
-      return json(502, {
-        code: "PROVIDER_UNAVAILABLE",
-        stage: "CUSTOMER_RESOLVE",
-        provider_status: createCustomer.status,
-      });
+      return providerFailure("CUSTOMER_RESOLVE", createCustomer.status);
     }
   }
 
-  const addCard = await fetch(`https://api.mercadopago.com/v1/customers/${customerId}/cards`, {
+  const addCard = await fetch(`https://api.mercadopago.com/v1/customers/${encodeURIComponent(customerId)}/cards`, {
     method: "POST",
     signal: AbortSignal.timeout(7000),
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
@@ -95,17 +97,17 @@ Deno.serve(async (request) => {
   });
   if (!addCard.ok) {
     if (addCard.status === 400 || addCard.status === 422) return json(422, { code: "CARD_REJECTED" });
-    return json(502, {
-      code: "PROVIDER_UNAVAILABLE",
-      stage: "CARD_ATTACH",
-      provider_status: addCard.status,
-    });
+    return providerFailure("CARD_ATTACH", addCard.status);
   }
   const card = await addCard.json();
-  const brand = String(card.payment_method?.id ?? card.payment_method?.name ?? "unknown");
+  const paymentMethod = card.payment_method && typeof card.payment_method === "object"
+    ? card.payment_method : {};
+  const paymentMethodId = String(paymentMethod.id ?? card.payment_method_id ?? "");
+  const brand = String(paymentMethodId || paymentMethod.name || "unknown");
   const lastFour = String(card.last_four_digits ?? "");
-  const paymentType = card.payment_method?.payment_type_id;
-  if (!card.id || !/^[0-9]{4}$/.test(lastFour) || !["credit_card","debit_card"].includes(paymentType)) {
+  const paymentType = String(paymentMethod.payment_type_id ?? card.payment_type_id ?? "");
+  if (!card.id || !/^[0-9]{4}$/.test(lastFour) || !["credit_card","debit_card"].includes(paymentType) || !paymentMethodId) {
+    console.error(JSON.stringify({ function: "mp-save-card", stage: "CARD_RESPONSE" }));
     return json(502, { code: "INVALID_CARD_RESPONSE" });
   }
   const { data: previous } = await admin.from("saved_cards").select("id,client_id").eq("mp_card_id", String(card.id)).maybeSingle();
@@ -118,10 +120,11 @@ Deno.serve(async (request) => {
     mp_card_id: String(card.id),
     brand,
     last_four_digits: lastFour,
-    payment_method_id: String(card.payment_method.id),
+    payment_method_id: paymentMethodId,
     payment_type_id: paymentType,
   }, { onConflict: "mp_card_id" }).select().single();
   if (insertError || !saved) {
+    console.error(JSON.stringify({ function: "mp-save-card", stage: "CARD_STORE", code: insertError?.code }));
     return json(502, { code: "PROVIDER_UNAVAILABLE", stage: "CARD_STORE" });
   }
 

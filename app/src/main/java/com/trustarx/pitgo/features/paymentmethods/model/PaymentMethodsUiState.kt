@@ -8,7 +8,10 @@ sealed interface PaymentMethodsUiState {
     data class Listing(val cards: List<SavedCard>, val removalFailed: Boolean = false) : PaymentMethodsUiState
 
     data object Registering : PaymentMethodsUiState
-    data class RegisterFailed(val cards: List<SavedCard>) : PaymentMethodsUiState
+    data class RegisterFailed(
+        val cards: List<SavedCard>,
+        val reason: SavedCardFailure = SavedCardFailure.UNKNOWN,
+    ) : PaymentMethodsUiState
     data class Removing(val cards: List<SavedCard>, val removingId: String) : PaymentMethodsUiState
     data object Failure : PaymentMethodsUiState
 }

@@ -1,5 +1,6 @@
 package com.trustarx.pitgo.features.payment.repository
 
+import android.util.Log
 import com.trustarx.pitgo.features.mobiledispatch.model.isUuid
 import com.trustarx.pitgo.features.payment.data.CreatePaymentRequestDto
 import com.trustarx.pitgo.features.payment.data.CreatePaymentResponseDto
@@ -208,8 +209,11 @@ class PaymentRepository(private val client: SupabaseClient) {
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (error: Throwable) {
-            send(PaymentEvent.Failure(classifyRpcError(error)))
-            awaitCancellation() // The single 10-second fallback survives a Realtime outage.
+            // Realtime is an optimization. A private-channel authorization failure must not
+            // turn a valid payment into a generic service-unavailable screen: the polling job
+            // above continues calling get_payment_status every 10 seconds.
+            Log.w("PaymentRepository", "payment Realtime unavailable; using status polling", error)
+            awaitCancellation()
         } finally {
             withContext(NonCancellable) { runCatching { client.realtime.removeChannel(channel) } }
         }

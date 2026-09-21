@@ -25,6 +25,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mercadopago.sdk.android.coremethods.domain.interactor.coreMethods
 import com.mercadopago.sdk.android.coremethods.domain.model.BuyerIdentification
 import com.mercadopago.sdk.android.coremethods.domain.model.CardToken
+import com.mercadopago.sdk.android.coremethods.domain.model.ResultError
 import com.mercadopago.sdk.android.coremethods.domain.utils.Result as CoreMethodsResult
 import com.mercadopago.sdk.android.coremethods.ui.components.textfield.cardnumber.CardNumberTextField
 import com.mercadopago.sdk.android.coremethods.ui.components.textfield.expirationdate.ExpirationDateTextField
@@ -53,6 +55,7 @@ import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 import com.trustarx.pitgo.features.paymentmethods.model.PaymentMethodsUiState
 import com.trustarx.pitgo.features.paymentmethods.model.SavedCard
+import com.trustarx.pitgo.features.paymentmethods.model.SavedCardFailure
 import com.trustarx.pitgo.features.paymentmethods.viewmodel.PaymentMethodsViewModel
 import kotlinx.coroutines.launch
 
@@ -133,7 +136,7 @@ private fun PaymentMethodsScreen(
                     CardsList(uiState.cards, onRemove, null) { showRegistrationForm = true }
                     Text(stringResource(R.string.payment_methods_register_failed_title))
                     Text(
-                        stringResource(R.string.payment_methods_register_failed_message),
+                        registerFailureMessage(uiState.reason),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     TextButton(onClick = onDismissRegisterFailure) { Text(stringResource(R.string.action_cancel)) }
@@ -151,6 +154,15 @@ private fun PaymentMethodsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun registerFailureMessage(reason: SavedCardFailure): String = when (reason) {
+    SavedCardFailure.CARD_REJECTED -> stringResource(R.string.payment_card_save_rejected)
+    SavedCardFailure.SESSION_EXPIRED -> stringResource(R.string.payment_card_save_session_expired)
+    SavedCardFailure.OFFLINE, SavedCardFailure.TIMEOUT -> stringResource(R.string.payment_card_save_network_error)
+    SavedCardFailure.SERVICE_UNAVAILABLE -> stringResource(R.string.payment_card_save_service_error)
+    else -> stringResource(R.string.payment_methods_register_failed_message)
 }
 
 @Composable
@@ -205,9 +217,35 @@ private fun CardRegistrationForm(
     val scope = rememberCoroutineScope()
     var isTokenizing by remember { mutableStateOf(false) }
     var tokenizationFailed by remember { mutableStateOf(false) }
+    var tokenizationMessage by remember { mutableStateOf<String?>(null) }
+    var cardholderName by rememberSaveable { mutableStateOf(profile.name) }
+    var cardholderCpf by rememberSaveable { mutableStateOf(profile.cpf.orEmpty()) }
     val cardNumberState = remember { PCIFieldState.Companion.create() }
     val expirationDateState = remember { PCIFieldState.Companion.create() }
     val securityCodeState = remember { PCIFieldState.Companion.create() }
+    val cpfRequiredMessage = stringResource(R.string.payment_card_cpf_required)
+    val holderNameRequiredMessage = stringResource(R.string.payment_cardholder_name_required)
+    val networkErrorMessage = stringResource(R.string.payment_card_token_network_error)
+    val tokenErrorMessage = stringResource(R.string.payment_card_token_error)
+
+    Text(stringResource(R.string.payment_cardholder_name_label), style = MaterialTheme.typography.labelLarge)
+    OutlinedTextField(
+        value = cardholderName,
+        onValueChange = { cardholderName = it },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+    )
+
+    Text(stringResource(R.string.payment_cardholder_cpf_label), style = MaterialTheme.typography.labelLarge)
+    OutlinedTextField(
+        value = cardholderCpf,
+        onValueChange = { value -> cardholderCpf = value.filter(Char::isDigit).take(11) },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+        ),
+    )
 
     Text(stringResource(R.string.payment_methods_register_title), style = MaterialTheme.typography.titleMedium)
 
@@ -222,7 +260,9 @@ private fun CardRegistrationForm(
     Text(stringResource(R.string.payment_methods_security_code_label), style = MaterialTheme.typography.labelLarge)
     SecurityCodeTextField(modifier = Modifier.fillMaxWidth(), state = securityCodeState, onEvent = {})
 
-    if (tokenizationFailed) Text(stringResource(R.string.payment_card_token_error))
+    if (tokenizationFailed) {
+        Text(tokenizationMessage ?: tokenErrorMessage)
+    }
     if (isTokenizing) {
         CircularProgressIndicator()
     } else {
@@ -230,15 +270,35 @@ private fun CardRegistrationForm(
             TextButton(onClick = onCancel) { Text(stringResource(R.string.action_cancel)) }
             Button(
                 onClick = {
+                    val cpf = cardholderCpf.filter(Char::isDigit)
+                    if (cardholderName.isBlank()) {
+                        tokenizationFailed = true
+                        tokenizationMessage = holderNameRequiredMessage
+                        return@Button
+                    }
+                    if (cpf.length != 11) {
+                        tokenizationFailed = true
+                        tokenizationMessage = cpfRequiredMessage
+                        return@Button
+                    }
                     isTokenizing = true
+                    tokenizationFailed = false
+                    tokenizationMessage = null
                     scope.launch {
-                        val buyer = BuyerIdentification(profile.name, profile.cpf.orEmpty(), "CPF")
+                        val buyer = BuyerIdentification(cardholderName.trim(), cpf, "CPF")
                         val result = MercadoPagoSDK.getInstance().coreMethods.generateCardToken(
                             cardNumberState, expirationDateState, securityCodeState, buyer,
                         )
                         isTokenizing = false
                         val token = (result as? CoreMethodsResult.Success<*>)?.data as? CardToken
                         tokenizationFailed = token?.token.isNullOrBlank()
+                        tokenizationMessage = if (tokenizationFailed) {
+                            when (val error = (result as? CoreMethodsResult.Error<*>)?.error) {
+                                is ResultError.Validation -> error.message
+                                is ResultError.Request -> networkErrorMessage
+                                else -> tokenErrorMessage
+                            }
+                        } else null
                         token?.token?.let(onTokenGenerated)
                     }
                 },

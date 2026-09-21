@@ -140,6 +140,7 @@ internal data class PitTecOfferDto(
             version = quoteVersion,
             clientConfirmationDeadlineEpochMillis = null,
             clientConfirmedAtEpochMillis = null,
+            providerAmount = BigDecimal(quotedPrice.jsonPrimitive.content),
         ),
     )
 }
@@ -177,19 +178,30 @@ internal data class PitTecAppointmentDto(
 
 @Serializable
 internal data class PitTecQuoteDto(
-    val amount: JsonElement,
-    val currency: String,
-    val version: Long,
+    val amount: JsonElement? = null,
+    @SerialName("provider_amount") val providerAmount: JsonElement? = null,
+    @SerialName("markup_amount") val markupAmount: JsonElement? = null,
+    @SerialName("customer_fee_amount") val customerFeeAmount: JsonElement? = null,
+    @SerialName("customer_total_amount") val customerTotalAmount: JsonElement? = null,
+    val currency: String = "BRL",
+    val version: Long = 0,
     @SerialName("client_confirmation_deadline") val clientConfirmationDeadline: String? = null,
     @SerialName("client_confirmed_at") val clientConfirmedAt: String? = null,
+    @SerialName("expires_at") val expiresAt: String? = null,
 ) {
     fun toDomain() = PitTecQuote(
-        amount = BigDecimal(amount.jsonPrimitive.content),
+        amount = (customerTotalAmount ?: providerAmount ?: amount ?: error("quote amount missing")).jsonPrimitive.content.toBigDecimal(),
         currency = currency,
         version = version,
         clientConfirmationDeadlineEpochMillis = clientConfirmationDeadline
             ?.let { parseSupabaseInstant(it).toEpochMilli() },
         clientConfirmedAtEpochMillis = clientConfirmedAt
+            ?.let { parseSupabaseInstant(it).toEpochMilli() },
+        providerAmount = providerAmount?.jsonPrimitive?.content?.toBigDecimal(),
+        markupAmount = markupAmount?.jsonPrimitive?.content?.toBigDecimal(),
+        customerFeeAmount = customerFeeAmount?.jsonPrimitive?.content?.toBigDecimal(),
+        customerTotalAmount = customerTotalAmount?.jsonPrimitive?.content?.toBigDecimal(),
+        expiresAtEpochMillis = (expiresAt ?: clientConfirmationDeadline)
             ?.let { parseSupabaseInstant(it).toEpochMilli() },
     )
 }

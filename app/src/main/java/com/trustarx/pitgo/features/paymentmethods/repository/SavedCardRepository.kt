@@ -18,6 +18,7 @@ import io.github.jan.supabase.postgrest.exception.PostgrestRestException
 import io.github.jan.supabase.postgrest.postgrest
 import io.ktor.client.call.body
 import io.ktor.client.plugins.HttpRequestTimeoutException
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
@@ -100,6 +101,13 @@ class SavedCardRepository(private val client: SupabaseClient) {
 
     private suspend fun classifyEdgeFunctionError(error: RestException): SavedCardFailure {
         val body = runCatching { error.response.body<EdgeFunctionErrorDto>() }.getOrNull()
+        if (error.statusCode >= 500) {
+            Log.e(
+                "SavedCardRepository",
+                "mp-save-card failed: http=${error.statusCode}, code=${body?.code}, " +
+                    "stage=${body?.stage}, providerStatus=${body?.providerStatus}",
+            )
+        }
         return when {
             error.statusCode == 401 -> SavedCardFailure.SESSION_EXPIRED
             body?.code == "CARD_REJECTED" -> SavedCardFailure.CARD_REJECTED

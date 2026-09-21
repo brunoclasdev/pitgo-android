@@ -57,6 +57,7 @@ class PitTecViewModel(
     val state: StateFlow<PitTecUiState> = _state.asStateFlow()
 
     private val operation = AtomicLong()
+    private var locationJob: Job? = null
     private var discoveryJob: Job? = null
     private var actionJob: Job? = null
     private var streamJob: Job? = null
@@ -92,7 +93,9 @@ class PitTecViewModel(
         useDeviceLocation()
     }
 
-    private fun useDeviceLocation() = viewModelScope.launch {
+    private fun useDeviceLocation() {
+        locationJob?.cancel()
+        locationJob = viewModelScope.launch {
         update { it.copy(locationState = PitTecLocationState.Resolving) }
         locationRepository.beginVisibleUse(ClientLocationPurpose.PROVIDER_DISCOVERY)
         when (val result = locationRepository.currentClientFix()) {
@@ -115,6 +118,7 @@ class PitTecViewModel(
                 loadDiscovery(result.fix)
             }
             else -> update { it.copy(locationState = PitTecLocationState.Unavailable, clientCoordinate = null) }
+        }
         }
     }
 
@@ -143,7 +147,10 @@ class PitTecViewModel(
         )
     }
 
-    fun retryDiscovery() = useDeviceLocation()
+    fun retryDiscovery() {
+        update { it.copy(discoveryState = PitTecDiscoveryState.Loading) }
+        useDeviceLocation()
+    }
 
     fun retryStyle() = update { it.copy(styleReloadRevision = it.styleReloadRevision + 1) }
 

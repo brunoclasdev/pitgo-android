@@ -67,6 +67,7 @@ fun PaymentCheckoutRoute(
     onBack: () -> Unit,
     onCancel: () -> Unit = onBack,
     onApproved: (requestId: String) -> Unit,
+    onManagePaymentMethods: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     LifecycleStartEffect(viewModel) {
@@ -88,6 +89,7 @@ fun PaymentCheckoutRoute(
         onPayWithSavedCard = viewModel::payWithSavedCard,
         onRetry = viewModel::retry,
         onChooseAnotherMethod = viewModel::chooseAnotherMethod,
+        onManagePaymentMethods = onManagePaymentMethods,
     )
 }
 
@@ -101,6 +103,7 @@ private fun PaymentCheckoutScreen(
     onPayWithSavedCard: (String) -> Unit,
     onRetry: () -> Unit,
     onChooseAnotherMethod: () -> Unit,
+    onManagePaymentMethods: () -> Unit,
 ) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -154,7 +157,7 @@ private fun PaymentCheckoutScreen(
                 PaymentCheckoutUiState.InvalidService, PaymentCheckoutUiState.Failure -> FailureContent(onRetry)
 
                 is PaymentCheckoutUiState.SelectingMethod ->
-                    SelectingMethodContent(uiState.amount, uiState.savedCards, onPayWithPix, onPayWithSavedCard)
+                    SelectingMethodContent(uiState.amount, uiState.savedCards, onPayWithPix, onPayWithSavedCard, onManagePaymentMethods)
 
                 is PaymentCheckoutUiState.AwaitingPix -> AwaitingPixContent(uiState, onRetry, onChooseAnotherMethod)
                 PaymentCheckoutUiState.AwaitingCardConfirmation ->
@@ -184,6 +187,7 @@ private fun SelectingMethodContent(
     savedCards: List<SavedCard>,
     onPayWithPix: () -> Unit,
     onPayWithSavedCard: (String) -> Unit,
+    onManagePaymentMethods: () -> Unit,
 ) {
     Text(
         stringResource(R.string.request_estimate_value, formatBrl(amount)),
@@ -199,6 +203,10 @@ private fun SelectingMethodContent(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        OutlinedButton(
+            onClick = onManagePaymentMethods,
+            modifier = Modifier.fillMaxWidth().heightIn(min = PitGoSize.MinimumTouchTarget),
+        ) { Text(stringResource(R.string.payment_methods_add_action)) }
     } else {
         savedCards.forEach { card ->
             OutlinedButton(

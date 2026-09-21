@@ -211,6 +211,10 @@
     <string name="payment_methods_register_action">Salvar cartão</string>
     <string name="payment_methods_register_failed_title">Não foi possível cadastrar esse cartão</string>
     <string name="payment_methods_register_failed_message">Confira os dados e tente novamente, ou continue sem cadastrar cartão.</string>
+    <string name="payment_card_save_rejected">O Mercado Pago recusou esse cartão ou token. Use um cartão de teste válido para o ambiente configurado.</string>
+    <string name="payment_card_save_session_expired">Sua sessão expirou. Entre novamente e tente cadastrar o cartão.</string>
+    <string name="payment_card_save_network_error">Não foi possível acessar o Mercado Pago. Verifique a conexão e tente novamente.</string>
+    <string name="payment_card_save_service_error">O serviço de cartões está indisponível no momento. Tente novamente mais tarde.</string>
     <string name="profile_payment_methods_label">Formas de pagamento</string>
 
     <string name="signup_title">Criar conta</string>
@@ -640,6 +644,11 @@
     <string name="payment_check_status">Consultar pagamento</string>
     <string name="payment_pix_valid_until">Pix válido até %1$s. Após esse horário, aguarde a confirmação de expiração.</string>
     <string name="payment_card_token_error">Não foi possível confirmar o cartão. Confira o código de segurança e tente novamente, ou escolha Pix.</string>
+    <string name="payment_card_cpf_required">Informe um CPF válido do titular para salvar o cartão.</string>
+    <string name="payment_cardholder_name_label">Nome do titular do cartão</string>
+    <string name="payment_cardholder_cpf_label">CPF do titular do cartão</string>
+    <string name="payment_cardholder_name_required">Informe o nome do titular do cartão.</string>
+    <string name="payment_card_token_network_error">Não foi possível validar o cartão com o Mercado Pago. Verifique a conexão e tente novamente.</string>
     <string name="payment_card_confirm">Confirmar pagamento</string>
     <string name="payment_card_remove_error">Não foi possível remover o cartão. Atualize a lista ou tente novamente.</string>
     <string name="payment_resume">Acompanhar pagamento</string>

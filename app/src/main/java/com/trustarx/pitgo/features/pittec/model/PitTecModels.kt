@@ -75,9 +75,23 @@ data class PitTecQuote(
     val version: Long,
     val clientConfirmationDeadlineEpochMillis: Long?,
     val clientConfirmedAtEpochMillis: Long?,
+    val providerAmount: BigDecimal? = null,
+    val markupAmount: BigDecimal? = null,
+    val customerFeeAmount: BigDecimal? = null,
+    val customerTotalAmount: BigDecimal? = null,
+    val expiresAtEpochMillis: Long? = null,
 ) {
     fun isValid() = amount.signum() > 0 && currency == "BRL" && version > 0
 }
+
+data class PricingBreakdown(
+    val markupAmount: BigDecimal,
+    val customerFeeAmount: BigDecimal,
+    val customerTotalAmount: BigDecimal,
+    val currency: String,
+    val version: Long,
+    val expiresAtEpochMillis: Long?,
+)
 
 /** Approximate, decision-safe offer metadata shown only to the currently offered provider. */
 data class PitTecOffer(

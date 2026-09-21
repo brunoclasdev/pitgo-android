@@ -77,6 +77,9 @@ class PaymentCheckoutViewModel(
     init { loadService() }
 
     private fun loadService() {
+        observeJob?.cancel()
+        observeJob = null
+        currentPayment = null
         _uiState.value = PaymentCheckoutUiState.Loading
         viewModelScope.launch {
             when (val existing = paymentRepository.getStatus(requestId)) {
@@ -178,7 +181,11 @@ class PaymentCheckoutViewModel(
     }
 
     private fun observeApproval() {
-        if (!screenActive) return
+        // A checkout screen can exist without a payment (for example, before the client
+        // chooses Pix or a saved card). Do not subscribe to a payment topic in that state.
+        // The Verifying state is the only exception: creation may have timed out after the
+        // provider accepted the request, so status polling must be allowed to recover it.
+        if (!screenActive || (currentPayment == null && _uiState.value != PaymentCheckoutUiState.Verifying)) return
         observeJob?.cancel()
         observeJob = viewModelScope.launch {
             paymentRepository.observe(requestId).collect { event ->

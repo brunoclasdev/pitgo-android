@@ -815,6 +815,9 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                 PaymentCheckoutRoute(
                     viewModel = paymentViewModel,
                     onBack = { navController.popBackStack() },
+                    onManagePaymentMethods = {
+                        navController.navigate(PitGoRoutes.PaymentMethods) { launchSingleTop = true }
+                    },
                     onCancel = {
                         pitTecViewModel?.cancelSearch()
                         navController.popBackStack()

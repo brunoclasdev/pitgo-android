@@ -73,7 +73,11 @@ internal data class CreatePaymentResponseDto(
 
 /** Error body shape returned by every `mp-*` Edge Function on non-2xx (see their contracts). */
 @Serializable
-internal data class EdgeFunctionErrorDto(val code: String? = null)
+internal data class EdgeFunctionErrorDto(
+    val code: String? = null,
+    val stage: String? = null,
+    @SerialName("provider_status") val providerStatus: Int? = null,
+)
 
 /** Body sent to `mp-refund-payment`. */
 @Serializable

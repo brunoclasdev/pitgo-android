@@ -244,11 +244,11 @@ private fun DiscoveryStateBanner(
 ) {
     val message = when {
         state.discoveryState == PitTecDiscoveryState.Offline -> R.string.map_offline
-        state.discoveryState == PitTecDiscoveryState.Failure -> R.string.mobile_dispatch_unavailable
-        state.discoveryState == PitTecDiscoveryState.Empty -> R.string.pittec_empty_map
-        state.discoveryState == PitTecDiscoveryState.UpdateRequired -> R.string.mobile_dispatch_unavailable
         state.locationState == PitTecLocationState.Denied -> R.string.pittec_location_required
         state.locationState == PitTecLocationState.Unavailable -> R.string.pittec_location_unavailable
+        state.discoveryState == PitTecDiscoveryState.Empty -> R.string.pittec_empty_map
+        state.discoveryState == PitTecDiscoveryState.Failure -> R.string.mobile_dispatch_unavailable
+        state.discoveryState == PitTecDiscoveryState.UpdateRequired -> R.string.mobile_dispatch_unavailable
         state.surfaceState.style is MapStyleState.Failed -> R.string.map_style_failure
         state.surfaceState.resources is MapResourceState.Degraded -> R.string.map_resource_degraded
         else -> null
