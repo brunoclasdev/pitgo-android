@@ -58,7 +58,7 @@ Deno.serve(async req => {
     }
     const response = await mpRequest('/v1/orders', 'POST', {
       type: 'online', processing_mode: 'automatic', total_amount: amount,
-      external_reference: payment.external_reference, payer: { email: user.email, ...(card ? { customer_id: card.mp_customer_id } : {}) },
+      external_reference: payment.external_reference, payer: { email: user.email },
       transactions: { payments: [{ amount, ...(card ? {} : { expiration_time: 'PT30M' }),
         payment_method: card ? { id: card.payment_method_id, type: card.payment_type_id,
           token: input.card_security_code_token, installments: 1 } : { id: 'pix', type: 'bank_transfer' } }] },
