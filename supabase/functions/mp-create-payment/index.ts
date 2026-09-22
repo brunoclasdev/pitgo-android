@@ -1,5 +1,5 @@
 import { cents, decimal, mpRequest, object } from '../_shared/mercadopago-http.ts';
-import { normalizeOrder } from '../_shared/mercadopago-orders.ts';
+import { getOrder, normalizeOrder, searchOrders } from '../_shared/mercadopago-orders.ts';
 import { applyEvidence, defer, serviceClient } from '../_shared/payment-reconciliation.ts';
 import { authenticatedUser, isUuid, json, snapshot } from '../_shared/payment-response.ts';
 
@@ -63,7 +63,17 @@ Deno.serve(async req => {
         payment_method: card ? { id: card.payment_method_id, type: card.payment_type_id,
           token: input.card_security_code_token, installments: 1 } : { id: 'pix', type: 'bank_transfer' } }] },
     }, String(payment.idempotency_key));
-    const evidence = [200,201,402].includes(response.status) ? normalizeOrder(response.body) : null;
+    let evidence = [200,201,402].includes(response.status) ? normalizeOrder(response.body) : null;
+    // A 402 may create the order but omit its full body from the response. Recover it
+    // immediately so a failed card does not remain in VERIFYING until the cron worker runs.
+    if (!evidence && response.status === 402) {
+      const found = await searchOrders(String(payment.external_reference), String(payment.created_at));
+      const orderId = found.orders[0]?.id;
+      if (found.response.status === 200 && orderId) {
+        const recovered = await getOrder(String(orderId));
+        evidence = recovered.status === 200 ? normalizeOrder(recovered.body) : null;
+      }
+    }
     if (evidence) payment = await applyEvidence(db, payment, evidence);
     else {
       await defer(db, 'payment', payment, response.code, Math.max(60, response.retryAfter));
