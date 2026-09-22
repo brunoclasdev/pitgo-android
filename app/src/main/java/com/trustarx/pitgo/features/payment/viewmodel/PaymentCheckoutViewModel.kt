@@ -24,9 +24,11 @@ import com.trustarx.pitgo.features.paymentmethods.model.SavedCard
 import com.trustarx.pitgo.features.paymentmethods.model.SavedCardsResult
 import com.trustarx.pitgo.features.paymentmethods.repository.SavedCardRepository
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.math.BigDecimal
@@ -50,9 +52,6 @@ class PaymentCheckoutViewModel(
     private val appointmentId: String? = savedStateHandle.get<String>(PitGoRoutes.PaymentAppointmentIdArg)
     private val quoteVersion: Long? = savedStateHandle.get<String>(PitGoRoutes.PaymentQuoteVersionArg)
         ?.toLongOrNull()
-    private val quotedAmount: BigDecimal? = savedStateHandle.get<String>(PitGoRoutes.PaymentAmountArg)
-        ?.let { runCatching { BigDecimal(it) }.getOrNull() }
-
     /**
      * The id the dispatch screen will reuse to start once this payment is approved. Normally a
      * fresh id (guincho móvel, paid before dispatch); `019-pittec-request-flow` instead supplies
@@ -92,7 +91,9 @@ class PaymentCheckoutViewModel(
             }
             val service = if (dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) null
                 else (catalogRepository.service(serviceId) as? CatalogItemResult.Success)?.item
-            val parsedAmount = quotedAmount ?: service?.minimumPrice?.let { runCatching { BigDecimal(it) }.getOrNull() }
+            val parsedAmount = TEST_PAYMENT_AMOUNT.takeIf {
+                dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL || service != null
+            }
             if ((dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL &&
                     (appointmentId == null || quoteVersion == null)) ||
                 parsedAmount == null || parsedAmount.signum() <= 0
@@ -151,8 +152,18 @@ class PaymentCheckoutViewModel(
             when (result) {
                 is CreatePaymentResult.Success -> { applyPayment(result.payment); observeApproval() }
                 is CreatePaymentResult.Failure -> {
-                    _uiState.value = PaymentCheckoutUiState.Verifying
-                    observeApproval()
+                    // Only an ambiguous provider/network result can have created a payment
+                    // without returning it. Deterministic failures must be actionable and must
+                    // not be presented as an indefinitely pending payment.
+                    if (result.reason in setOf(
+                            com.trustarx.pitgo.features.payment.model.PaymentFailure.TIMEOUT,
+                            com.trustarx.pitgo.features.payment.model.PaymentFailure.UNKNOWN,
+                        )) {
+                        _uiState.value = PaymentCheckoutUiState.Verifying
+                        observeApproval()
+                    } else {
+                        _uiState.value = PaymentCheckoutUiState.Failure
+                    }
                 }
             }
         }
@@ -167,7 +178,10 @@ class PaymentCheckoutViewModel(
             _uiState.value = PaymentCheckoutUiState.FinancialStatus(payment)
             return
         }
-        if (payment.syncState != com.trustarx.pitgo.features.payment.model.PaymentSyncState.CURRENT) {
+        val pixReadyWhileProviderSyncing = payment.status == PaymentStatus.PENDING &&
+            payment.method == PaymentMethod.PIX && payment.pix?.isComplete == true
+        if (payment.syncState != com.trustarx.pitgo.features.payment.model.PaymentSyncState.CURRENT &&
+            !pixReadyWhileProviderSyncing) {
             _uiState.value = PaymentCheckoutUiState.Verifying
             return
         }
@@ -177,7 +191,8 @@ class PaymentCheckoutViewModel(
             PaymentStatus.EXPIRED -> _uiState.value = PaymentCheckoutUiState.Expired
             PaymentStatus.PENDING -> {
                 _uiState.value = when {
-                    payment.pix != null -> PaymentCheckoutUiState.AwaitingPix(payment.pix)
+                    payment.pix != null && payment.pix.isComplete ->
+                        PaymentCheckoutUiState.AwaitingPix(payment.amount, payment.pix)
                     payment.method == PaymentMethod.PIX -> PaymentCheckoutUiState.Verifying
                     else -> PaymentCheckoutUiState.AwaitingCardConfirmation
                 }
@@ -189,17 +204,25 @@ class PaymentCheckoutViewModel(
     }
 
     private fun observeApproval() {
-        // A checkout screen can exist without a payment (for example, before the client
-        // chooses Pix or a saved card). Do not subscribe to a payment topic in that state.
-        // The Verifying state is the only exception: creation may have timed out after the
-        // provider accepted the request, so status polling must be allowed to recover it.
+        // Checkout status must not depend on private Realtime authorization. A delayed provider
+        // response is recovered through the authenticated status RPC, which is also safe after
+        // process recreation and does not create another payment attempt.
         if (!screenActive || (currentPayment == null && _uiState.value != PaymentCheckoutUiState.Verifying)) return
         observeJob?.cancel()
         observeJob = viewModelScope.launch {
-            paymentRepository.observe(requestId).collect { event ->
-                if (event is PaymentEvent.StatusChanged) event.payment?.let(::applyPayment)
-                else if (event is PaymentEvent.NotFound && _uiState.value == PaymentCheckoutUiState.Verifying)
-                    _uiState.value = PaymentCheckoutUiState.Failure
+            while (isActive && screenActive) {
+                when (val event = paymentRepository.getStatus(requestId)) {
+                    is PaymentEvent.StatusChanged -> event.payment?.let(::applyPayment)
+                    PaymentEvent.NotFound,
+                    is PaymentEvent.Failure,
+                    -> if (_uiState.value == PaymentCheckoutUiState.Verifying) {
+                        _uiState.value = PaymentCheckoutUiState.Failure
+                    }
+                }
+                if (_uiState.value !is PaymentCheckoutUiState.Verifying &&
+                    _uiState.value !is PaymentCheckoutUiState.AwaitingPix &&
+                    _uiState.value !is PaymentCheckoutUiState.AwaitingCardConfirmation) return@launch
+                delay(5_000L)
             }
         }
     }
@@ -210,15 +233,25 @@ class PaymentCheckoutViewModel(
     fun cancelPayment(onNoPayment: () -> Unit) {
         if (cancelling || _uiState.value == PaymentCheckoutUiState.CreatingPayment) return
         cancelling = true
+        _uiState.value = PaymentCheckoutUiState.Cancelling
         viewModelScope.launch {
             try {
                 when (val existing = paymentRepository.getStatus(requestId)) {
                     PaymentEvent.NotFound -> onNoPayment()
                     is PaymentEvent.Failure -> _uiState.value = PaymentCheckoutUiState.Failure
                     is PaymentEvent.StatusChanged -> {
-                        val id = existing.paymentId ?: return@launch
+                        val id = existing.paymentId ?: run { onNoPayment(); return@launch }
                         when (val result = paymentRepository.cancel(id)) {
-                            is CreatePaymentResult.Success -> { applyPayment(result.payment); observeApproval() }
+                            is CreatePaymentResult.Success -> {
+                                applyPayment(result.payment)
+                                observeApproval()
+                                if (result.payment.cancelRequested || result.payment.status in setOf(
+                                        PaymentStatus.CANCELLED,
+                                        PaymentStatus.REFUND_PENDING,
+                                        PaymentStatus.REFUNDED,
+                                        PaymentStatus.REFUND_FAILED,
+                                    )) onNoPayment()
+                            }
                             is CreatePaymentResult.Failure -> { _uiState.value = PaymentCheckoutUiState.Verifying; observeApproval() }
                         }
                     }
@@ -251,6 +284,7 @@ class PaymentCheckoutViewModel(
     }
 
     companion object {
+        private val TEST_PAYMENT_AMOUNT = BigDecimal("1.00")
         private const val CREATE_PAYMENT_UI_TIMEOUT_MILLIS = 20_000L
 
         fun factory(

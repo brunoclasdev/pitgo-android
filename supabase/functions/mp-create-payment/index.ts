@@ -52,6 +52,10 @@ Deno.serve(async req => {
     let payment = object(reservation.payment);
     if (reservation.created !== true) return json(payment.sync_state === 'CURRENT' ? 200 : 202, snapshot(payment));
     const amount = decimal(cents(payment.amount)!);
+    if (amount !== '1.00') {
+      await defer(db, 'payment', payment, 'FIXED_AMOUNT_REQUIRED', 3600);
+      return json(409, { code: 'FIXED_AMOUNT_REQUIRED' });
+    }
     const response = await mpRequest('/v1/orders', 'POST', {
       type: 'online', processing_mode: 'automatic', total_amount: amount,
       external_reference: payment.external_reference, payer: { email: user.email, ...(card ? { customer_id: card.mp_customer_id } : {}) },

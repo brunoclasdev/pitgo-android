@@ -178,8 +178,12 @@
     <string name="payment_cancel">Cancelar</string>
     <string name="payment_creating">Gerando cobrança…</string>
     <string name="payment_pix_qr_description">QR Code Pix</string>
+    <string name="payment_pix_heading">Pague com Pix</string>
+    <string name="payment_pix_subtitle">Escaneie o QR Code ou copie o código abaixo.</string>
+    <string name="payment_pix_copy_label">Pix copia e cola</string>
     <string name="payment_pix_copy_code">Copiar código Pix</string>
     <string name="payment_pix_code_copied">Código copiado</string>
+    <string name="payment_pix_unavailable_message">Não foi possível carregar o QR Code. Tente novamente.</string>
     <string name="payment_pix_expires_in">Expira em %1$s</string>
     <string name="payment_pix_expired_title">O código Pix expirou</string>
     <string name="payment_pix_expired_message">O prazo para pagar esse código acabou. Gere um novo código ou escolha outra forma de pagamento.</string>

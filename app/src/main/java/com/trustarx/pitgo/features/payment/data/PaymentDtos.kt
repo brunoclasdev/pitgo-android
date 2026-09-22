@@ -33,8 +33,8 @@ internal data class PixChargeDto(
     @SerialName("expires_at") val expiresAt: String? = null,
 ) {
     fun toDomain() = PixCharge(
-        qrCode = qrCode,
-        qrCodeBase64 = qrCodeBase64,
+        qrCode = qrCode.trim(),
+        qrCodeBase64 = qrCodeBase64.trim(),
         expiresAtEpochMillis = expiresAt?.let { runCatching { parseSupabaseInstant(it).toEpochMilli() }.getOrNull() } ?: 0L,
     )
 }
@@ -54,12 +54,13 @@ internal data class CreatePaymentResponseDto(
     @SerialName("support_required") val supportRequired: Boolean = false,
 ) {
     fun toDomainOrNull(command: CreatePaymentCommand): Payment? = runCatching {
+        val paymentAmount = amount?.let(::BigDecimal) ?: command.amount
         Payment(
             id = paymentId,
             requestId = command.requestId,
             dispatchKind = command.dispatchKind,
             method = method?.let(PaymentMethod::valueOf) ?: command.method,
-            amount = amount?.let(::BigDecimal) ?: command.amount,
+            amount = paymentAmount,
             appointmentId = command.appointmentId,
             quoteVersion = command.quoteVersion,
             status = PaymentStatus.valueOf(status),
@@ -67,7 +68,7 @@ internal data class CreatePaymentResponseDto(
             serviceId = serviceId ?: command.serviceId,
             syncState = PaymentSyncState.valueOf(syncState), revision = revision,
             cancelRequested = cancelRequested, supportRequired = supportRequired,
-        ).takeIf { it.isValid() && currency == "BRL" }
+        ).takeIf { it.isValid() && currency == "BRL" && paymentAmount.compareTo(BigDecimal("1.00")) == 0 }
     }.getOrNull()
 }
 
@@ -113,9 +114,10 @@ internal data class PaymentStatusProbeDto(
     @SerialName("card_last_four_digits") val cardLastFourDigits: String? = null,
 ) {
     fun toDomainOrNull(): Payment? = runCatching {
+        val paymentAmount = BigDecimal(requireNotNull(amount))
         Payment(id = requireNotNull(paymentId), requestId = requireNotNull(requestId),
             dispatchKind = MobileDispatchKind.valueOf(requireNotNull(dispatchKind)),
-            method = PaymentMethod.valueOf(requireNotNull(method)), amount = BigDecimal(requireNotNull(amount)),
+            method = PaymentMethod.valueOf(requireNotNull(method)), amount = paymentAmount,
             status = PaymentStatus.valueOf(requireNotNull(status)), appointmentId = appointmentId, quoteVersion = quoteVersion,
             pix = pix?.toDomain(), serviceId = serviceId, syncState = PaymentSyncState.valueOf(syncState),
             revision = revision, cancelRequested = cancelRequested, supportRequired = supportRequired,

@@ -28,7 +28,9 @@ data class PixCharge(
     val qrCode: String,
     val qrCodeBase64: String,
     val expiresAtEpochMillis: Long,
-)
+) {
+    val isComplete get() = qrCode.isNotBlank() && qrCodeBase64.isNotBlank() && expiresAtEpochMillis > 0L
+}
 
 data class Payment(
     val id: String,

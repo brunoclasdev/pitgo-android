@@ -3,6 +3,9 @@ import { object } from './mercadopago-http.ts';
 import { authenticatedUser, isUuid, json } from './payment-response.ts';
 import { serviceClient } from './payment-reconciliation.ts';
 
+// Feature 024: cancellation is authoritative in the database. Before approval it
+// converges to CANCELLED; after approval it remains on the refund state machine.
+
 export async function cancellationResponse(req: Request, refundOnly: boolean) {
   if (req.method !== 'POST') return json(405, { code: 'METHOD_NOT_ALLOWED' });
   try {
