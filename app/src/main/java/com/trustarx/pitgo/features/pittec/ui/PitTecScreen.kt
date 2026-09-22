@@ -191,7 +191,14 @@ private fun PitTecScreen(
         }
         Box(Modifier.fillMaxSize().padding(padding)) {
             Column(Modifier.fillMaxSize()) {
-                DiscoveryStateBanner(state, onRetryDiscovery, onRetryStyle)
+                // Discovery is only relevant before a request starts. Once a PitTec
+                // dispatch is active, its realtime/polling updates can briefly change
+                // the map state and make this unrelated banner flash over the flow.
+                if (state.dispatch is PitTecDispatchPhase.None ||
+                    state.dispatch is PitTecDispatchPhase.Terminal
+                ) {
+                    DiscoveryStateBanner(state, onRetryDiscovery, onRetryStyle)
+                }
                 val mapDescription = stringResource(R.string.pittec_map_description, state.markers.size)
                 Box(Modifier.weight(1f).semantics { contentDescription = mapDescription }) {
                     MapLibreMapHost(

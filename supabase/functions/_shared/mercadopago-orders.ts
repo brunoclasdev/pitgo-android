@@ -53,7 +53,11 @@ export function normalizeOrder(order: JsonObject): PaymentEvidence | null {
   return {
     external_reference: String(order.external_reference ?? ''), resource_id: String(order.id),
     transaction_id: String(payment.id), reference_id: payment.reference_id == null ? null : String(payment.reference_id),
-    amount: decimal(amount), currency: order.country_code === 'BR' ? 'BRL' : '',
+    amount: decimal(amount),
+    // Mercado Pago returns both `BR` and `BRA` for Brazilian Orders depending
+    // on the API response/version. Both represent BRL for this integration.
+    currency: ['BR', 'BRA'].includes(String(order.country_code ?? '').toUpperCase())
+      ? 'BRL' : String(order.currency_id ?? ''),
     status, detail, transaction_status: ps, transaction_detail: pd, result,
     settled_amount: paid === null ? null : decimal(paid),
     refunded_amount: refunded === null ? null : decimal(refunded),

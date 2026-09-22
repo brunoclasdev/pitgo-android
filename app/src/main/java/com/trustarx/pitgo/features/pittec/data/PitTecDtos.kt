@@ -193,7 +193,10 @@ internal data class PitTecQuoteDto(
         amount = (customerTotalAmount ?: providerAmount ?: amount ?: error("quote amount missing")).jsonPrimitive.content.toBigDecimal(),
         currency = currency,
         version = version,
-        clientConfirmationDeadlineEpochMillis = clientConfirmationDeadline
+        // The customer-safe snapshot exposes this same deadline as `expires_at`.
+        // Keep both field names compatible so the quote countdown and confirm action
+        // do not become disabled when the provider accepts the request.
+        clientConfirmationDeadlineEpochMillis = (clientConfirmationDeadline ?: expiresAt)
             ?.let { parseSupabaseInstant(it).toEpochMilli() },
         clientConfirmedAtEpochMillis = clientConfirmedAt
             ?.let { parseSupabaseInstant(it).toEpochMilli() },

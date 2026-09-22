@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -129,8 +130,11 @@ class PaymentCheckoutViewModel(
         if (_uiState.value !is PaymentCheckoutUiState.SelectingMethod || amount.signum() <= 0) return
         _uiState.value = PaymentCheckoutUiState.CreatingPayment
         viewModelScope.launch {
-            when (
-                val result = paymentRepository.createPayment(
+            // The Edge Function has its own bounded provider call, but keep a UI
+            // deadline as well so a stalled network/function request cannot leave
+            // the checkout showing an endless spinner.
+            val result = withTimeoutOrNull(CREATE_PAYMENT_UI_TIMEOUT_MILLIS) {
+                paymentRepository.createPayment(
                     CreatePaymentCommand(
                         requestId = requestId,
                         serviceId = serviceId,
@@ -143,7 +147,8 @@ class PaymentCheckoutViewModel(
                         cardSecurityCodeToken = token,
                     ),
                 )
-            ) {
+            } ?: CreatePaymentResult.Failure(com.trustarx.pitgo.features.payment.model.PaymentFailure.TIMEOUT)
+            when (result) {
                 is CreatePaymentResult.Success -> { applyPayment(result.payment); observeApproval() }
                 is CreatePaymentResult.Failure -> {
                     _uiState.value = PaymentCheckoutUiState.Verifying
@@ -171,8 +176,11 @@ class PaymentCheckoutViewModel(
             PaymentStatus.REJECTED -> _uiState.value = PaymentCheckoutUiState.Declined
             PaymentStatus.EXPIRED -> _uiState.value = PaymentCheckoutUiState.Expired
             PaymentStatus.PENDING -> {
-                _uiState.value = payment.pix?.let(PaymentCheckoutUiState::AwaitingPix)
-                    ?: PaymentCheckoutUiState.AwaitingCardConfirmation
+                _uiState.value = when {
+                    payment.pix != null -> PaymentCheckoutUiState.AwaitingPix(payment.pix)
+                    payment.method == PaymentMethod.PIX -> PaymentCheckoutUiState.Verifying
+                    else -> PaymentCheckoutUiState.AwaitingCardConfirmation
+                }
             }
             PaymentStatus.CANCELLED, PaymentStatus.REFUND_PENDING,
             PaymentStatus.REFUNDED, PaymentStatus.REFUND_FAILED,
@@ -243,6 +251,8 @@ class PaymentCheckoutViewModel(
     }
 
     companion object {
+        private const val CREATE_PAYMENT_UI_TIMEOUT_MILLIS = 20_000L
+
         fun factory(
             catalogRepository: ServiceCatalogRepository,
             paymentRepository: PaymentRepository,
