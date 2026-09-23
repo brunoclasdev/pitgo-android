@@ -12,6 +12,7 @@ import com.trustarx.pitgo.core.location.model.DeviceLocationFix
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 
 /** Platform location source that does not require Google Play Services. */
@@ -30,7 +31,12 @@ class AndroidLocationDataSource(context: Context) {
     @SuppressLint("MissingPermission")
     suspend fun currentPreciseLocation(): DeviceLocationFix? =
         try {
-            preciseUpdates(CURRENT_FIX_INTERVAL_MILLIS).first()
+            // Android can immediately replay an old PASSIVE/GPS fix when a listener is
+            // registered. Do not treat that replay as the current position; wait for a
+            // recent, sufficiently accurate fix instead.
+            preciseUpdates(CURRENT_FIX_INTERVAL_MILLIS)
+                .filter { it.isHighQuality(System.currentTimeMillis()) }
+                .first()
         } catch (_: IllegalStateException) {
             // Location services can be switched off between the preflight check and the
             // registration call. Treat that as an unavailable fix instead of crashing the app.
