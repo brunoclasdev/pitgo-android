@@ -178,6 +178,8 @@ internal data class PitTecAppointmentDto(
 
 @Serializable
 internal data class PitTecQuoteDto(
+    @SerialName("service_amount") val serviceAmount: JsonElement? = null,
+    @SerialName("distance_charge_amount") val distanceChargeAmount: JsonElement? = null,
     val amount: JsonElement? = null,
     @SerialName("provider_amount") val providerAmount: JsonElement? = null,
     @SerialName("markup_amount") val markupAmount: JsonElement? = null,

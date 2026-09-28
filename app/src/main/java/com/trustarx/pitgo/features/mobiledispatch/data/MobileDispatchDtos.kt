@@ -135,6 +135,10 @@ internal data class MobileCandidateDto(
 internal data class MobileAppointmentDto(
     @SerialName("appointment_id") val id: String,
     val status: String,
+    @SerialName("arrived_at") val arrivedAt: String? = null,
+    @SerialName("service_started_at") val serviceStartedAt: String? = null,
+    @SerialName("client_start_acknowledged_at") val clientStartAcknowledgedAt: String? = null,
+    val quote: com.trustarx.pitgo.features.pittec.data.PitTecQuoteDto? = null,
     // Absent for PitTec: `private.pittec_dispatch_snapshot()` never includes a price — the PitTec
     // request UI never shows one (see data-model.md `provider_services`).
     @SerialName("quoted_price") val quotedPrice: JsonElement? = null,
@@ -149,7 +153,12 @@ internal data class MobileAppointmentDto(
     fun toDomain() = MobileAppointment(
         id = id,
         status = MobileAppointmentStatus.valueOf(status),
-        quotedPrice = quotedPrice?.jsonPrimitive?.content?.let(::BigDecimal) ?: BigDecimal.ZERO,
+        quotedPrice = (quote?.providerAmount ?: quote?.customerTotalAmount ?: quotedPrice)?.jsonPrimitive?.content?.let(::BigDecimal) ?: BigDecimal.ZERO,
+        arrivedAt = arrivedAt,
+        serviceStartedAt = serviceStartedAt,
+        clientStartAcknowledgedAt = clientStartAcknowledgedAt,
+        serviceAmount = quote?.serviceAmount?.jsonPrimitive?.content?.let(::BigDecimal),
+        distanceChargeAmount = quote?.distanceChargeAmount?.jsonPrimitive?.content?.let(::BigDecimal),
         isFree = isFree,
         responseDeadlineEpochMillis = responseDeadline?.let { parseSupabaseInstant(it).toEpochMilli() },
         revision = revision,

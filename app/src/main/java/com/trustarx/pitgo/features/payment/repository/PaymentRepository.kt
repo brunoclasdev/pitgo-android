@@ -150,6 +150,20 @@ class PaymentRepository(private val client: SupabaseClient) {
     }
 
     /** One-shot fallback used when the Realtime channel drops or hasn't emitted yet (10 s rule). */
+    suspend fun quoteTotal(requestId: String, appointmentId: String?, quoteVersion: Long?): java.math.BigDecimal? {
+        return try {
+            val envelope = withTimeout(RPC_TIMEOUT_MILLIS) {
+                client.postgrest.rpc("get_my_active_pittec_dispatch").decodeAs<com.trustarx.pitgo.features.pittec.data.PitTecDispatchEnvelopeDto>()
+            }
+            val snapshot = envelope.domainOrNull() ?: return null
+            val appointment = snapshot.appointment ?: return null
+            if (snapshot.searchId != requestId || appointment.id != appointmentId || appointment.quote?.version != quoteVersion) return null
+            appointment.quote?.customerTotalAmount?.takeIf { it.signum() > 0 }
+        } catch (_: TimeoutCancellationException) { null }
+        catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+        catch (_: Exception) { null }
+    }
+
     suspend fun getStatus(requestId: String): PaymentEvent {
         if (!requestId.isUuid()) return PaymentEvent.Failure(PaymentFailure.CONTRACT)
         return try {

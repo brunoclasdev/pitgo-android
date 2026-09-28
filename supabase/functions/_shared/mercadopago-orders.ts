@@ -38,7 +38,10 @@ export function normalizeOrder(order: JsonObject): PaymentEvidence | null {
     && paid === amount && refunded === 0) result = 'APPROVED';
   else if (['created','processing','action_required'].includes(status)
     && ['created','processing','action_required'].includes(ps) && (paid === null || paid === 0)) result = 'PENDING';
-  else if (status === 'failed' && ps === 'failed' && (paid === null || paid === 0)) result = 'REJECTED';
+  // Orders can report total_paid_amount even when the card transaction is
+  // rejected by risk analysis. The provider status pair is authoritative for
+  // this terminal outcome; otherwise the checkout would remain VERIFYING.
+  else if (status === 'failed' && ps === 'failed') result = 'REJECTED';
   else if (['canceled','expired'].includes(status) && ['canceled','expired'].includes(ps)
     && (paid === null || paid === 0)) result = status === 'expired' ? 'EXPIRED' : 'CANCELLED';
   if ((status === 'refunded' || detail === 'refunded') && refunded === amount) result = 'REFUNDED';

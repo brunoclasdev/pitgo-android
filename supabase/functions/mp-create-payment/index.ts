@@ -45,20 +45,19 @@ Deno.serve(async req => {
     });
     if (error) {
       const code = ['INVALID_INPUT','INVALID_PAYMENT_CONTEXT','PRICE_CHANGED','CARD_NOT_FOUND',
-        'SERVICE_NOT_FOUND','SERVICE_UNAVAILABLE'].includes(error.message) ? error.message : 'SERVICE_UNAVAILABLE';
+        'QUOTE_EXPIRED','SERVICE_NOT_FOUND','SERVICE_UNAVAILABLE'].includes(error.message) ? error.message : 'SERVICE_UNAVAILABLE';
       return json(code === 'SERVICE_UNAVAILABLE' ? 503 : code.endsWith('NOT_FOUND') ? 404 : 409, { code });
     }
     const reservation = object(data);
     let payment = object(reservation.payment);
     if (reservation.created !== true) return json(payment.sync_state === 'CURRENT' ? 200 : 202, snapshot(payment));
     const amount = decimal(cents(payment.amount)!);
-    if (amount !== '1.00') {
-      await defer(db, 'payment', payment, 'FIXED_AMOUNT_REQUIRED', 3600);
-      return json(409, { code: 'FIXED_AMOUNT_REQUIRED' });
-    }
     const response = await mpRequest('/v1/orders', 'POST', {
       type: 'online', processing_mode: 'automatic', total_amount: amount,
-      external_reference: payment.external_reference, payer: { email: user.email },
+      external_reference: payment.external_reference,
+      payer: card
+        ? { customer_id: card.mp_customer_id }
+        : { email: user.email },
       transactions: { payments: [{ amount, ...(card ? {} : { expiration_time: 'PT30M' }),
         payment_method: card ? { id: card.payment_method_id, type: card.payment_type_id,
           token: input.card_security_code_token, installments: 1 } : { id: 'pix', type: 'bank_transfer' } }] },

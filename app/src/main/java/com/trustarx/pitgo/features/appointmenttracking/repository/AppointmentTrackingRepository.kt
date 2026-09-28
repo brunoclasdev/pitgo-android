@@ -38,6 +38,12 @@ class AppointmentTrackingRepository(private val client: SupabaseClient) {
             return@channelFlow
         }
         val channel = client.channel("appointment-location:$appointmentId") { isPrivate = true }
+        launch {
+            while (true) {
+                send(snapshotSafely(appointmentId))
+                kotlinx.coroutines.delay(5_000)
+            }
+        }
         try {
             client.realtime.setAuth()
             val insert = channel.broadcastFlow<JsonObject>("INSERT")
@@ -80,6 +86,7 @@ class AppointmentTrackingRepository(private val client: SupabaseClient) {
             )
         } catch (_: Throwable) {
             send(AppointmentLocationEvent.Failure)
+            awaitCancellation()
         } finally {
             withContext(NonCancellable) { runCatching { client.realtime.removeChannel(channel) } }
         }
@@ -147,14 +154,15 @@ class AppointmentTrackingRepository(private val client: SupabaseClient) {
     }
 
     private suspend fun fetchClientLocation(appointmentId: String): AppointmentClientLocation? {
-        val dto = runCatching {
+        val dto = try {
             client.postgrest.rpc(
                 "get_appointment_client_location",
                 buildJsonObject { put("p_appointment_id", appointmentId) },
             ).decodeAs<ClientLocationSnapshotDto>()
-        }.getOrNull() ?: return null
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) { return null }
         if (dto.outcome != "FOUND" || dto.location == null) return null
-        val location = AppointmentClientLocation(dto.location.latitude, dto.location.longitude)
+        val location = AppointmentClientLocation(dto.location.latitude, dto.location.longitude, dto.location.capturedAt?.let { parseSupabaseInstant(it).toEpochMilli() })
         return location.takeIf(AppointmentClientLocation::isValid)
     }
 
@@ -203,6 +211,7 @@ private data class ClientLocationSnapshotDto(
 
 @Serializable
 private data class ClientLocationDto(
+    @SerialName("captured_at") val capturedAt: String? = null,
     val latitude: Double,
     val longitude: Double,
 )

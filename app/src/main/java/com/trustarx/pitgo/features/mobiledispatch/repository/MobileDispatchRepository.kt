@@ -30,6 +30,10 @@ import kotlinx.serialization.json.put
 import java.time.Instant
 
 class MobileDispatchRepository(private val client: SupabaseClient) {
+    suspend fun appointmentSnapshot(appointmentId: String): MobileDispatchResult = call(
+        "get_pittec_appointment_snapshot", buildJsonObject { put("p_appointment_id", appointmentId) },
+    )
+
     suspend fun restore(): MobileDispatchResult = call("get_my_active_mobile_dispatch")
 
     /** Dedicated PitTec contract (see contracts/pittec-rpcs.md) so it never mixes with MOBILE_SEQUENTIAL rows. */
@@ -78,6 +82,16 @@ class MobileDispatchRepository(private val client: SupabaseClient) {
 
     suspend fun startAppointment(appointmentId: String, revision: Long) = appointmentCommand(
         "start_mobile_appointment", appointmentId, revision,
+    )
+
+    suspend fun arrive(appointmentId: String, revision: Long): MobileDispatchResult = call("arrive_pittec_appointment", buildJsonObject {
+        put("p_request_id", java.util.UUID.randomUUID().toString())
+        put("p_appointment_id", appointmentId)
+        put("p_expected_revision", revision)
+    })
+
+    suspend fun acknowledgeStart(appointmentId: String, revision: Long) = appointmentCommand(
+        "acknowledge_pittec_start", appointmentId, revision,
     )
 
     suspend fun complete(appointmentId: String, revision: Long) = appointmentCommand(
@@ -161,6 +175,7 @@ class MobileDispatchRepository(private val client: SupabaseClient) {
         is HttpRequestTimeoutException -> MobileDispatchFailure.TIMEOUT
         is HttpRequestException -> MobileDispatchFailure.OFFLINE
         is PostgrestRestException -> when {
+            error.message?.contains("PITTEC_PRICING_UNAVAILABLE") == true -> MobileDispatchFailure.PRICING_UNAVAILABLE
             error.statusCode == 401 || error.statusCode == 403 || error.code == "42501" ->
                 MobileDispatchFailure.SESSION_EXPIRED
             error.code in setOf("PGRST202", "PGRST203", "42883", "42P01", "42703") ->

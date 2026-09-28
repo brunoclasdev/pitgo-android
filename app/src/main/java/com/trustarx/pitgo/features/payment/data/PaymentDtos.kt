@@ -68,7 +68,7 @@ internal data class CreatePaymentResponseDto(
             serviceId = serviceId ?: command.serviceId,
             syncState = PaymentSyncState.valueOf(syncState), revision = revision,
             cancelRequested = cancelRequested, supportRequired = supportRequired,
-        ).takeIf { it.isValid() && currency == "BRL" && paymentAmount.compareTo(BigDecimal("1.00")) == 0 }
+        ).takeIf { it.isValid() && currency == "BRL" }
     }.getOrNull()
 }
 

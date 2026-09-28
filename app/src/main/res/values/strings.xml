@@ -666,4 +666,20 @@
     <string name="payment_refund_pending">Reembolso em andamento. Você pode fechar o aplicativo.</string>
     <string name="payment_refunded">Reembolso confirmado</string>
     <string name="payment_support">Este pagamento precisa de acompanhamento do suporte. Continuamos verificando o resultado.</string>
+    <string name="payment_approved_feedback">Pagamento aprovado! Abrindo acompanhamento…</string>
+    <string name="pittec_start_service">Iniciar serviço</string>
+    <string name="pittec_service_started">Serviço em andamento</string>
+    <string name="pittec_arrived_waiting_start">PitTec chegou. Aguardando início do serviço.</string>
+    <string name="pittec_acknowledge_start">Confirmar que o serviço começou</string>
+    <string name="pittec_start_acknowledged">Início do serviço confirmado por você</string>
+    <string name="pittec_service_finished">Serviço concluído</string>
+    <string name="pittec_service_cancelled">Serviço cancelado</string>
+    <string name="pittec_action_retry">Não foi possível confirmar. Atualize e tente novamente.</string>
+    <string name="pittec_provider_service_value">Serviço: %1$s</string>
+    <string name="pittec_provider_distance_value">Adicional de quilometragem: %1$s</string>
+    <string name="pittec_provider_total_value">Valor a receber: %1$s</string>
+    <string name="pittec_value_on_accept">Valor calculado ao aceitar o pedido</string>
+    <string name="pittec_client_location_stale">Última posição do cliente. Aguardando atualização.</string>
+    <string name="pittec_customer_total_value">Total: %1$s</string>
+    <string name="pittec_pricing_unavailable">Orçamento indisponível. O preço ou a tarifa de quilometragem precisa ser configurado.</string>
 </resources>

@@ -175,9 +175,6 @@ private fun QuoteCard(
         )
         Text(stringResource(R.string.pittec_quote_provider, providerName))
         Text(formatter.format(quote.amount), style = MaterialTheme.typography.headlineSmall)
-        quote.markupAmount?.let { Text("Adicional: ${formatter.format(it)}") }
-        quote.customerFeeAmount?.let { Text("Taxas: ${formatter.format(it)}") }
-        quote.customerTotalAmount?.let { Text("Total: ${formatter.format(it)}") }
         Text(stringResource(R.string.pittec_quote_deadline, phase.remainingSeconds))
         phase.failure?.let { Text(quoteFailureTitle(it), color = MaterialTheme.colorScheme.error) }
         Row(

@@ -65,6 +65,7 @@ class PaymentCheckoutViewModel(
         ?: UUID.randomUUID().toString().also { savedStateHandle["payment_request_id"] = it }
 
     private var amount: BigDecimal = BigDecimal.ZERO
+    private var paymentOrderAmount: BigDecimal = BigDecimal.ZERO
     private var savedCards: List<SavedCard> = emptyList()
     private var observeJob: Job? = null
     private var currentPayment: Payment? = null
@@ -84,16 +85,24 @@ class PaymentCheckoutViewModel(
         viewModelScope.launch {
             when (val existing = paymentRepository.getStatus(requestId)) {
                 is PaymentEvent.StatusChanged -> {
-                    existing.payment?.let { amount = it.amount; applyPayment(it); observeApproval(); return@launch }
+                    existing.payment?.let {
+                        paymentOrderAmount = it.amount
+                        amount = if (dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) {
+                            paymentRepository.quoteTotal(requestId, appointmentId, quoteVersion) ?: it.amount
+                        } else it.amount
+                        applyPayment(it)
+                        observeApproval()
+                        return@launch
+                    }
                 }
                 is PaymentEvent.Failure -> { _uiState.value = PaymentCheckoutUiState.Failure; return@launch }
                 PaymentEvent.NotFound -> Unit
             }
             val service = if (dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) null
                 else (catalogRepository.service(serviceId) as? CatalogItemResult.Success)?.item
-            val parsedAmount = TEST_PAYMENT_AMOUNT.takeIf {
-                dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL || service != null
-            }
+            val parsedAmount = if (dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) {
+                paymentRepository.quoteTotal(requestId, appointmentId, quoteVersion)
+            } else TEST_PAYMENT_AMOUNT.takeIf { service != null }
             if ((dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL &&
                     (appointmentId == null || quoteVersion == null)) ||
                 parsedAmount == null || parsedAmount.signum() <= 0
@@ -102,6 +111,9 @@ class PaymentCheckoutViewModel(
                 return@launch
             }
             amount = parsedAmount
+            paymentOrderAmount = if (dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) {
+                TEST_PAYMENT_AMOUNT
+            } else parsedAmount
             savedCards = (savedCardRepository.list() as? SavedCardsResult.Success)?.cards.orEmpty()
             _uiState.value = PaymentCheckoutUiState.SelectingMethod(amount, savedCards)
         }
@@ -140,7 +152,7 @@ class PaymentCheckoutViewModel(
                         requestId = requestId,
                         serviceId = serviceId,
                         dispatchKind = dispatchKind,
-                        amount = amount,
+                        amount = paymentOrderAmount,
                         method = method,
                         appointmentId = appointmentId,
                         quoteVersion = quoteVersion,
@@ -172,7 +184,7 @@ class PaymentCheckoutViewModel(
     private fun applyPayment(payment: Payment) {
         if (currentPayment?.id == payment.id && payment.revision < (currentPayment?.revision ?: 0)) return
         currentPayment = payment
-        amount = payment.amount
+        if (dispatchKind != MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) amount = payment.amount
         if (payment.cancelRequested || (payment.status == PaymentStatus.APPROVED && payment.serviceId == null)
             || payment.status in setOf(PaymentStatus.REFUND_PENDING, PaymentStatus.REFUNDED, PaymentStatus.REFUND_FAILED)) {
             _uiState.value = PaymentCheckoutUiState.FinancialStatus(payment)

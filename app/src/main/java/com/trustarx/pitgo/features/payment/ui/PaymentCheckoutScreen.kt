@@ -87,7 +87,11 @@ fun PaymentCheckoutRoute(
         SavedCardSecurityCodeSheet(it.context, viewModel::chooseAnotherMethod, viewModel::confirmCard)
     }
     if (uiState is PaymentCheckoutUiState.Approved) {
-        LaunchedEffect(viewModel.requestId) { onApproved(viewModel.requestId) }
+        Text(stringResource(R.string.payment_approved_feedback), modifier = Modifier.padding(PitGoSpacing.Large))
+        LaunchedEffect(viewModel.requestId) {
+            kotlinx.coroutines.delay(1200)
+            onApproved(viewModel.requestId)
+        }
         return
     }
     PaymentCheckoutScreen(

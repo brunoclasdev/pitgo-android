@@ -71,6 +71,11 @@ data class MobileAppointment(
     val quoteVersion: Long = 1,
     val clientConfirmationDeadlineEpochMillis: Long? = null,
     val clientConfirmedAtEpochMillis: Long? = null,
+    val arrivedAt: String? = null,
+    val serviceStartedAt: String? = null,
+    val clientStartAcknowledgedAt: String? = null,
+    val serviceAmount: BigDecimal? = null,
+    val distanceChargeAmount: BigDecimal? = null,
 ) {
     fun isValid() = id.isUuid() && quotedPrice.signum() >= 0 && revision > 0 &&
         (responseDeadlineEpochMillis == null || responseDeadlineEpochMillis > 0)
@@ -100,7 +105,7 @@ data class MobileDispatchSnapshot(
 
 enum class MobileDispatchFailure {
     LOCATION_REQUIRED, LOCATION_UNAVAILABLE, OFFLINE, TIMEOUT, SESSION_EXPIRED,
-    SERVICE_UNAVAILABLE, CONTRACT, UNKNOWN,
+    SERVICE_UNAVAILABLE, PRICING_UNAVAILABLE, CONTRACT, UNKNOWN,
 }
 
 sealed interface MobileDispatchResult {

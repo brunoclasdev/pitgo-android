@@ -67,7 +67,31 @@ class AppointmentTrackingViewModel(
             // a GPS acquisition + up to 3 retries in parallel with the provider's own
             // ProviderLocationTrackingService — a real contributor to inconsistent provider
             // location updates.
-            if (isClient) launch { publishOwnLocation() }
+            if (isClient) launch {
+                while (!terminal) { publishOwnLocation(); delay(5_000) }
+            }
+            launch {
+                while (!terminal) {
+                    val result = if (_state.value.isPitTec) dispatchRepository.appointmentSnapshot(appointmentId)
+                        else dispatchRepository.restoreAnyDispatchKind()
+                    if (result is MobileDispatchResult.Success && result.snapshot.appointment?.id == appointmentId) {
+                        val current = _state.value.dispatch
+                        if (current == null || result.snapshot.revision >= current.revision) {
+                            _state.value = _state.value.copy(dispatch = result.snapshot)
+                        }
+                        if (result.snapshot.appointment.status in setOf(
+                            com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus.CANCELLED,
+                            com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus.COMPLETED,
+                        )) {
+                            terminal = true
+                            latest = null
+                            routeJob?.cancel()
+                            _state.value = _state.value.copy(data = TrackingDataState.Ended, clientLocation = null, route = null)
+                        }
+                    }
+                    delay(5_000)
+                }
+            }
             // repository.observe()'s underlying channelFlow sends one Failure/Offline event and
             // then COMPLETES on any transient error (network blip, realtime disconnect while
             // backgrounded, etc.) — see AppointmentTrackingRepository.observe(). Without a retry,
@@ -78,7 +102,7 @@ class AppointmentTrackingViewModel(
                 try {
                     coroutineScope {
                         launch {
-                            while (true) {
+                            while (!terminal) {
                                 delay(1_000)
                                 if (!terminal && _state.value.data !is TrackingDataState.Offline &&
                                     _state.value.data !is TrackingDataState.Failure
@@ -114,13 +138,28 @@ class AppointmentTrackingViewModel(
     fun arrive() {
         val appointment = _state.value.dispatch?.appointment ?: return
         if (_state.value.arriving) return
-        _state.value = _state.value.copy(arriving = true)
+        _state.value = _state.value.copy(arriving = true, actionFailed = false)
         viewModelScope.launch {
-            when (val result = dispatchRepository.startAppointment(appointment.id, appointment.revision)) {
+            val result = if (_state.value.isPitTec && appointment.arrivedAt == null)
+                dispatchRepository.arrive(appointment.id, appointment.revision)
+            else dispatchRepository.startAppointment(appointment.id, appointment.revision)
+            when (result) {
                 is MobileDispatchResult.Success -> _state.value = _state.value.copy(
                     dispatch = result.snapshot, arriving = false,
                 )
-                else -> _state.value = _state.value.copy(arriving = false)
+                else -> _state.value = _state.value.copy(arriving = false, actionFailed = true)
+            }
+        }
+    }
+
+    fun acknowledgeStart() {
+        val appointment = _state.value.dispatch?.appointment ?: return
+        if (!isClient || _state.value.arriving) return
+        _state.value = _state.value.copy(arriving = true, actionFailed = false)
+        viewModelScope.launch {
+            when (val result = dispatchRepository.acknowledgeStart(appointment.id, appointment.revision)) {
+                is MobileDispatchResult.Success -> _state.value = _state.value.copy(dispatch = result.snapshot, arriving = false)
+                else -> _state.value = _state.value.copy(arriving = false, actionFailed = true)
             }
         }
     }
@@ -191,8 +230,9 @@ class AppointmentTrackingViewModel(
         repeat(OWN_LOCATION_ATTEMPTS) { attempt ->
             try {
                 val fix = deviceLocationRepository.currentClientFix(timeoutMillis = OWN_LOCATION_TIMEOUT_MS)
+                if (terminal) return
                 if (fix is DeviceLocationResult.Success) {
-                    applyClientLocation(AppointmentClientLocation(fix.fix.latitude, fix.fix.longitude))
+                    applyClientLocation(AppointmentClientLocation(fix.fix.latitude, fix.fix.longitude, fix.fix.capturedAtEpochMillis))
                     repository.publishClientLocation(
                         appointmentId = appointmentId,
                         latitude = fix.fix.latitude,
@@ -246,14 +286,14 @@ class AppointmentTrackingViewModel(
                 terminal = true
                 latest = null
                 routeJob?.cancel()
-                _state.value = _state.value.copy(route = null)
+                _state.value = _state.value.copy(route = null, clientLocation = null)
                 updateData(TrackingDataState.Ended)
             }
             AppointmentLocationEvent.SessionExpired -> {
                 terminal = true
                 latest = null
                 routeJob?.cancel()
-                _state.value = _state.value.copy(route = null)
+                _state.value = _state.value.copy(route = null, clientLocation = null)
                 updateData(TrackingDataState.SessionExpired)
             }
             AppointmentLocationEvent.Offline -> updateData(TrackingDataState.Offline(latest))

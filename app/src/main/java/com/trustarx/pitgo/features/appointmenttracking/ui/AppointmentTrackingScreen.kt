@@ -84,6 +84,7 @@ fun AppointmentTrackingRoute(
         onCancel = viewModel::cancel,
         onArrive = viewModel::arrive,
         onComplete = viewModel::complete,
+        onAcknowledgeStart = viewModel::acknowledgeStart,
     )
 }
 
@@ -101,6 +102,7 @@ private fun AppointmentTrackingScreen(
     onCancel: (String) -> Unit,
     onArrive: () -> Unit,
     onComplete: () -> Unit,
+    onAcknowledgeStart: () -> Unit,
 ) {
     var showCancel by remember { mutableStateOf(false) }
     var reason by remember { mutableStateOf("") }
@@ -151,6 +153,12 @@ private fun AppointmentTrackingScreen(
                 verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
             ) {
                 TrackingStatus(state.data)
+                state.clientLocation?.let { client ->
+                    val capturedAt = client.capturedAtEpochMillis
+                    if (capturedAt == null || System.currentTimeMillis() - capturedAt > 30_000) {
+                        Text(stringResource(R.string.pittec_client_location_stale))
+                    }
+                }
                 state.dispatch?.appointment?.let { appointment ->
                     Surface(shape = MaterialTheme.shapes.large) {
                         Column(Modifier.fillMaxWidth().padding(PitGoSpacing.Medium)) {
@@ -158,12 +166,22 @@ private fun AppointmentTrackingScreen(
                             if (state.isPitTec) {
                                 Text(
                                     stringResource(
-                                        if (appointment.status == MobileAppointmentStatus.IN_PROGRESS) {
-                                            R.string.pittec_arrived
-                                        } else R.string.pittec_on_the_way
+                                        when {
+                                            appointment.status == MobileAppointmentStatus.COMPLETED -> R.string.pittec_service_finished
+                                            appointment.status == MobileAppointmentStatus.CANCELLED -> R.string.pittec_service_cancelled
+                                            appointment.status == MobileAppointmentStatus.IN_PROGRESS -> R.string.pittec_service_started
+                                            appointment.arrivedAt != null -> R.string.pittec_arrived_waiting_start
+                                            else -> R.string.pittec_on_the_way
+                                        }
                                     ),
                                 )
                                 PitTecDistanceLine(state)
+                                val money = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR"))
+                                if (!isClient) {
+                                    appointment.serviceAmount?.let { Text(stringResource(R.string.pittec_provider_service_value, money.format(it))) }
+                                    appointment.distanceChargeAmount?.let { Text(stringResource(R.string.pittec_provider_distance_value, money.format(it))) }
+                                }
+                                Text(stringResource(if (isClient) R.string.pittec_customer_total_value else R.string.pittec_provider_total_value, money.format(appointment.quotedPrice)))
                             } else {
                                 Text(stringResource(
                                     R.string.mobile_dispatch_price_frozen,
@@ -171,10 +189,18 @@ private fun AppointmentTrackingScreen(
                                 ))
                                 Text(appointment.status.name)
                             }
+                            if (state.actionFailed) Text(stringResource(R.string.pittec_action_retry), color = MaterialTheme.colorScheme.error)
+                            if (isClient && state.isPitTec && appointment.status == MobileAppointmentStatus.IN_PROGRESS) {
+                                if (appointment.clientStartAcknowledgedAt == null) {
+                                    Button(onClick = onAcknowledgeStart, enabled = !state.arriving) {
+                                        Text(stringResource(R.string.pittec_acknowledge_start))
+                                    }
+                                } else Text(stringResource(R.string.pittec_start_acknowledged))
+                            }
                             if (!isClient && state.isPitTec) {
                                 PitTecProviderActions(state, onArrive, onComplete)
                             }
-                            TextButton(onClick = { showCancel = true }, enabled = !state.cancelling) {
+                            TextButton(onClick = { showCancel = true }, enabled = !state.cancelling && state.data != TrackingDataState.Ended) {
                                 Text(stringResource(
                                     if (state.isPitTec) R.string.pittec_cancel_service
                                     else R.string.mobile_dispatch_cancel,
@@ -259,12 +285,12 @@ private fun PitTecProviderActions(
     when (appointment.status) {
         MobileAppointmentStatus.ACCEPTED -> Button(
             onClick = onArrive,
-            enabled = !state.arriving,
+            enabled = !state.arriving && state.data != TrackingDataState.Ended,
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(stringResource(R.string.pittec_arrive)) }
+        ) { Text(stringResource(if (appointment.arrivedAt == null) R.string.pittec_arrive else R.string.pittec_start_service)) }
         MobileAppointmentStatus.IN_PROGRESS -> Button(
             onClick = onComplete,
-            enabled = !state.completing,
+            enabled = !state.completing && state.data != TrackingDataState.Ended,
             modifier = Modifier.fillMaxWidth(),
         ) { Text(stringResource(R.string.pittec_complete)) }
         else -> Unit

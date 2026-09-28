@@ -403,6 +403,10 @@ private fun MapTab(
                 modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(PitGoSpacing.Small),
                 verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
             ) {
+                if (request.failure != null) {
+                    Text(stringResource(if (request.failure == com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchFailure.PRICING_UNAVAILABLE)
+                        R.string.pittec_pricing_unavailable else R.string.pittec_action_retry), color = MaterialTheme.colorScheme.error)
+                }
                 RealIncomingRequestCard(
                     offer = request.snapshot.offer,
                     revision = request.snapshot.revision,
@@ -438,9 +442,6 @@ private fun RealIncomingRequestCard(
         }
     }
     val purple = MaterialTheme.colorScheme.primary
-    val mockEstimate = ServiceEstimate(
-        DistancePerimeter(bandedKilometers(offer?.approximateDistanceMeters)),
-    )
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
         border = BorderStroke(2.dp, purple),
@@ -467,7 +468,7 @@ private fun RealIncomingRequestCard(
                 )
             }
             Text(
-                stringResource(R.string.pittec_mock_incoming_total, formatCents(mockEstimate.totalCents)),
+                stringResource(R.string.pittec_value_on_accept),
                 style = MaterialTheme.typography.titleMedium,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
@@ -572,20 +573,14 @@ private fun ValuesTab(incomingState: ProviderIncomingUiState) {
         if (snapshot?.appointment == null) {
             Text(stringResource(R.string.pittec_mock_values_empty))
         } else {
-            // PitTec has no real price in the backend — this is a fixed placeholder only.
-            val estimate = ServiceEstimate(DistancePerimeter(bandedKilometers(snapshot.offer?.approximateDistanceMeters)))
-            Text(stringResource(R.string.pittec_mock_values_fixed, formatCents(estimate.fixedCents)))
-            Text(
-                stringResource(
-                    R.string.pittec_mock_values_additional,
-                    estimate.bandCount,
-                    formatCents(estimate.distanceAdditionalCents),
-                ),
-            )
-            Text(
-                stringResource(R.string.pittec_mock_values_total, formatCents(estimate.totalCents)),
-                style = MaterialTheme.typography.titleMedium,
-            )
+            val appointment = snapshot.appointment
+            val formatter = java.text.NumberFormat.getCurrencyInstance(java.util.Locale.forLanguageTag("pt-BR"))
+            appointment.serviceAmount?.let { Text(stringResource(R.string.pittec_provider_service_value, formatter.format(it))) }
+            appointment.distanceChargeAmount?.let { Text(stringResource(R.string.pittec_provider_distance_value, formatter.format(it))) }
+            if (appointment.serviceAmount != null) {
+                Text(stringResource(R.string.pittec_provider_total_value, formatter.format(appointment.quotedPrice)),
+                    style = MaterialTheme.typography.titleMedium)
+            } else Text(stringResource(R.string.pittec_value_on_accept))
         }
     }
 }

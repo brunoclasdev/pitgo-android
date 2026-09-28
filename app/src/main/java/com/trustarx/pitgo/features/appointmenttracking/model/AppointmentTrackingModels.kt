@@ -50,6 +50,7 @@ data class AppointmentProviderLocation(
 data class AppointmentClientLocation(
     val latitude: Double,
     val longitude: Double,
+    val capturedAtEpochMillis: Long? = null,
 ) {
     val coordinate = MapCoordinate(latitude, longitude)
     val isValid: Boolean get() = coordinate.isValid
@@ -96,6 +97,7 @@ data class AppointmentTrackingUiState(
     val dispatch: MobileDispatchSnapshot? = null,
     val cancelling: Boolean = false,
     val arriving: Boolean = false,
+    val actionFailed: Boolean = false,
     val completing: Boolean = false,
     /** Only populated for PitTec — Guincho keeps its existing distance-free experience. */
     val route: RouteSnapshot? = null,
