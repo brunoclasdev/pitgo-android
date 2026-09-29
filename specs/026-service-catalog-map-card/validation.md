@@ -1,6 +1,7 @@
 # Validação — feature 026
 
-Data: 2026-09-29. Implementação local; nenhuma migration aplicada ao projeto remoto.
+Data: 2026-09-29. Registro da implementação inicial local e, na seção final,
+da publicação e análise remota autorizadas posteriormente pelo usuário.
 
 ## Comandos e resultados
 
@@ -93,3 +94,85 @@ de teste antes da publicação, sem excluir ou reativar ofertas históricas impl
 
 Não foram criados pagamentos, cadastros ou mutações no banco remoto. Não houve
 publicação, push ou commit nesta etapa de implementação.
+
+## Publicação e análise remota — 2026-09-29
+
+Etapa posterior, explicitamente autorizada pelo usuário: aplicar migrations e
+conferir sincronização com o banco vinculado. Todos os comandos Supabase usaram
+`npx --yes supabase`.
+
+### Sincronização e migrations
+
+- O primeiro dry-run identificou três migrations remotas ausentes no checkout.
+  Seus nomes e SQL foram recuperados diretamente de
+  `supabase_migrations.schema_migrations`, sem reparar ou apagar o histórico:
+  `20260929050000_dashboard_pittec_earnings_created_at.sql`,
+  `20260929060000_dashboard_pittec_earnings_rolling_period.sql` e
+  `20260929070000_dashboard_home_recent_blocks.sql`.
+- Aplicada `20260930000000_service_catalog_and_pittec_map_card.sql`.
+- A análise real revelou grants amplos de escrita direta e políticas somente
+  de itens ativos, que impediam o prestador de ler suas ofertas desativadas.
+  Aplicada `20260930010000_catalog_write_grants.sql`: leitura autenticada,
+  escrita somente via RPC staff e políticas suplementares para histórico do dono.
+- O teste de duplicação encontrou ausência de índice único de nomes de serviços
+  no banco legado. Como não havia duplicatas existentes, aplicada
+  `20260930020000_catalog_name_uniqueness.sql`, com unicidade de categoria e
+  serviço por nome aparado e sem distinção de maiúsculas.
+- Conferência final de `migration list --linked`: **77 versões locais/remotas,
+  nenhuma divergência**, incluindo as três migrations recuperadas e as três novas.
+- Dry-run final de `db push --linked --dry-run`: `upToDate: true`,
+  `migrations: []`, `Remote database is up to date`.
+
+### Integridade e contratos publicados
+
+- Catálogo: **108 serviços em 20 categorias**. São 105 especialidades novas
+  distribuídas em sete categorias, cada uma com exatamente 15 BROWSE ativos,
+  mais os três serviços anteriores.
+- **11 prestadores e 11 ofertas preservados**; hash dos vínculos das ofertas
+  idêntico antes/depois. IDs, nomes, categorias, estados e dispatch kinds dos
+  serviços anteriores, assim como as categorias anteriores, preservados.
+- Zero nomes duplicados, zero ofertas órfãs, zero projeções de categoria
+  ausentes/extras e zero incompatibilidades entre modalidade e dispatch kind.
+- As quatro funções desta feature têm MD5 de `prosrc` igual ao corpo SQL local:
+  cadastro, criação de categoria, criação de serviço e atualização de catálogo.
+  Todas continuam SECURITY DEFINER com `search_path` vazio, execução negada a
+  `anon` e permitida a `authenticated` conforme seus guards internos.
+- RLS habilitada nas duas tabelas; authenticated tem SELECT e não tem
+  INSERT/UPDATE/DELETE. Os dois índices únicos normalizados estão presentes.
+
+### Validação transacional no banco real
+
+`npx --yes supabase db query --linked --file /private/tmp/pitgo-026-remote-rpc-check.sql`
+executou criação/edição/desativação com contexto de um staff ativo e verificou:
+
+- Criação de 16 serviços, sem limite permanente de 15.
+- Duplicação de categoria e serviço rejeitada com `DUPLICATE_NAME`.
+- Categoria inativa rejeitada com `CATEGORY_NOT_FOUND`.
+- Alteração do serviço implícito rejeitada com `IMPLICIT_SERVICE_PROTECTED`.
+- 19 ações de criação/atualização registradas no audit log da transação.
+- As três mutações RPC negadas a prestador sem staff com `STAFF_REQUIRED`.
+- Escrita direta negada e execução RPC negada a `anon`.
+- Serviço/categoria desativados ainda legíveis pelo prestador dono de uma oferta
+  histórica; invisíveis para contexto autenticado que não possui essa oferta.
+
+Todos os registros, vínculos e eventos de auditoria de teste foram revertidos
+com `ROLLBACK`. A conferência final encontrou **zero categorias de teste residuais**
+e os mesmos 11 vínculos de ofertas. Não foram alterados appointments nem pagamentos.
+
+`npx --yes supabase db lint --linked --schema public,private --level error --fail-on error`
+concluiu com `results: []`, sem erros SQL nas funções desses schemas.
+
+### Dados legados e limites remanescentes
+
+- Há **12 categorias antigas ativas sem serviços**; foram preservadas. O app já
+  apresenta o estado vazio para elas. As sete categorias desta feature estão completas.
+- O serviço implícito **Guincho permanece na categoria Bateria**, associação já
+  existente antes da publicação. ID, disponibilidade e despacho MOBILE_SEQUENTIAL
+  foram preservados; não houve remanejamento de ofertas/projeções históricas.
+- A validação de cadastro novo com prova real de geocodificação, interface Android,
+  pagamento e 20 atualizações de mapa continua pendente conforme T010/T019/T020/T021.
+- Esta análise verifica histórico de migrations, contratos publicados, integridade,
+  permissões/RLS do catálogo e lint SQL. Não representa um diff integral de todos
+  os objetos históricos do projeto.
+- Os três arquivos recuperados e as duas migrations corretivas estão no checkout;
+  não foi criado novo commit nem push nesta etapa de publicação.
