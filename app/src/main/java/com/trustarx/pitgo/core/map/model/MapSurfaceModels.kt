@@ -54,6 +54,7 @@ private fun haversineMeters(a: MapCoordinate, b: MapCoordinate): Double {
 data class MapViewportCommand(
     val viewport: MapViewport,
     val revision: Long,
+    val fitCoordinates: List<MapCoordinate> = emptyList(),
 )
 
 enum class MapMarkerKind {

@@ -86,7 +86,7 @@ class AppointmentTrackingViewModel(
                             terminal = true
                             latest = null
                             routeJob?.cancel()
-                            _state.value = _state.value.copy(data = TrackingDataState.Ended, clientLocation = null, route = null)
+                            _state.value = _state.value.copy(data = TrackingDataState.Ended, clientLocation = null, route = null, summaryExpanded = false)
                         }
                     }
                     delay(5_000)
@@ -132,6 +132,7 @@ class AppointmentTrackingViewModel(
         terminal = false
         deviceLocationRepository.endVisibleUse(ClientLocationPurpose.APPOINTMENT_TRACKING)
         _state.value = AppointmentTrackingUiState()
+        cameraRevision = 0L
     }
 
     /** Provider-only "Cheguei" — mirrors the ACCEPTED "Iniciar atendimento" RPC for Mobile. */
@@ -198,9 +199,14 @@ class AppointmentTrackingViewModel(
         if (enabled) latest?.let { moveCameraTo(it, _state.value.clientLocation) }
     }
 
+    fun toggleSummary() {
+        _state.value = _state.value.copy(summaryExpanded = !_state.value.summaryExpanded)
+    }
+
     fun cancel(reason: String) {
         if (reason.isBlank() || _state.value.cancelling) return
         val appointment = _state.value.dispatch?.appointment ?: return
+        if (_state.value.isPitTec && com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchAction.CANCEL !in _state.value.dispatch!!.allowedActions) return
         _state.value = _state.value.copy(cancelling = true)
         viewModelScope.launch {
             when (val result = dispatchRepository.cancel(appointment.id, reason, appointment.revision)) {
@@ -257,9 +263,9 @@ class AppointmentTrackingViewModel(
         _state.value = _state.value.copy(clientLocation = clientLocation)
         val providerLocation = latest
         if (providerLocation != null) {
-            if (_state.value.followProvider) moveCameraTo(providerLocation, clientLocation)
+            if (_state.value.followProvider && !_state.value.isPitTec) moveCameraTo(providerLocation, clientLocation)
         } else {
-            centerOnClientOnly(clientLocation)
+            if (!_state.value.isPitTec || cameraRevision == 0L) centerOnClientOnly(clientLocation)
         }
     }
 
@@ -308,7 +314,9 @@ class AppointmentTrackingViewModel(
         acceptedRevision = location.revision
         latest = location
         publishFreshness(location)
-        if (_state.value.followProvider) moveCameraTo(location, _state.value.clientLocation)
+        if (_state.value.followProvider && (!_state.value.isPitTec || accepted == null)) {
+            moveCameraTo(location, _state.value.clientLocation)
+        }
         if (_state.value.isPitTec) refreshRoute(location.version)
     }
 
@@ -343,12 +351,15 @@ class AppointmentTrackingViewModel(
         } else MapViewport(location.coordinate, 16.0)
         _state.value = _state.value.copy(
             viewport = target,
-            cameraCommand = MapViewportCommand(target, cameraRevision),
+            cameraCommand = MapViewportCommand(target, cameraRevision,
+                if (_state.value.isPitTec) _state.value.markers.map { it.coordinate } +
+                    _state.value.routePolyline?.points.orEmpty() else emptyList()),
         )
     }
 
     private fun updateData(data: TrackingDataState) {
-        _state.value = _state.value.copy(data = data)
+        _state.value = _state.value.copy(data = data,
+            summaryExpanded = _state.value.summaryExpanded && data != TrackingDataState.Ended && data != TrackingDataState.SessionExpired)
     }
 
     companion object {

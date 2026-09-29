@@ -9,6 +9,7 @@ import com.trustarx.pitgo.features.providerregistration.model.OfferField
 import com.trustarx.pitgo.features.providerregistration.model.OfferRegistration
 import com.trustarx.pitgo.features.providerregistration.model.ProviderField
 import com.trustarx.pitgo.features.providerregistration.model.ProviderFieldError
+import com.trustarx.pitgo.features.providerregistration.model.ProviderLocationMode
 import com.trustarx.pitgo.features.providerregistration.model.ProviderRegistration
 import com.trustarx.pitgo.features.providerregistration.model.ProviderRegistrationDraft
 import java.math.BigDecimal
@@ -92,6 +93,9 @@ object ProviderRegistrationValidation {
         }
 
         val availableById = availableServices.associateBy(CatalogService::id)
+        if (draft.locationMode == ProviderLocationMode.FIXED && draft.primaryCategoryId == null) {
+            errors[ProviderField.PrimaryCategory] = ProviderFieldError.REQUIRED
+        }
         if (draft.offers.isEmpty()) errors[ProviderField.Offers] = ProviderFieldError.REQUIRED
         val seenServices = mutableSetOf<String>()
         val normalizedOffers = draft.offers.mapNotNull { offer ->
@@ -103,6 +107,10 @@ object ProviderRegistrationValidation {
             if (offer.categoryId == null) errors[categoryField] = ProviderFieldError.REQUIRED
 
             val selectedService = offer.serviceId?.let(availableById::get)
+            if (draft.locationMode == ProviderLocationMode.FIXED &&
+                (offer.categoryId != draft.primaryCategoryId ||
+                    selectedService?.dispatchKind != com.trustarx.pitgo.core.catalog.model.ServiceDispatchKind.BROWSE)
+            ) errors[serviceField] = ProviderFieldError.SERVICE_UNAVAILABLE
             when {
                 offer.serviceId == null -> errors[serviceField] = ProviderFieldError.REQUIRED
                 selectedService == null || selectedService.categoryId != offer.categoryId ->

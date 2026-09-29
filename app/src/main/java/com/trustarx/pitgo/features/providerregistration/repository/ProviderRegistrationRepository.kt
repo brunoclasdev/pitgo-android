@@ -43,7 +43,7 @@ class ProviderRegistrationRepository(private val client: SupabaseClient) {
         if (provider != null) {
             ProviderEntryResult.AlreadyRegistered(loadSummary(provider))
         } else {
-            ProviderEntryResult.Ready(loadAllCategories())
+            ProviderEntryResult.Ready(loadAllCategories(activeOnly = true))
         }
     } catch (cancellation: CancellationException) {
         throw cancellation
@@ -52,7 +52,7 @@ class ProviderRegistrationRepository(private val client: SupabaseClient) {
     }
 
     suspend fun loadServices(categoryId: String): ProviderCatalogResult<CatalogService> = try {
-        ProviderCatalogResult.Success(loadAllServices(categoryId))
+        ProviderCatalogResult.Success(loadAllServices(categoryId, selectableOnly = true))
     } catch (cancellation: CancellationException) {
         throw cancellation
     } catch (error: Throwable) {
@@ -155,11 +155,12 @@ class ProviderRegistrationRepository(private val client: SupabaseClient) {
         )
     }
 
-    private suspend fun loadAllCategories(): List<ServiceCategory> {
+    private suspend fun loadAllCategories(activeOnly: Boolean = false): List<ServiceCategory> {
         val result = mutableListOf<ServiceCategory>()
         var start = 0L
         do {
             val page = client.from(SERVICE_CATEGORIES).select {
+                if (activeOnly) filter { eq("active", true) }
                 order("name", Order.ASCENDING)
                 order("id", Order.ASCENDING)
                 range(start, start + PAGE_SIZE - 1)
@@ -172,11 +173,16 @@ class ProviderRegistrationRepository(private val client: SupabaseClient) {
         )
     }
 
-    private suspend fun loadAllServices(categoryId: String?): List<CatalogService> {
+    private suspend fun loadAllServices(categoryId: String?, selectableOnly: Boolean = false): List<CatalogService> {
+        if (selectableOnly && categoryId != null && client.from(SERVICE_CATEGORIES).select {
+            filter { eq("id", categoryId); eq("active", true) }
+            limit(1)
+        }.decodeList<ServiceCategoryDto>().isEmpty()) return emptyList()
         val result = mutableListOf<CatalogService>()
         var start = 0L
         do {
             val page = client.from(SERVICES).select {
+                if (selectableOnly) filter { eq("active", true); eq("dispatch_kind", "BROWSE") }
                 categoryId?.let { filter { eq("category_id", it) } }
                 order("name", Order.ASCENDING)
                 order("id", Order.ASCENDING)

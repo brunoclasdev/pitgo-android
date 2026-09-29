@@ -1002,9 +1002,24 @@ private fun OfferCard(
     onRemove: (Long) -> Unit,
     onRetryServices: () -> Unit,
 ) {
-    val categoryField = ProviderField.Offer(offer.localId, OfferField.CATEGORY)
+    val categoryField = ProviderField.PrimaryCategory
     val serviceField = ProviderField.Offer(offer.localId, OfferField.SERVICE)
     val serviceItems = (servicesState as? LoadState.Content)?.value.orEmpty()
+    var pendingCategory by remember { mutableStateOf<String?>(null) }
+    pendingCategory?.let { category ->
+        AlertDialog(
+            onDismissRequest = { pendingCategory = null },
+            title = { Text(stringResource(R.string.provider_change_category_title)) },
+            text = { Text(stringResource(R.string.provider_change_category_message)) },
+            confirmButton = { TextButton(onClick = {
+                pendingCategory = null
+                onCategorySelected(offer.localId, category)
+            }) { Text(stringResource(R.string.provider_change_category_title)) } },
+            dismissButton = { TextButton(onClick = { pendingCategory = null }) {
+                Text(stringResource(R.string.action_back))
+            } },
+        )
+    }
     FormWidth {
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1020,14 +1035,17 @@ private fun OfferCard(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.semantics { heading() },
                 )
-                CatalogDropdown(
-                    label = stringResource(R.string.provider_category_label),
+                if (index == 0) CatalogDropdown(
+                    label = stringResource(R.string.provider_primary_category),
                     selectedId = offer.categoryId,
                     items = categories.map { it.id to it.name },
                     enabled = enabled && categories.isNotEmpty(),
                     error = errors[categoryField]?.let { fieldErrorMessage(it, categoryField) },
                     focusRequester = rememberFieldFocusRequester(focusRequesters, categoryField),
-                    onSelected = { onCategorySelected(offer.localId, it) },
+                    onSelected = {
+                        if (offer.categoryId != null && offer.categoryId != it) pendingCategory = it
+                        else onCategorySelected(offer.localId, it)
+                    },
                 )
                 when (servicesState) {
                     LoadState.Loading -> CatalogMessage(stringResource(R.string.provider_catalog_loading), loading = true)
@@ -1349,6 +1367,7 @@ private fun fieldErrorMessage(
 ): String = when (error) {
     ProviderFieldError.REQUIRED -> when (field) {
         ProviderField.LocationMode -> stringResource(R.string.provider_mode_required_error)
+        ProviderField.PrimaryCategory -> stringResource(R.string.provider_category_required_error)
         ProviderField.Offers -> stringResource(R.string.provider_offers_empty)
         is ProviderField.Offer -> when (field.field) {
             OfferField.CATEGORY -> stringResource(R.string.provider_category_required_error)
@@ -1415,6 +1434,8 @@ private fun formRowIndex(field: ProviderField, content: ProviderEditingContent):
     ProviderField.State -> 15
     ProviderField.LocationVerification -> 17
     ProviderField.Offers -> 18
+    ProviderField.PrimaryCategory -> if (content.draft.offers.isEmpty()) 18
+        else 19 + if (content.categories is LoadState.Content) 0 else 1
     is ProviderField.Offer -> {
         val catalogRowCount = if (content.categories is LoadState.Content) 0 else 1
         val emptyOffersRowCount = if (content.draft.offers.isEmpty()) 1 else 0

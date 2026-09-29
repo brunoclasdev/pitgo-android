@@ -40,6 +40,7 @@ data class OfferDraft(
 )
 
 data class ProviderRegistrationDraft(
+    val primaryCategoryId: String? = null,
     val locationMode: ProviderLocationMode? = null,
     val company: CompanyDraft = CompanyDraft(),
     val address: AddressDraft = AddressDraft(),
@@ -134,6 +135,7 @@ enum class OfferField {
 }
 
 sealed interface ProviderField {
+    data object PrimaryCategory : ProviderField
     data object LocationMode : ProviderField
     data object LocationVerification : ProviderField
     data object Name : ProviderField

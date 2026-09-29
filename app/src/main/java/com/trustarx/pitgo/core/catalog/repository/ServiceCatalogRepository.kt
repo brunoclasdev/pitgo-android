@@ -23,19 +23,28 @@ class ServiceCatalogRepository(private val client: SupabaseClient) {
     suspend fun categories(): CatalogLoadResult<ServiceCategory> = loadPaged(
         table = "service_categories",
         decode = { client.from("service_categories").select {
-            order("name", Order.ASCENDING); range(it, it + PAGE_SIZE - 1)
+            filter { eq("active", true) }
+            order("name", Order.ASCENDING); order("id", Order.ASCENDING); range(it, it + PAGE_SIZE - 1)
         }.decodeList<CategoryDto>() },
         map = { ServiceCategory(it.id, it.name, it.description) },
     )
 
-    suspend fun services(categoryId: String): CatalogLoadResult<CatalogService> = loadPaged(
-        table = "services",
-        decode = { start -> client.from("services").select {
-            filter { eq("category_id", categoryId) }
-            order("name", Order.ASCENDING); range(start, start + PAGE_SIZE - 1)
-        }.decodeList<ServiceDto>() },
-        map = { CatalogService(it.id, it.categoryId, it.name, it.description, it.dispatchKind.toDispatchKind()) },
-    )
+    suspend fun services(categoryId: String): CatalogLoadResult<CatalogService> = try {
+        val activeCategory = client.from("service_categories").select {
+            filter { eq("id", categoryId); eq("active", true) }
+            limit(1)
+        }.decodeList<CategoryDto>()
+        if (activeCategory.isEmpty()) CatalogLoadResult.Success(emptyList()) else loadPaged(
+            table = "services",
+            decode = { start -> client.from("services").select {
+                filter { eq("category_id", categoryId); eq("active", true) }
+                order("name", Order.ASCENDING); order("id", Order.ASCENDING); range(start, start + PAGE_SIZE - 1)
+            }.decodeList<ServiceDto>() },
+            map = { CatalogService(it.id, it.categoryId, it.name, it.description, it.dispatchKind.toDispatchKind()) },
+        )
+
+    } catch (cancel: CancellationException) { throw cancel }
+      catch (error: Throwable) { classify(error) }
 
     suspend fun homeServices(): CatalogLoadResult<HomeService> = try {
         val rows = client.postgrest.rpc("list_home_services").decodeList<HomeServiceDto>()

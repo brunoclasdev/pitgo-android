@@ -682,4 +682,12 @@
     <string name="pittec_client_location_stale">Última posição do cliente. Aguardando atualização.</string>
     <string name="pittec_customer_total_value">Total: %1$s</string>
     <string name="pittec_pricing_unavailable">Orçamento indisponível. O preço ou a tarifa de quilometragem precisa ser configurado.</string>
+    <string name="provider_primary_category">Categoria principal</string>
+    <string name="provider_change_category_title">Trocar categoria</string>
+    <string name="provider_change_category_message">Ao trocar a categoria, os serviços e valores preenchidos serão removidos. Deseja continuar?</string>
+    <string name="tracking_expand_summary">Ver detalhes</string>
+    <string name="tracking_collapse_summary">Recolher detalhes</string>
+    <string name="tracking_recenter">Recentralizar mapa</string>
+    <string name="tracking_summary_expanded">Detalhes expandidos</string>
+    <string name="tracking_summary_collapsed">Resumo recolhido</string>
 </resources>

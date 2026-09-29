@@ -32,6 +32,7 @@ import com.trustarx.pitgo.core.map.model.MapViewport
 import com.trustarx.pitgo.core.map.model.MapViewportCommand
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapLibreMapOptions
 import org.maplibre.android.maps.MapView
@@ -161,6 +162,10 @@ private class MapLibreHostHolder(
     private var onViewportIdle = onViewportIdle
     private var onFeatureClick = onFeatureClick
     private var onSurfaceState = onSurfaceState
+    private var gestureCamera = false
+    private val cameraMoveStartedListener = MapLibreMap.OnCameraMoveStartedListener { reason ->
+        if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) gestureCamera = true
+    }
 
     private val tileDegrade = Runnable {
         if (tileErrors >= TILE_ERROR_THRESHOLD && online) {
@@ -252,6 +257,7 @@ private class MapLibreHostHolder(
             if (destroyed || mapView !== view) return@getMapAsync
             map = readyMap
             readyMap.addOnCameraIdleListener(cameraIdleListener)
+            readyMap.addOnCameraMoveStartedListener(cameraMoveStartedListener)
             readyMap.addOnMapClickListener(mapClickListener)
             applyLatest()
         }
@@ -293,14 +299,18 @@ private class MapLibreHostHolder(
         latestCommand?.let { command ->
             if (command.revision > appliedCameraRevision && command.viewport.center.isValid) {
                 appliedCameraRevision = command.revision
+                gestureCamera = false
+                val points = command.fitCoordinates.filter { it.isValid }.distinct()
+                val cameraUpdate = if (points.size > 1) {
+                    CameraUpdateFactory.newLatLngBounds(
+                        LatLngBounds.Builder().includes(points.map { LatLng(it.latitude, it.longitude) }).build(),
+                        (48 * context.resources.displayMetrics.density).toInt(),
+                    )
+                } else CameraUpdateFactory.newLatLngZoom(
+                    LatLng(command.viewport.center.latitude, command.viewport.center.longitude), command.viewport.zoom,
+                )
                 currentMap.easeCamera(
-                    CameraUpdateFactory.newLatLngZoom(
-                        LatLng(
-                            command.viewport.center.latitude,
-                            command.viewport.center.longitude,
-                        ),
-                        command.viewport.zoom,
-                    ),
+                    cameraUpdate,
                     CAMERA_ANIMATION_MS,
                 )
             }
@@ -325,10 +335,17 @@ private class MapLibreHostHolder(
             // Loading a remote style may apply its own default camera after an earlier
             // viewport command. Restore the latest app-owned viewport so providers do
             // not remain outside the visible area on the first render or after retry.
-            val target = latestCommand?.viewport ?: latestViewport
+            val fittingCommand = latestCommand?.takeIf { it.fitCoordinates.isNotEmpty() }
+            val target = if (fittingCommand != null && gestureCamera) latestViewport
+                else latestCommand?.viewport ?: latestViewport
             if (target.center.isValid) {
+                val points = if (gestureCamera) emptyList() else fittingCommand?.fitCoordinates.orEmpty()
+                    .filter { it.isValid }.distinct()
                 currentMap.moveCamera(
-                    CameraUpdateFactory.newLatLngZoom(
+                    if (points.size > 1) CameraUpdateFactory.newLatLngBounds(
+                        LatLngBounds.Builder().includes(points.map { LatLng(it.latitude, it.longitude) }).build(),
+                        (48 * context.resources.displayMetrics.density).toInt(),
+                    ) else CameraUpdateFactory.newLatLngZoom(
                         LatLng(target.center.latitude, target.center.longitude),
                         target.zoom,
                     )
@@ -344,6 +361,7 @@ private class MapLibreHostHolder(
         destroyed = true
         handler.removeCallbacksAndMessages(null)
         map?.removeOnCameraIdleListener(cameraIdleListener)
+        map?.removeOnCameraMoveStartedListener(cameraMoveStartedListener)
         map?.removeOnMapClickListener(mapClickListener)
         view.removeOnDidFailLoadingMapListener(mapFailedListener)
         view.removeOnTileActionListener(tileActionListener)

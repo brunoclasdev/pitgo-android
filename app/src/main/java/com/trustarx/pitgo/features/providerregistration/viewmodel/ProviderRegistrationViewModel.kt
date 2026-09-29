@@ -191,9 +191,9 @@ class ProviderRegistrationViewModel(
         modeResolutionJob?.cancel()
         updateEditing { content ->
             content.copy(
-                draft = content.draft.copy(locationMode = mode),
+                draft = content.draft.copy(locationMode = mode, primaryCategoryId = null),
                 errors = content.errors.filterKeys {
-                    it != ProviderField.LocationMode && it != ProviderField.Offers && it !is ProviderField.Offer
+                    it != ProviderField.LocationMode && it != ProviderField.PrimaryCategory && it != ProviderField.Offers && it !is ProviderField.Offer
                 },
                 implicitServiceIssue = null,
             )
@@ -406,22 +406,12 @@ class ProviderRegistrationViewModel(
 
     fun onCategorySelected(localId: Long, categoryId: String) {
         updateEditing { content ->
-            val updatedDraft = content.draft.updateOffer(localId) {
-                it.copy(categoryId = categoryId, serviceId = null)
-            }
-            val categoryField = ProviderField.Offer(localId, OfferField.CATEGORY)
-            val serviceField = ProviderField.Offer(localId, OfferField.SERVICE)
-            var errors = content.errors - categoryField
-            if (serviceField in errors) {
-                val serviceError = ProviderRegistrationValidation.validateField(
-                    updatedDraft,
-                    content.availableServices(),
-                    content.addressVerification,
-                    serviceField,
-                )
-                errors = if (serviceError == null) errors - serviceField
-                else errors + (serviceField to serviceError)
-            }
+            if (content.draft.primaryCategoryId == categoryId) return@updateEditing content
+            val updatedDraft = content.draft.copy(
+                primaryCategoryId = categoryId,
+                offers = listOf(OfferDraft(localId = nextOfferId++, categoryId = categoryId)),
+            )
+            val errors = content.errors.filterKeys { it !is ProviderField.Offer } - ProviderField.Offers - ProviderField.PrimaryCategory
             content.copy(
                 draft = updatedDraft,
                 errors = errors,
@@ -466,7 +456,7 @@ class ProviderRegistrationViewModel(
     fun addOffer() = updateEditing { content ->
         content.copy(
             draft = content.draft.copy(
-                offers = content.draft.offers + OfferDraft(localId = nextOfferId++),
+                offers = content.draft.offers + OfferDraft(localId = nextOfferId++, categoryId = content.draft.primaryCategoryId),
             ),
             errors = content.errors - ProviderField.Offers,
             submission = ProviderSubmissionState.Idle,
@@ -519,11 +509,35 @@ class ProviderRegistrationViewModel(
             try {
                 val validated = when (editing.draft.locationMode) {
                     ProviderLocationMode.MOBILE, ProviderLocationMode.PITTEC -> recheckImplicitService(editing)
+                    ProviderLocationMode.FIXED -> recheckFixedServices(editing)
                     else -> editing
                 } ?: return@launch
                 proceedWithValidation(validated)
             } finally {
                 submitJob = null
+            }
+        }
+    }
+
+    private suspend fun recheckFixedServices(editing: ProviderEditingContent): ProviderEditingContent? {
+        val categoryId = editing.draft.primaryCategoryId ?: return editing
+        _uiState.updateEditing { it.copy(submission = ProviderSubmissionState.Submitting) }
+        return when (val result = repository.loadServices(categoryId)) {
+            is ProviderCatalogResult.Success -> {
+                val refreshed = editing.copy(
+                    servicesByCategory = editing.servicesByCategory + (categoryId to
+                        if (result.items.isEmpty()) LoadState.Empty else LoadState.Content(result.items)),
+                    submission = ProviderSubmissionState.Idle,
+                )
+                if (!isSessionCurrent()) null else {
+                    _uiState.updateEditing { refreshed }
+                    refreshed
+                }
+            }
+            is ProviderCatalogResult.Failure -> {
+                if (result.reason == ProviderFailure.SessionExpired) expireSession()
+                else _uiState.updateEditing { it.copy(submission = ProviderSubmissionState.Failure(result.reason)) }
+                null
             }
         }
     }
@@ -952,7 +966,7 @@ class ProviderRegistrationViewModel(
             address = address.copy(state = value.uppercase(Locale.ROOT).take(2)),
         )
         ProviderField.Latitude, ProviderField.Longitude, ProviderField.LocationMode,
-        ProviderField.LocationVerification, ProviderField.Offers, is ProviderField.Offer -> this
+        ProviderField.LocationVerification, ProviderField.PrimaryCategory, ProviderField.Offers, is ProviderField.Offer -> this
     }
 
     private fun ProviderRegistrationDraft.updateOffer(

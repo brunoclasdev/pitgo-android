@@ -9,6 +9,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,6 +45,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.trustarx.pitgo.R
@@ -54,6 +62,7 @@ import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentTracking
 import com.trustarx.pitgo.features.appointmenttracking.model.TrackingDataState
 import com.trustarx.pitgo.features.appointmenttracking.viewmodel.AppointmentTrackingViewModel
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchAction
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -78,6 +87,7 @@ fun AppointmentTrackingRoute(
         styleController = remember { ParticipantMapStyleController() },
         onBack = onBack,
         onFollowChanged = viewModel::setFollowProvider,
+        onToggleSummary = viewModel::toggleSummary,
         onViewportIdle = viewModel::onViewportIdle,
         onSurfaceState = viewModel::updateSurfaceState,
         onRetryStyle = viewModel::retryStyle,
@@ -96,6 +106,7 @@ private fun AppointmentTrackingScreen(
     styleController: ParticipantMapStyleController,
     onBack: () -> Unit,
     onFollowChanged: (Boolean) -> Unit,
+    onToggleSummary: () -> Unit,
     onViewportIdle: (com.trustarx.pitgo.core.map.model.MapViewport) -> Unit,
     onSurfaceState: (com.trustarx.pitgo.core.map.model.MapSurfaceState) -> Unit,
     onRetryStyle: () -> Unit,
@@ -106,6 +117,10 @@ private fun AppointmentTrackingScreen(
 ) {
     var showCancel by remember { mutableStateOf(false) }
     var reason by remember { mutableStateOf("") }
+    var summaryHeight by remember { mutableStateOf(0) }
+    val summaryPadding = with(LocalDensity.current) { summaryHeight.toDp() }
+    val maxSummaryHeight = (LocalConfiguration.current.screenHeightDp * 0.45f).dp
+    val summaryDescription = stringResource(if (state.summaryExpanded) R.string.tracking_summary_expanded else R.string.tracking_summary_collapsed)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -127,7 +142,7 @@ private fun AppointmentTrackingScreen(
             // The provider's position may still be pending (e.g. right after acceptance); the
             // client's own position, once known, is shown on its own rather than blanking the
             // whole map — see spec 014 US2 acceptance scenario 3.
-            if (location != null || hasClientLocation) {
+            if ((location != null || hasClientLocation) && (!state.isPitTec || summaryHeight > 0)) {
                 MapLibreMapHost(
                     configuration = PitGoManagedMapStyle.configuration,
                     renderModel = MapRenderModel(state.markers, state.routePolyline),
@@ -139,7 +154,7 @@ private fun AppointmentTrackingScreen(
                     onViewportIdle = onViewportIdle,
                     onFeatureClick = {},
                     onSurfaceState = onSurfaceState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().padding(bottom = if (state.isPitTec) summaryPadding else 0.dp),
                 )
             } else {
                 TrackingEmptyState(state.data, Modifier.fillMaxSize())
@@ -147,8 +162,12 @@ private fun AppointmentTrackingScreen(
 
             Column(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
+                    .align(if (state.isPitTec) Alignment.BottomCenter else Alignment.TopCenter)
                     .fillMaxWidth()
+                    .onSizeChanged { summaryHeight = it.height }
+                    .then(if (state.isPitTec) Modifier.heightIn(max = maxSummaryHeight)
+                        .verticalScroll(rememberScrollState()).semantics { stateDescription = summaryDescription }
+                        else Modifier)
                     .padding(PitGoSpacing.Small),
                 verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
             ) {
@@ -162,7 +181,7 @@ private fun AppointmentTrackingScreen(
                 state.dispatch?.appointment?.let { appointment ->
                     Surface(shape = MaterialTheme.shapes.large) {
                         Column(Modifier.fillMaxWidth().padding(PitGoSpacing.Medium)) {
-                            Text(state.dispatch.serviceName, style = MaterialTheme.typography.titleMedium)
+                            if (!state.isPitTec || state.summaryExpanded) Text(state.dispatch.serviceName, style = MaterialTheme.typography.titleMedium)
                             if (state.isPitTec) {
                                 Text(
                                     stringResource(
@@ -176,41 +195,53 @@ private fun AppointmentTrackingScreen(
                                     ),
                                 )
                                 PitTecDistanceLine(state)
-                                val money = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR"))
-                                if (!isClient) {
-                                    appointment.serviceAmount?.let { Text(stringResource(R.string.pittec_provider_service_value, money.format(it))) }
-                                    appointment.distanceChargeAmount?.let { Text(stringResource(R.string.pittec_provider_distance_value, money.format(it))) }
-                                }
-                                Text(stringResource(if (isClient) R.string.pittec_customer_total_value else R.string.pittec_provider_total_value, money.format(appointment.quotedPrice)))
-                            } else {
-                                Text(stringResource(
-                                    R.string.mobile_dispatch_price_frozen,
-                                    NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")).format(appointment.quotedPrice),
-                                ))
-                                Text(appointment.status.name)
-                            }
-                            if (state.actionFailed) Text(stringResource(R.string.pittec_action_retry), color = MaterialTheme.colorScheme.error)
-                            if (isClient && state.isPitTec && appointment.status == MobileAppointmentStatus.IN_PROGRESS) {
-                                if (appointment.clientStartAcknowledgedAt == null) {
-                                    Button(onClick = onAcknowledgeStart, enabled = !state.arriving) {
-                                        Text(stringResource(R.string.pittec_acknowledge_start))
+                                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                    TextButton(onClick = onToggleSummary) {
+                                        Text(stringResource(if (state.summaryExpanded) R.string.tracking_collapse_summary else R.string.tracking_expand_summary))
                                     }
-                                } else Text(stringResource(R.string.pittec_start_acknowledged))
+                                    TextButton(onClick = { onFollowChanged(true) }) {
+                                        Text(stringResource(R.string.tracking_recenter))
+                                    }
+                                }
                             }
-                            if (!isClient && state.isPitTec) {
-                                PitTecProviderActions(state, onArrive, onComplete)
-                            }
-                            TextButton(onClick = { showCancel = true }, enabled = !state.cancelling && state.data != TrackingDataState.Ended) {
-                                Text(stringResource(
-                                    if (state.isPitTec) R.string.pittec_cancel_service
-                                    else R.string.mobile_dispatch_cancel,
-                                ))
+                            if (!state.isPitTec || state.summaryExpanded) {
+                                if (state.isPitTec) {
+                                    val money = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR"))
+                                    if (!isClient) {
+                                        appointment.serviceAmount?.let { Text(stringResource(R.string.pittec_provider_service_value, money.format(it))) }
+                                        appointment.distanceChargeAmount?.let { Text(stringResource(R.string.pittec_provider_distance_value, money.format(it))) }
+                                    }
+                                    Text(stringResource(if (isClient) R.string.pittec_customer_total_value else R.string.pittec_provider_total_value, money.format(appointment.quotedPrice)))
+                                } else {
+                                    Text(stringResource(
+                                        R.string.mobile_dispatch_price_frozen,
+                                        NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")).format(appointment.quotedPrice),
+                                    ))
+                                    Text(appointment.status.name)
+                                }
+                                if (state.actionFailed) Text(stringResource(R.string.pittec_action_retry), color = MaterialTheme.colorScheme.error)
+                                if (isClient && state.isPitTec && appointment.status == MobileAppointmentStatus.IN_PROGRESS) {
+                                    if (appointment.clientStartAcknowledgedAt == null) {
+                                        Button(onClick = onAcknowledgeStart, enabled = !state.arriving) {
+                                            Text(stringResource(R.string.pittec_acknowledge_start))
+                                        }
+                                    } else Text(stringResource(R.string.pittec_start_acknowledged))
+                                }
+                                if (!isClient && state.isPitTec) {
+                                    PitTecProviderActions(state, onArrive, onComplete)
+                                }
+                                if (!state.isPitTec || MobileDispatchAction.CANCEL in state.dispatch.allowedActions) TextButton(onClick = { showCancel = true }, enabled = !state.cancelling && state.data != TrackingDataState.Ended) {
+                                    Text(stringResource(
+                                        if (state.isPitTec) R.string.pittec_cancel_service
+                                        else R.string.mobile_dispatch_cancel,
+                                    ))
+                                }
                             }
                         }
                     }
                 }
                 MapSurfaceWarning(state, onRetryStyle)
-                if (location != null) {
+                if (location != null && !state.isPitTec) {
                     Surface(
                         shape = MaterialTheme.shapes.large,
                         tonalElevation = PitGoSpacing.ExtraSmall,
@@ -236,7 +267,8 @@ private fun AppointmentTrackingScreen(
                 }
             }
 
-            if (location != null || hasClientLocation) MapAttribution(Modifier.align(Alignment.BottomStart))
+            if (location != null || hasClientLocation) MapAttribution(Modifier.align(Alignment.BottomStart)
+                .padding(bottom = if (state.isPitTec) summaryPadding else 0.dp))
         }
     }
     if (showCancel) AlertDialog(

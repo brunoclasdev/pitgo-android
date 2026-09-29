@@ -93,6 +93,7 @@ data class AppointmentTrackingUiState(
     val viewport: MapViewport = MapViewport(MapCoordinate(-14.235, -51.9253), 4.0),
     val cameraCommand: MapViewportCommand? = null,
     val followProvider: Boolean = true,
+    val summaryExpanded: Boolean = false,
     val styleReloadRevision: Long = 0L,
     val dispatch: MobileDispatchSnapshot? = null,
     val cancelling: Boolean = false,
