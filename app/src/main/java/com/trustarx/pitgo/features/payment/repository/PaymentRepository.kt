@@ -49,8 +49,8 @@ import kotlinx.serialization.json.put
  * `createPayment`, and the private-Realtime-channel pattern from
  * [com.trustarx.pitgo.features.mobiledispatch.repository.MobileDispatchRepository] for [observe].
  */
-class PaymentRepository(private val client: SupabaseClient) {
-    suspend fun recoverable(): PaymentEvent = try {
+class PaymentRepository(private val client: SupabaseClient) : PaymentGateway {
+    override suspend fun recoverable(): PaymentEvent = try {
         val dto = withTimeout(RPC_TIMEOUT_MILLIS) {
             client.postgrest.rpc("get_recoverable_payment").decodeAs<PaymentStatusProbeDto>()
         }
@@ -61,14 +61,14 @@ class PaymentRepository(private val client: SupabaseClient) {
     } catch (cancel: CancellationException) { throw cancel
     } catch (error: Throwable) { PaymentEvent.Failure(classifyRpcError(error)) }
 
-    suspend fun history(before: Payment? = null): List<Payment> = withTimeout(RPC_TIMEOUT_MILLIS) {
+    override suspend fun history(before: Payment?): List<Payment> = withTimeout(RPC_TIMEOUT_MILLIS) {
         val rows = client.postgrest.rpc("get_payment_history", buildJsonObject {
             put("p_limit", 20)
             before?.createdAt?.let { put("p_before", it); put("p_before_id", before.id) }
         }).decodeList<PaymentStatusProbeDto>()
         rows.map { requireNotNull(it.toDomainOrNull()) }
     }
-    suspend fun createPayment(command: CreatePaymentCommand): CreatePaymentResult {
+    override suspend fun createPayment(command: CreatePaymentCommand): CreatePaymentResult {
         val pitTecContextValid = command.dispatchKind.name != "PITTEC_AUTO_SEQUENTIAL" ||
             (command.appointmentId?.isUuid() == true && (command.quoteVersion ?: 0) > 0)
         if (!command.requestId.isUuid() || command.amount.signum() <= 0 || !pitTecContextValid) {
@@ -111,7 +111,7 @@ class PaymentRepository(private val client: SupabaseClient) {
         }
     }
 
-    suspend fun cancel(paymentId: String): CreatePaymentResult {
+    override suspend fun cancel(paymentId: String): CreatePaymentResult {
         if (!paymentId.isUuid()) return CreatePaymentResult.Failure(PaymentFailure.CONTRACT)
         return try {
             val response = withTimeout(RPC_TIMEOUT_MILLIS) {
@@ -126,7 +126,7 @@ class PaymentRepository(private val client: SupabaseClient) {
     }
 
     /** Optional scheduling command; backend cancellation already schedules autonomous refunds. */
-    suspend fun refund(paymentId: String): RefundResult {
+    override suspend fun refund(paymentId: String): RefundResult {
         if (!paymentId.isUuid()) return RefundResult.Failure(PaymentFailure.CONTRACT)
         return try {
             val response = withTimeout(REFUND_TIMEOUT_MILLIS) {
@@ -150,7 +150,7 @@ class PaymentRepository(private val client: SupabaseClient) {
     }
 
     /** One-shot fallback used when the Realtime channel drops or hasn't emitted yet (10 s rule). */
-    suspend fun quoteTotal(requestId: String, appointmentId: String?, quoteVersion: Long?): java.math.BigDecimal? {
+    override suspend fun quoteTotal(requestId: String, appointmentId: String?, quoteVersion: Long?): java.math.BigDecimal? {
         return try {
             val envelope = withTimeout(RPC_TIMEOUT_MILLIS) {
                 client.postgrest.rpc("get_my_active_pittec_dispatch").decodeAs<com.trustarx.pitgo.features.pittec.data.PitTecDispatchEnvelopeDto>()
@@ -164,7 +164,7 @@ class PaymentRepository(private val client: SupabaseClient) {
         catch (_: Exception) { null }
     }
 
-    suspend fun getStatus(requestId: String): PaymentEvent {
+    override suspend fun getStatus(requestId: String): PaymentEvent {
         if (!requestId.isUuid()) return PaymentEvent.Failure(PaymentFailure.CONTRACT)
         return try {
             val dto = withTimeout(RPC_TIMEOUT_MILLIS) {
@@ -185,7 +185,7 @@ class PaymentRepository(private val client: SupabaseClient) {
     }
 
     /** Private `payment:<requestId>` broadcast; emits on every status change, self-heals via [getStatus]. */
-    fun observe(requestId: String): Flow<PaymentEvent> = channelFlow {
+    override fun observe(requestId: String): Flow<PaymentEvent> = channelFlow {
         if (!requestId.isUuid()) {
             send(PaymentEvent.Failure(PaymentFailure.CONTRACT))
             return@channelFlow
@@ -226,7 +226,7 @@ class PaymentRepository(private val client: SupabaseClient) {
             // Realtime is an optimization. A private-channel authorization failure must not
             // turn a valid payment into a generic service-unavailable screen: the polling job
             // above continues calling get_payment_status every 10 seconds.
-            Log.w("PaymentRepository", "payment Realtime unavailable; using status polling", error)
+            Log.w("PaymentRepository", "payment Realtime unavailable; using status polling")
             awaitCancellation()
         } finally {
             withContext(NonCancellable) { runCatching { client.realtime.removeChannel(channel) } }

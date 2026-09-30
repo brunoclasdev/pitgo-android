@@ -36,6 +36,7 @@ sealed interface SessionLoginResult {
 class SessionRepository(
     private val authDataSource: SupabaseAuthDataSource,
     private val accountRepository: AccountContextRepository,
+    private val beforeInitialize: suspend () -> Unit = {},
     private val beforeSignOut: suspend (ProviderSnapshot?) -> Unit = {},
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -69,6 +70,7 @@ class SessionRepository(
     suspend fun ensureInitialized() = bootstrapMutex.withLock {
         if (initialized) return@withLock
         _state.value = AppSessionState.Initializing
+        beforeInitialize()
         authDataSource.awaitInitialization()
         if (authDataSource.currentIdentityOrNull() == null) _state.value = AppSessionState.Unauthenticated()
         else verifyAndLoad()

@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 data class ProfileUiState(
+    val environmentLabel: String = com.trustarx.pitgo.core.environment.EnvironmentDiagnostics.label,
     val address: ClientAddress? = null,
     val addressLoading: Boolean = true,
     val appearanceMode: AppearanceMode = AppearanceMode.SYSTEM,

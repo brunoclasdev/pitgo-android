@@ -69,6 +69,7 @@ fun PaymentMethodsRoute(
     PaymentMethodsScreen(
         uiState = uiState,
         profile = profile,
+        simulated = viewModel.simulated,
         onBack = onBack,
         onCardTokenGenerated = viewModel::registerCard,
         onDismissRegisterFailure = viewModel::dismissRegisterFailure,
@@ -82,6 +83,7 @@ fun PaymentMethodsRoute(
 private fun PaymentMethodsScreen(
     uiState: PaymentMethodsUiState,
     profile: Profile,
+    simulated: Boolean,
     onBack: () -> Unit,
     onCardTokenGenerated: (String) -> Unit,
     onDismissRegisterFailure: () -> Unit,
@@ -125,15 +127,15 @@ private fun PaymentMethodsScreen(
                     Button(onClick = onRetryLoad) { Text(stringResource(R.string.payment_retry)) }
                 }
                 is PaymentMethodsUiState.Listing -> {
-                    CardsList(uiState.cards, onRemove, null) { showRegistrationForm = true }
+                    CardsList(uiState.cards, onRemove, null) { if (simulated) onCardTokenGenerated("simulated") else showRegistrationForm = true }
                     if (uiState.removalFailed) Text(stringResource(R.string.payment_card_remove_error))
                 }
                 is PaymentMethodsUiState.Removing -> CardsList(uiState.cards, onRemove, uiState.removingId) {
-                    showRegistrationForm = true
+                    if (simulated) onCardTokenGenerated("simulated") else showRegistrationForm = true
                 }
                 PaymentMethodsUiState.Registering -> CircularProgressIndicator()
                 is PaymentMethodsUiState.RegisterFailed -> {
-                    CardsList(uiState.cards, onRemove, null) { showRegistrationForm = true }
+                    CardsList(uiState.cards, onRemove, null) { if (simulated) onCardTokenGenerated("simulated") else showRegistrationForm = true }
                     Text(stringResource(R.string.payment_methods_register_failed_title))
                     Text(
                         registerFailureMessage(uiState.reason),
@@ -142,7 +144,7 @@ private fun PaymentMethodsScreen(
                     TextButton(onClick = onDismissRegisterFailure) { Text(stringResource(R.string.action_cancel)) }
                 }
             }
-            if (showRegistrationForm) {
+            if (showRegistrationForm && !simulated) {
                 CardRegistrationForm(
                     profile = profile,
                     onCancel = { showRegistrationForm = false },

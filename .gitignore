@@ -303,3 +303,5 @@ fabric.properties
 # Edge-function tooling
 node_modules/
 dist/
+config/*.properties
+config/*.secrets.env

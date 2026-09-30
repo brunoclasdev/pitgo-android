@@ -106,7 +106,7 @@ fun PitTecProviderDashboardRoute(
 
     val activeAppointmentId = (incomingState as? ProviderIncomingUiState.Active)
         ?.snapshot?.appointment
-        ?.takeIf { it.status in setOf(MobileAppointmentStatus.ACCEPTED, MobileAppointmentStatus.IN_PROGRESS) }
+        ?.takeIf { it.status in setOf(MobileAppointmentStatus.ACCEPTED, MobileAppointmentStatus.IN_PROGRESS, MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION) }
         ?.id
     LaunchedEffect(activeAppointmentId) { activeAppointmentId?.let(onOpenTracking) }
 

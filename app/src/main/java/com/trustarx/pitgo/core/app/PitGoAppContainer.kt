@@ -1,6 +1,7 @@
 package com.trustarx.pitgo.core.app
 
 import android.content.Context
+import io.github.jan.supabase.auth.auth
 import com.trustarx.pitgo.core.account.repository.AccountRepository
 import com.trustarx.pitgo.core.account.repository.AccountContextRepository
 import com.trustarx.pitgo.core.auth.data.SupabaseAuthDataSource
@@ -59,7 +60,10 @@ class PitGoAppContainer(context: Context) {
     val mobileDispatchRepository = MobileDispatchRepository(supabase)
     val pitTecRepository = PitTecRepository(supabase)
     val pitTecRouteRepository = PitTecRouteRepository(supabase)
-    val paymentRepository = PaymentRepository(supabase)
+    val simulatedPitTecFlowRepository = com.trustarx.pitgo.features.pittec.repository.SimulatedPitTecFlowRepository()
+    val paymentRepository: com.trustarx.pitgo.features.payment.repository.PaymentGateway =
+        if (com.trustarx.pitgo.core.environment.EnvironmentConfig.simulated) com.trustarx.pitgo.features.payment.repository.SimulatedPaymentGateway()
+        else com.trustarx.pitgo.features.payment.repository.IntegratedPaymentGateway(PaymentRepository(supabase))
     val savedCardRepository = SavedCardRepository(supabase)
     val clientAddressRepository = ClientAddressRepository(supabase)
     val deviceLocationRepository = DeviceLocationRepository(AndroidLocationDataSource(context))
@@ -68,6 +72,18 @@ class PitGoAppContainer(context: Context) {
     val sessionRepository = SessionRepository(
         authDataSource,
         accountContextRepository,
+        beforeInitialize = {
+            supabase.auth.awaitInitialization()
+            com.trustarx.pitgo.core.environment.EnvironmentStateRepository(context).validate {
+                supabase.auth.sessionManager.deleteSession()
+                context.stopService(android.content.Intent(context, com.trustarx.pitgo.features.providertracking.service.ProviderLocationTrackingService::class.java))
+                providerTrackingPreferences.clear()
+                onboardingRepository.clear()
+                deviceLocationRepository.clearAllVisibleUses()
+                androidx.core.app.NotificationManagerCompat.from(context).cancelAll()
+            }
+            supabase.auth.loadFromStorage()
+        },
         beforeSignOut = { provider ->
             if (provider != null) {
                 providerDashboardRepository.update(

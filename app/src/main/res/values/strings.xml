@@ -536,6 +536,10 @@
     <string name="pittec_arrived">PitTec chegou</string>
     <string name="pittec_arrive">CHEGUEI</string>
     <string name="pittec_complete">CONCLUIR ATENDIMENTO</string>
+    <string name="pittec_completion_confirmation_title">O atendimento foi encerrado pelo PitTec</string>
+    <string name="pittec_completion_confirmation_message">Confirme se o serviço foi realizado corretamente para finalizar o atendimento.</string>
+    <string name="pittec_completion_confirmation_action">SIM, DEU TUDO CERTO</string>
+    <string name="pittec_completion_waiting_client">Aguardando o cliente confirmar a conclusão do atendimento.</string>
     <string name="pittec_candidate_found_title">PitTec encontrado</string>
     <string name="pittec_candidate_distance">A %1$s de distância</string>
     <string name="pittec_candidate_confirm">Confirmar</string>
@@ -690,4 +694,13 @@
     <string name="tracking_recenter">Recentralizar mapa</string>
     <string name="tracking_summary_expanded">Detalhes expandidos</string>
     <string name="tracking_summary_collapsed">Resumo recolhido</string>
+    <string name="environment_dev_payment">Dev • pagamento simulado, sem cobrança</string>
+    <string name="environment_simulate_approved">Aprovar</string>
+    <string name="environment_simulate_rejected">Recusar</string>
+    <string name="environment_simulate_expired">Expirar</string>
+    <string name="environment_simulate_failure">Simular falha</string>
+    <string name="environment_dev_appointment">Dev • atendimento simulado</string>
+    <string name="environment_simulate_advance">Avançar etapa</string>
+    <string name="environment_simulate_cancel">Cancelar / voltar</string>
+    <string name="environment_simulate_complete">Concluir simulação</string>
 </resources>

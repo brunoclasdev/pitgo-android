@@ -29,7 +29,13 @@ import com.trustarx.pitgo.features.paymentmethods.model.CardContextResult
 
 /** Cadastro opcional de cartão (FR-004/FR-006/FR-007) — área dedicada, sem checkout inline. */
 class SavedCardRepository(private val client: SupabaseClient) {
-    suspend fun tokenizationContext(savedCardId: String): CardContextResult = try {
+    val simulated = com.trustarx.pitgo.core.environment.EnvironmentConfig.simulated
+    private var simulatedCards = listOf(com.trustarx.pitgo.features.paymentmethods.model.SavedCard(java.util.UUID.randomUUID().toString(), "Simulação", "0000"))
+    suspend fun tokenizationContext(savedCardId: String): CardContextResult {
+        if (simulated) return CardContextResult.Failure(SavedCardFailure.CONTRACT)
+        return integratedTokenizationContext(savedCardId)
+    }
+    private suspend fun integratedTokenizationContext(savedCardId: String): CardContextResult = try {
         val dto = withTimeout(RPC_TIMEOUT_MILLIS) {
             client.postgrest.rpc("get_saved_card_tokenization_context", buildJsonObject {
                 put("p_saved_card_id", savedCardId)
@@ -41,7 +47,11 @@ class SavedCardRepository(private val client: SupabaseClient) {
     } catch (cancel: CancellationException) { throw cancel
     } catch (error: Throwable) { CardContextResult.Failure(classifyRpcError(error)) }
 
-    suspend fun list(): SavedCardsResult = try {
+    suspend fun list(): SavedCardsResult {
+        if (simulated) return SavedCardsResult.Success(simulatedCards)
+        return listIntegrated()
+    }
+    private suspend fun listIntegrated(): SavedCardsResult = try {
         val rows = withTimeout(RPC_TIMEOUT_MILLIS) {
             client.postgrest.rpc("list_saved_cards").decodeList<SavedCardDto>()
         }
@@ -55,6 +65,11 @@ class SavedCardRepository(private val client: SupabaseClient) {
     }
 
     suspend fun save(cardToken: String): SaveCardResult {
+        if (simulated) {
+            val card = com.trustarx.pitgo.features.paymentmethods.model.SavedCard(java.util.UUID.randomUUID().toString(), "Simulação", "0000")
+            simulatedCards = simulatedCards + card
+            return SaveCardResult.Success(card)
+        }
         if (cardToken.isBlank()) return SaveCardResult.Failure(SavedCardFailure.CONTRACT)
         return try {
             val response = withTimeout(RPC_TIMEOUT_MILLIS) {
@@ -78,6 +93,7 @@ class SavedCardRepository(private val client: SupabaseClient) {
     }
 
     suspend fun remove(savedCardId: String): RemoveCardResult {
+        if (simulated) { simulatedCards = simulatedCards.filterNot { it.id == savedCardId }; return RemoveCardResult.Success }
         if (!savedCardId.isUuid()) return RemoveCardResult.Failure(SavedCardFailure.CONTRACT)
         return try {
             withTimeout(RPC_TIMEOUT_MILLIS) {
@@ -102,11 +118,7 @@ class SavedCardRepository(private val client: SupabaseClient) {
     private suspend fun classifyEdgeFunctionError(error: RestException): SavedCardFailure {
         val body = runCatching { error.response.body<EdgeFunctionErrorDto>() }.getOrNull()
         if (error.statusCode >= 500) {
-            Log.e(
-                "SavedCardRepository",
-                "mp-save-card failed: http=${error.statusCode}, code=${body?.code}, " +
-                    "stage=${body?.stage}, providerStatus=${body?.providerStatus}",
-            )
+            Log.e("SavedCardRepository", "payment method operation failed: http=${error.statusCode}")
         }
         return when {
             error.statusCode == 401 -> SavedCardFailure.SESSION_EXPIRED

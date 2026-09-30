@@ -32,7 +32,7 @@ import com.trustarx.pitgo.features.pittec.model.PitTecUiState
 import com.trustarx.pitgo.features.pittec.repository.PitTecRepository
 import com.trustarx.pitgo.features.payment.model.PaymentEvent
 import com.trustarx.pitgo.features.payment.model.PaymentStatus
-import com.trustarx.pitgo.features.payment.repository.PaymentRepository
+import com.trustarx.pitgo.features.payment.repository.PaymentGateway
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,7 +48,7 @@ class PitTecViewModel(
     private val repository: PitTecRepository,
     private val locationRepository: DeviceLocationRepository,
     private val connectivityObserver: ConnectivityObserver,
-    private val paymentRepository: PaymentRepository? = null,
+    private val paymentRepository: PaymentGateway? = null,
 ) : ViewModel() {
     private val _state = MutableStateFlow<PitTecUiState>(
         if (!isUuid(serviceId)) PitTecUiState.InvalidService
@@ -347,6 +347,7 @@ class PitTecViewModel(
                     snapshot.trackingAuthorized && snapshot.appointment?.status in setOf(
                         PitTecAppointmentStatus.ACCEPTED,
                         PitTecAppointmentStatus.IN_PROGRESS,
+                        PitTecAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION,
                     ) -> PitTecDispatchPhase.TrackingReady(snapshot)
                     snapshot.status == PitTecDispatchStatus.AWAITING_CLIENT_CONFIRMATION ||
                         snapshot.appointment?.status == PitTecAppointmentStatus.AWAITING_CLIENT_CONFIRMATION ->
@@ -477,7 +478,7 @@ class PitTecViewModel(
             repository: PitTecRepository,
             locationRepository: DeviceLocationRepository,
             connectivityObserver: ConnectivityObserver,
-            paymentRepository: PaymentRepository? = null,
+            paymentRepository: PaymentGateway? = null,
         ) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PitTecViewModel(

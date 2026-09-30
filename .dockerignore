@@ -6,6 +6,8 @@
 *.log*
 .env*
 local.properties
+config/*.properties
+config/*.secrets.env
 Dockerfile*
 .dockerignore
 coverage/

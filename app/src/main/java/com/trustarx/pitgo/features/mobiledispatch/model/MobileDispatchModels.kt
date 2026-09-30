@@ -11,7 +11,7 @@ import java.math.BigDecimal
 
 enum class MobileDispatchStatus {
     SEARCHING, OPTION_FOUND, AWAITING_PROVIDER, AWAITING_CLIENT_CONFIRMATION, AWAITING_PAYMENT,
-    ACCEPTED, IN_PROGRESS,
+    ACCEPTED, IN_PROGRESS, AWAITING_CLIENT_COMPLETION_CONFIRMATION,
     CANCELLED, COMPLETED, EXHAUSTED,
 }
 
@@ -37,12 +37,13 @@ data class PitTecOfferSummary(
 
 enum class MobileAppointmentStatus {
     PENDING, AWAITING_CLIENT_CONFIRMATION, AWAITING_PAYMENT,
-    ACCEPTED, IN_PROGRESS, COMPLETED, CANCELLED, PROVIDER_REJECTED, EXPIRED,
+    ACCEPTED, IN_PROGRESS, AWAITING_CLIENT_COMPLETION_CONFIRMATION,
+    COMPLETED, CANCELLED, PROVIDER_REJECTED, EXPIRED,
 }
 
 enum class MobileDispatchAction {
     NEXT, REQUEST, CANCEL, ACCEPT, DECLINE, CONFIRM_QUOTE, DECLINE_QUOTE,
-    OPEN_PAYMENT, OPEN_TRACKING, START, ARRIVE, COMPLETE,
+    OPEN_PAYMENT, OPEN_TRACKING, START, ARRIVE, COMPLETE, CONFIRM_COMPLETION,
 }
 
 data class MobileCandidate(
@@ -71,6 +72,8 @@ data class MobileAppointment(
     val quoteVersion: Long = 1,
     val clientConfirmationDeadlineEpochMillis: Long? = null,
     val clientConfirmedAtEpochMillis: Long? = null,
+    val completionRequestedAtEpochMillis: Long? = null,
+    val clientCompletionConfirmedAtEpochMillis: Long? = null,
     val arrivedAt: String? = null,
     val serviceStartedAt: String? = null,
     val clientStartAcknowledgedAt: String? = null,

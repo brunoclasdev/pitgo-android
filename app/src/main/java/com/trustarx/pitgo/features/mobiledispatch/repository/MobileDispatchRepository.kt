@@ -98,6 +98,10 @@ class MobileDispatchRepository(private val client: SupabaseClient) {
         "complete_mobile_appointment", appointmentId, revision,
     )
 
+    suspend fun confirmCompletion(appointmentId: String, revision: Long) = appointmentCommand(
+        "confirm_pittec_completion", appointmentId, revision,
+    )
+
     suspend fun cancel(appointmentId: String, reason: String, revision: Long): MobileDispatchResult {
         if (!appointmentId.isUuid() || reason.isBlank() || revision <= 0) return contractFailure()
         return call("cancel_mobile_appointment", buildJsonObject {

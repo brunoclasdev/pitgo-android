@@ -149,6 +149,8 @@ internal data class MobileAppointmentDto(
     @SerialName("quote_version") val quoteVersion: Long = 1,
     @SerialName("client_confirmation_deadline") val clientConfirmationDeadline: String? = null,
     @SerialName("client_confirmed_at") val clientConfirmedAt: String? = null,
+    @SerialName("completion_requested_at") val completionRequestedAt: String? = null,
+    @SerialName("client_completion_confirmed_at") val clientCompletionConfirmedAt: String? = null,
 ) {
     fun toDomain() = MobileAppointment(
         id = id,
@@ -167,6 +169,10 @@ internal data class MobileAppointmentDto(
         clientConfirmationDeadlineEpochMillis = clientConfirmationDeadline
             ?.let { parseSupabaseInstant(it).toEpochMilli() },
         clientConfirmedAtEpochMillis = clientConfirmedAt
+            ?.let { parseSupabaseInstant(it).toEpochMilli() },
+        completionRequestedAtEpochMillis = completionRequestedAt
+            ?.let { parseSupabaseInstant(it).toEpochMilli() },
+        clientCompletionConfirmedAtEpochMillis = clientCompletionConfirmedAt
             ?.let { parseSupabaseInstant(it).toEpochMilli() },
     )
 }

@@ -253,7 +253,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         when (sessionState) {
             is AppSessionState.Authenticated.Client -> {
                 val appointment = active.snapshot.appointment
-                if (appointment != null && appointment.status in setOf(MobileAppointmentStatus.ACCEPTED, MobileAppointmentStatus.IN_PROGRESS)) {
+                if (appointment != null && appointment.status in setOf(MobileAppointmentStatus.ACCEPTED, MobileAppointmentStatus.IN_PROGRESS, MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION)) {
                     navController.navigate(PitGoRoutes.appointmentTracking(appointment.id)) { launchSingleTop = true }
                 } else navController.navigate(PitGoRoutes.mobileDispatch(active.snapshot.searchId)) { launchSingleTop = true }
             }
@@ -285,7 +285,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         if (target == lastPitTecAutoNavigated) return@LaunchedEffect
         lastPitTecAutoNavigated = target
         if (appointment != null && appointment.status in
-            setOf(PitTecAppointmentStatus.ACCEPTED, PitTecAppointmentStatus.IN_PROGRESS)
+            setOf(PitTecAppointmentStatus.ACCEPTED, PitTecAppointmentStatus.IN_PROGRESS, PitTecAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION)
         ) {
             navController.navigate(PitGoRoutes.appointmentTracking(appointment.id)) { launchSingleTop = true }
         } else if (active.snapshot.status in
@@ -742,6 +742,11 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     viewModel = trackingViewModel,
                     isClient = isClientSession,
                     onBack = { navController.popBackStack() },
+                    onFinished = {
+                        navController.navigateRoot(
+                            if (isClientSession) PitGoRoutes.Home else PitGoRoutes.ProviderDashboard,
+                        )
+                    },
                     onSessionExpired = sessionViewModel::refresh,
                 )
             }
@@ -797,7 +802,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         container.serviceCatalogRepository, container.paymentRepository, container.savedCardRepository,
                     ),
                 )
-                val pitTecViewModel = if (dispatchKind == "PITTEC_AUTO_SEQUENTIAL") {
+                val pitTecViewModel = if (!container.paymentRepository.simulated && dispatchKind == "PITTEC_AUTO_SEQUENTIAL") {
                     navController.previousBackStackEntry?.takeIf { it.destination.route == PitGoRoutes.PitTec }?.let { pitTecEntry ->
                         viewModel<PitTecViewModel>(
                             viewModelStoreOwner = pitTecEntry,
@@ -819,7 +824,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         navController.navigate(PitGoRoutes.PaymentMethods) { launchSingleTop = true }
                     },
                     onCancel = {
-                        pitTecViewModel?.cancelSearch()
+                        if (!container.paymentRepository.simulated) pitTecViewModel?.cancelSearch()
                         navController.popBackStack()
                     },
                     onApproved = { requestId ->
@@ -827,7 +832,9 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         // andamento (requestId = search_id, ver PitTecRoute.onNeedsPayment) — só
                         // volta para a mesma tela, que já detecta a aprovação sozinha. Guincho
                         // móvel continua indo para o despacho com o requestId recém-gerado.
-                        if (dispatchKind == "PITTEC_AUTO_SEQUENTIAL") {
+                        if (container.paymentRepository.simulated) {
+                            navController.navigate(PitGoRoutes.simulatedPitTec(requestId)) { popUpTo(PitGoRoutes.Home); launchSingleTop = true }
+                        } else if (dispatchKind == "PITTEC_AUTO_SEQUENTIAL") {
                             if (navController.previousBackStackEntry?.destination?.route == PitGoRoutes.PitTec) navController.popBackStack()
                             else navController.navigate(PitGoRoutes.pitTec(serviceId)) { launchSingleTop = true }
                         } else {
@@ -849,6 +856,14 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         ) { entry ->
             val serviceId = entry.arguments?.getString(PitGoRoutes.PitTecServiceArg).orEmpty()
             if (sessionState is AppSessionState.Authenticated.Client && serviceId.isNotBlank()) {
+                if (container.paymentRepository.simulated) {
+                    androidx.compose.runtime.LaunchedEffect(serviceId) {
+                        navController.navigate(PitGoRoutes.payment(serviceId, "PITTEC_AUTO_SEQUENTIAL", java.util.UUID.randomUUID().toString(), java.util.UUID.randomUUID().toString(), 1, "1.00")) {
+                            popUpTo(PitGoRoutes.PitTec) { inclusive = true }
+                        }
+                    }
+                    return@composable
+                }
                 val pitTecViewModel: PitTecViewModel = viewModel(
                     key = serviceId,
                     factory = PitTecViewModel.factory(
@@ -873,6 +888,13 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     onAccepted = { navController.navigate(PitGoRoutes.appointmentTracking(it)) { launchSingleTop = true } },
                     onSessionExpired = sessionViewModel::refresh,
                 )
+            }
+        }
+
+        composable(PitGoRoutes.SimulatedPitTec, arguments = listOf(navArgument(PitGoRoutes.PaymentRequestIdArg) { type = NavType.StringType })) {
+            if (container.paymentRepository.simulated && sessionState is AppSessionState.Authenticated.Client) {
+                val simulationViewModel: com.trustarx.pitgo.features.pittec.viewmodel.SimulatedPitTecFlowViewModel = viewModel(factory = com.trustarx.pitgo.features.pittec.viewmodel.SimulatedPitTecFlowViewModel.factory(container.simulatedPitTecFlowRepository, container.paymentRepository))
+                com.trustarx.pitgo.features.pittec.ui.SimulatedPitTecFlowScreen(simulationViewModel) { navController.popBackStack() }
             }
         }
 
@@ -921,6 +943,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                 ProviderIncomingRequestRoute(
                     viewModel = incomingViewModel,
                     onBack = { navController.popBackStack() },
+                    onFinished = { navController.navigateRoot(PitGoRoutes.ProviderDashboard) },
                     onSessionExpired = sessionViewModel::refresh,
                     onTrack = { navController.navigate(PitGoRoutes.appointmentTracking(it)) },
                 )

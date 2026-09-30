@@ -1,0 +1,17 @@
+# Copy to dev.properties, homol.properties or prod.properties (ignored by Git).
+# Only public/client-safe configuration belongs here.
+environmentId=dev
+supabaseProjectRef=CHANGE_ME
+supabaseUrl=https://CHANGE_ME.supabase.co
+supabaseKey=CHANGE_ME
+mapStyleUrl=https://CHANGE_ME/style.json
+mapStyleProviderName=CHANGE_ME
+mapStyleAttribution=OpenStreetMap / CHANGE_ME
+mapStyleAttributionUrl=https://CHANGE_ME
+# Required only in homol and prod; public key, never Access Token.
+# mercadoPagoPublicKey=APP_USR-CHANGE_ME
+# Dev uses its own backend; Homol must repeat every public value from Prod
+# except environmentId. Homol/Prod use the same Mercado Pago integration.
+# Backend secrets: configure Dev separately. Homol uses Prod backend secrets.
+# An unsigned release APK cannot be installed; use homolDebug for testing
+# without a release signing key (Android signs it with the debug key).

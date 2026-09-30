@@ -23,6 +23,8 @@ object PitGoRoutes {
     const val PaymentAmountArg = "quotedAmount"
     // (019) Sem requestId de pagamento prévio — a busca do PitTec sempre gera seu próprio id
     // internamente agora; o pagamento acontece depois do aceite, não antes da busca.
+    const val SimulatedPitTec = "simulated-pittec/{$PaymentRequestIdArg}"
+    fun simulatedPitTec(requestId: String) = "simulated-pittec/${Uri.encode(requestId)}"
     const val PitTec = "pittec/{$PitTecServiceArg}"
     const val MobileDispatchServiceArg = "mobileServiceId"
     const val MobileDispatchNew =

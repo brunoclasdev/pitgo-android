@@ -19,7 +19,7 @@ import com.trustarx.pitgo.features.payment.model.PaymentCheckoutUiState
 import com.trustarx.pitgo.features.payment.model.PaymentEvent
 import com.trustarx.pitgo.features.payment.model.PaymentMethod
 import com.trustarx.pitgo.features.payment.model.PaymentStatus
-import com.trustarx.pitgo.features.payment.repository.PaymentRepository
+import com.trustarx.pitgo.features.payment.repository.PaymentGateway
 import com.trustarx.pitgo.features.paymentmethods.model.SavedCard
 import com.trustarx.pitgo.features.paymentmethods.model.SavedCardsResult
 import com.trustarx.pitgo.features.paymentmethods.repository.SavedCardRepository
@@ -42,7 +42,7 @@ import java.util.UUID
 class PaymentCheckoutViewModel(
     private val savedStateHandle: SavedStateHandle,
     private val catalogRepository: ServiceCatalogRepository,
-    private val paymentRepository: PaymentRepository,
+    private val paymentRepository: PaymentGateway,
     private val savedCardRepository: SavedCardRepository,
 ) : ViewModel() {
     private val serviceId = savedStateHandle.get<String>(PitGoRoutes.PaymentServiceArg).orEmpty()
@@ -75,6 +75,15 @@ class PaymentCheckoutViewModel(
     private val _uiState = MutableStateFlow<PaymentCheckoutUiState>(PaymentCheckoutUiState.Loading)
     val uiState: StateFlow<PaymentCheckoutUiState> = _uiState.asStateFlow()
 
+    val simulated = paymentRepository.simulated
+    fun simulate(status: PaymentStatus) {
+        viewModelScope.launch {
+            val event = paymentRepository.simulate(requestId, status)
+            (event as? PaymentEvent.StatusChanged)?.payment?.let(::applyPayment)
+        }
+    }
+    fun simulateFailure() { _uiState.value = PaymentCheckoutUiState.Failure }
+
     init { loadService() }
 
     private fun loadService() {
@@ -97,6 +106,13 @@ class PaymentCheckoutViewModel(
                 }
                 is PaymentEvent.Failure -> { _uiState.value = PaymentCheckoutUiState.Failure; return@launch }
                 PaymentEvent.NotFound -> Unit
+            }
+            if (simulated) {
+                amount = TEST_PAYMENT_AMOUNT
+                paymentOrderAmount = amount
+                savedCards = (savedCardRepository.list() as? SavedCardsResult.Success)?.cards.orEmpty()
+                _uiState.value = PaymentCheckoutUiState.SelectingMethod(amount, savedCards)
+                return@launch
             }
             val service = if (dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) null
                 else (catalogRepository.service(serviceId) as? CatalogItemResult.Success)?.item
@@ -122,6 +138,7 @@ class PaymentCheckoutViewModel(
     fun payWithPix() = createPayment(PaymentMethod.PIX, savedCardId = null)
 
     fun payWithSavedCard(savedCardId: String) {
+        if (simulated) { createPayment(PaymentMethod.SAVED_CARD, savedCardId); return }
         if (_uiState.value !is PaymentCheckoutUiState.SelectingMethod) return
         _uiState.value = PaymentCheckoutUiState.Loading
         viewModelScope.launch {
@@ -301,7 +318,7 @@ class PaymentCheckoutViewModel(
 
         fun factory(
             catalogRepository: ServiceCatalogRepository,
-            paymentRepository: PaymentRepository,
+            paymentRepository: PaymentGateway,
             savedCardRepository: SavedCardRepository,
         ): ViewModelProvider.Factory = viewModelFactory {
             initializer {

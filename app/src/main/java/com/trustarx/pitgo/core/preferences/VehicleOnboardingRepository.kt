@@ -13,6 +13,8 @@ private val Context.vehicleOnboardingDataStore by preferencesDataStore(
 class VehicleOnboardingRepository(context: Context) {
     private val dataStore = context.applicationContext.vehicleOnboardingDataStore
 
+    suspend fun clear() = dataStore.edit { it.clear() }
+
     suspend fun markPending(userId: String) {
         require(userId.isNotBlank())
         dataStore.edit { preferences ->

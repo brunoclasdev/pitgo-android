@@ -1,6 +1,5 @@
 import groovy.json.JsonSlurper
 import org.gradle.api.GradleException
-import org.gradle.api.Project
 import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
@@ -49,19 +48,6 @@ private fun javaStringLiteral(value: String): String = buildString {
         }
     }
     append('"')
-}
-
-private fun Project.environmentProperty(name: String): String? {
-    val gradleProperty = providers.gradleProperty(name)
-    if (gradleProperty.isPresent) return gradleProperty.get()
-
-    val localPropertiesFile = rootProject.layout.projectDirectory.file("local.properties")
-    val localPropertiesText = providers.fileContents(localPropertiesFile).asText.orNull
-        ?: return null
-
-    return runCatching {
-        Properties().apply { load(localPropertiesText.reader()) }.getProperty(name)
-    }.getOrNull()
 }
 
 private fun validateMapStyleConfiguration(
@@ -134,16 +120,14 @@ private fun validateSupabaseConfiguration(
 
     when {
         url.isEmpty() -> errors +=
-            "'supabaseUrl' is required. Provide it through a Gradle project property, " +
-                "ORG_GRADLE_PROJECT_supabaseUrl, or local.properties."
+            "'supabaseUrl' is required in the selected config/<environment>.properties file."
         !isValidSupabaseUrl(url) -> errors +=
             "'supabaseUrl' must be an absolute HTTPS URL with a host and no user-info."
     }
 
     when {
         key.isEmpty() -> errors +=
-            "'supabaseKey' is required. Provide it through a Gradle project property, " +
-                "ORG_GRADLE_PROJECT_supabaseKey, or local.properties."
+            "'supabaseKey' is required in the selected config/<environment>.properties file."
         !isClientSafeSupabaseKey(key) -> errors +=
             "'supabaseKey' must be a publishable key or legacy anon key; " +
                 "secret and service-role keys are forbidden."
@@ -221,19 +205,41 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-private val supabaseConfiguration = validateSupabaseConfiguration(
-    rawUrl = project.environmentProperty("supabaseUrl"),
-    rawKey = project.environmentProperty("supabaseKey"),
-)
-private val mercadoPagoPublicKey = validateMercadoPagoPublicKey(
-    project.environmentProperty("mercadoPagoPublicKey"),
-)
-private val mapStyleConfiguration = validateMapStyleConfiguration(
-    rawUrl = project.environmentProperty("mapStyleUrl"),
-    rawProviderName = project.environmentProperty("mapStyleProviderName"),
-    rawAttribution = project.environmentProperty("mapStyleAttribution"),
-    rawAttributionUrl = project.environmentProperty("mapStyleAttributionUrl"),
-)
+private val environmentNames = listOf("dev", "homol", "prod")
+private val allowedEnvironmentProperties = setOf("environmentId", "supabaseProjectRef", "supabaseUrl", "supabaseKey", "mapStyleUrl", "mapStyleProviderName", "mapStyleAttribution", "mapStyleAttributionUrl", "mercadoPagoPublicKey")
+private fun loadEnvironment(name: String): Properties {
+    val file = rootProject.file("config/$name.properties")
+    if (!file.isFile) throw GradleException("Missing configuration file for $name")
+    val values = Properties().apply { file.reader().use { load(it) } }
+    if (values.stringPropertyNames().any { it !in allowedEnvironmentProperties }) throw GradleException("Unsupported configuration property for $name")
+    if (values.getProperty("environmentId") != name) throw GradleException("Invalid environmentId for $name")
+    val ref = values.getProperty("supabaseProjectRef").orEmpty()
+    val url = values.getProperty("supabaseUrl").orEmpty()
+    if (!Regex("[a-z0-9]{20}").matches(ref) || url != "https://$ref.supabase.co") throw GradleException("Invalid backend identity for $name")
+    validateSupabaseConfiguration(url, values.getProperty("supabaseKey"))
+    validateMapStyleConfiguration(values.getProperty("mapStyleUrl"), values.getProperty("mapStyleProviderName"), values.getProperty("mapStyleAttribution"), values.getProperty("mapStyleAttributionUrl"))
+    if (name != "dev") {
+        val publicKey = validateMercadoPagoPublicKey(values.getProperty("mercadoPagoPublicKey"))
+        if (!publicKey.startsWith("APP_USR-")) throw GradleException("Real Mercado Pago public key required for $name")
+    }
+    return values
+}
+val validateEnvironmentIsolation = tasks.register("validateEnvironmentIsolation") {
+    group = "verification"
+    doLast {
+        val configurations = environmentNames.map { loadEnvironment(it) }
+        for (property in listOf("supabaseProjectRef", "supabaseUrl")) {
+            if (configurations.first().getProperty(property) == configurations.last().getProperty(property)) {
+                throw GradleException("Development backend must differ from production")
+            }
+        }
+        for (property in allowedEnvironmentProperties - "environmentId") {
+            if (configurations[1].getProperty(property) != configurations[2].getProperty(property)) {
+                throw GradleException("Homol must mirror production configuration")
+            }
+        }
+    }
+}
 
 android {
     namespace = "com.trustarx.pitgo"
@@ -246,37 +252,17 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        buildConfigField(
-            "String",
-            "SUPABASE_URL",
-            javaStringLiteral(supabaseConfiguration.url),
-        )
-        buildConfigField(
-            "String",
-            "SUPABASE_KEY",
-            javaStringLiteral(supabaseConfiguration.key),
-        )
-        buildConfigField("String", "MAP_STYLE_URL", javaStringLiteral(mapStyleConfiguration.url))
-        buildConfigField(
-            "String",
-            "MAP_STYLE_PROVIDER_NAME",
-            javaStringLiteral(mapStyleConfiguration.providerName),
-        )
-        buildConfigField(
-            "String",
-            "MAP_STYLE_ATTRIBUTION",
-            javaStringLiteral(mapStyleConfiguration.attribution),
-        )
-        buildConfigField(
-            "String",
-            "MAP_STYLE_ATTRIBUTION_URL",
-            javaStringLiteral(mapStyleConfiguration.attributionUrl),
-        )
-        buildConfigField(
-            "String",
-            "MERCADO_PAGO_PUBLIC_KEY",
-            javaStringLiteral(mercadoPagoPublicKey),
-        )
+    }
+
+    flavorDimensions += "environment"
+    productFlavors {
+        environmentNames.forEach { environment ->
+            create(environment) {
+                dimension = "environment"
+                buildConfigField("String", "ENVIRONMENT_ID", javaStringLiteral(environment))
+                buildConfigField("boolean", "SIMULATED_PAYMENTS", (environment == "dev").toString())
+            }
+        }
     }
 
     buildTypes {
@@ -328,4 +314,26 @@ dependencies {
     implementation(libs.mercadopago.sdk.core.methods)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+}
+
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        val environment = variant.productFlavors.single { it.first == "environment" }.second
+        val configurationFile = rootProject.layout.projectDirectory.file("config/$environment.properties")
+        val values = providers.fileContents(configurationFile).asText.map { loadEnvironment(environment) }
+        val fields = mapOf("SUPABASE_URL" to "supabaseUrl", "SUPABASE_KEY" to "supabaseKey", "SUPABASE_PROJECT_REF" to "supabaseProjectRef", "MAP_STYLE_URL" to "mapStyleUrl", "MAP_STYLE_PROVIDER_NAME" to "mapStyleProviderName", "MAP_STYLE_ATTRIBUTION" to "mapStyleAttribution", "MAP_STYLE_ATTRIBUTION_URL" to "mapStyleAttributionUrl", "MERCADO_PAGO_PUBLIC_KEY" to "mercadoPagoPublicKey")
+        fields.forEach { (field, property) ->
+            requireNotNull(variant.buildConfigFields).put(field, values.map { configuration ->
+                com.android.build.api.variant.BuildConfigField("String", javaStringLiteral(if (environment == "dev" && property == "mercadoPagoPublicKey") "" else configuration.getProperty(property).orEmpty()), "Public environment configuration")
+            })
+        }
+        tasks.matching {
+            variant.buildType == "release" && it.name in listOf(
+                "assemble${variant.name.replaceFirstChar { it.uppercase() }}",
+                "bundle${variant.name.replaceFirstChar { it.uppercase() }}",
+            )
+        }.configureEach {
+            dependsOn(validateEnvironmentIsolation)
+        }
+    }
 }

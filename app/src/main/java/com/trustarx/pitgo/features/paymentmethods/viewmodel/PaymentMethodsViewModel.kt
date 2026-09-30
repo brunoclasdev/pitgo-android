@@ -16,6 +16,7 @@ import kotlinx.coroutines.launch
 
 /** Área dedicada de formas de pagamento (US2) — cadastro sempre opcional, nunca inline no checkout. */
 class PaymentMethodsViewModel(private val repository: SavedCardRepository) : ViewModel() {
+    val simulated = repository.simulated
     private var cards: List<SavedCard> = emptyList()
     private val _uiState = MutableStateFlow<PaymentMethodsUiState>(PaymentMethodsUiState.Loading)
     val uiState: StateFlow<PaymentMethodsUiState> = _uiState.asStateFlow()

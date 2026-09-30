@@ -71,6 +71,7 @@ fun AppointmentTrackingRoute(
     viewModel: AppointmentTrackingViewModel,
     isClient: Boolean,
     onBack: () -> Unit,
+    onFinished: () -> Unit,
     onSessionExpired: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -78,14 +79,17 @@ fun AppointmentTrackingRoute(
         viewModel.onVisible()
         onStopOrDispose { viewModel.onHidden() }
     }
-    LaunchedEffect(state.data) {
+    LaunchedEffect(state.data, state.dispatch?.appointment?.status) {
         if (state.data is TrackingDataState.SessionExpired) onSessionExpired()
+        val status = state.dispatch?.appointment?.status
+        if (status == MobileAppointmentStatus.COMPLETED) onFinished()
     }
     AppointmentTrackingScreen(
         state = state,
         isClient = isClient,
         styleController = remember { ParticipantMapStyleController() },
         onBack = onBack,
+        onConfirmCompletion = viewModel::confirmCompletion,
         onFollowChanged = viewModel::setFollowProvider,
         onToggleSummary = viewModel::toggleSummary,
         onViewportIdle = viewModel::onViewportIdle,
@@ -105,6 +109,7 @@ private fun AppointmentTrackingScreen(
     isClient: Boolean,
     styleController: ParticipantMapStyleController,
     onBack: () -> Unit,
+    onConfirmCompletion: () -> Unit,
     onFollowChanged: (Boolean) -> Unit,
     onToggleSummary: () -> Unit,
     onViewportIdle: (com.trustarx.pitgo.core.map.model.MapViewport) -> Unit,
@@ -189,6 +194,7 @@ private fun AppointmentTrackingScreen(
                                             appointment.status == MobileAppointmentStatus.COMPLETED -> R.string.pittec_service_finished
                                             appointment.status == MobileAppointmentStatus.CANCELLED -> R.string.pittec_service_cancelled
                                             appointment.status == MobileAppointmentStatus.IN_PROGRESS -> R.string.pittec_service_started
+                                            appointment.status == MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION -> if (isClient) R.string.pittec_completion_confirmation_title else R.string.pittec_completion_waiting_client
                                             appointment.arrivedAt != null -> R.string.pittec_arrived_waiting_start
                                             else -> R.string.pittec_on_the_way
                                         }
@@ -204,7 +210,8 @@ private fun AppointmentTrackingScreen(
                                     }
                                 }
                             }
-                            if (!state.isPitTec || state.summaryExpanded) {
+                            if (!state.isPitTec || state.summaryExpanded ||
+                                appointment.status == MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION) {
                                 if (state.isPitTec) {
                                     val money = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR"))
                                     if (!isClient) {
@@ -226,6 +233,26 @@ private fun AppointmentTrackingScreen(
                                             Text(stringResource(R.string.pittec_acknowledge_start))
                                         }
                                     } else Text(stringResource(R.string.pittec_start_acknowledged))
+                                }
+                                if (isClient && state.isPitTec && appointment.status == MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION) {
+                                    Surface(
+                                        shape = MaterialTheme.shapes.large,
+                                        tonalElevation = PitGoSpacing.Small,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Column(
+                                            Modifier.fillMaxWidth().padding(PitGoSpacing.Medium),
+                                            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
+                                        ) {
+                                            Text(stringResource(R.string.pittec_completion_confirmation_title), style = MaterialTheme.typography.titleMedium)
+                                            Text(stringResource(R.string.pittec_completion_confirmation_message))
+                                            Button(
+                                                onClick = onConfirmCompletion,
+                                                enabled = !state.completing,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            ) { Text(stringResource(R.string.pittec_completion_confirmation_action)) }
+                                        }
+                                    }
                                 }
                                 if (!isClient && state.isPitTec) {
                                     PitTecProviderActions(state, onArrive, onComplete)
@@ -325,6 +352,8 @@ private fun PitTecProviderActions(
             enabled = !state.completing && state.data != TrackingDataState.Ended,
             modifier = Modifier.fillMaxWidth(),
         ) { Text(stringResource(R.string.pittec_complete)) }
+        MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION ->
+            Text(stringResource(R.string.pittec_completion_waiting_client))
         else -> Unit
     }
 }

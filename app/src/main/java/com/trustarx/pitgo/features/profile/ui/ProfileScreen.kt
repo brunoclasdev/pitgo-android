@@ -120,6 +120,7 @@ private fun ProfileScreen(
                 style = MaterialTheme.typography.headlineMedium,
                 modifier = Modifier.semantics { heading() },
             )
+            Text(profileState.environmentLabel)
             Text(account.profile.displayName, style = MaterialTheme.typography.titleLarge)
             Text(account.authEmail, color = MaterialTheme.colorScheme.onSurfaceVariant)
 

@@ -94,6 +94,16 @@ fun PaymentCheckoutRoute(
         }
         return
     }
+    androidx.compose.foundation.layout.Column {
+    if (viewModel.simulated) {
+        Text(stringResource(R.string.environment_dev_payment))
+        if (uiState is PaymentCheckoutUiState.Verifying || uiState is PaymentCheckoutUiState.AwaitingPix || uiState is PaymentCheckoutUiState.AwaitingCardConfirmation) {
+            listOf(com.trustarx.pitgo.features.payment.model.PaymentStatus.APPROVED to R.string.environment_simulate_approved, com.trustarx.pitgo.features.payment.model.PaymentStatus.REJECTED to R.string.environment_simulate_rejected, com.trustarx.pitgo.features.payment.model.PaymentStatus.EXPIRED to R.string.environment_simulate_expired).forEach { (status, label) ->
+                Button(onClick = { viewModel.simulate(status) }) { Text(stringResource(label)) }
+            }
+            Button(onClick = viewModel::simulateFailure) { Text(stringResource(R.string.environment_simulate_failure)) }
+        }
+    }
     PaymentCheckoutScreen(
         uiState = uiState,
         onBack = { viewModel.cancelPayment(onCancel) },
@@ -104,6 +114,7 @@ fun PaymentCheckoutRoute(
         onChooseAnotherMethod = viewModel::chooseAnotherMethod,
         onManagePaymentMethods = onManagePaymentMethods,
     )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

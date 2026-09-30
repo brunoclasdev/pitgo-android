@@ -22,7 +22,7 @@ class HomeViewModel(
     private val sessionRepository: SessionRepository,
     private val catalogRepository: ServiceCatalogRepository,
     private val clientAddressRepository: ClientAddressRepository,
-    private val paymentRepository: com.trustarx.pitgo.features.payment.repository.PaymentRepository,
+    private val paymentRepository: com.trustarx.pitgo.features.payment.repository.PaymentGateway,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
@@ -116,7 +116,7 @@ class HomeViewModel(
             repository: SessionRepository,
             catalogRepository: ServiceCatalogRepository,
             clientAddressRepository: ClientAddressRepository,
-            paymentRepository: com.trustarx.pitgo.features.payment.repository.PaymentRepository,
+            paymentRepository: com.trustarx.pitgo.features.payment.repository.PaymentGateway,
         ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")

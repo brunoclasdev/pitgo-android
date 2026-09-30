@@ -4,14 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.trustarx.pitgo.features.payment.model.PaymentHistoryUiState
-import com.trustarx.pitgo.features.payment.repository.PaymentRepository
+import com.trustarx.pitgo.features.payment.repository.PaymentGateway
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class PaymentHistoryViewModel(private val repository: PaymentRepository) : ViewModel() {
+class PaymentHistoryViewModel(private val repository: PaymentGateway) : ViewModel() {
     private val _state = MutableStateFlow(PaymentHistoryUiState())
     val state = _state.asStateFlow()
     fun load(refresh: Boolean = false) {
@@ -29,7 +29,7 @@ class PaymentHistoryViewModel(private val repository: PaymentRepository) : ViewM
         }
     }
     companion object {
-        fun factory(repository: PaymentRepository) = object : ViewModelProvider.Factory {
+        fun factory(repository: PaymentGateway) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PaymentHistoryViewModel(repository) as T
         }

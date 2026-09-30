@@ -169,13 +169,30 @@ class AppointmentTrackingViewModel(
     fun complete() {
         val appointment = _state.value.dispatch?.appointment ?: return
         if (_state.value.completing) return
-        _state.value = _state.value.copy(completing = true)
+        _state.value = _state.value.copy(completing = true, actionFailed = false)
         viewModelScope.launch {
             when (val result = dispatchRepository.complete(appointment.id, appointment.revision)) {
                 is MobileDispatchResult.Success -> _state.value = _state.value.copy(
                     dispatch = result.snapshot, completing = false,
                 )
-                else -> _state.value = _state.value.copy(completing = false)
+                else -> _state.value = _state.value.copy(completing = false, actionFailed = true)
+            }
+        }
+    }
+
+    /** Client confirmation after the PitTec reports that the service is finished. */
+    fun confirmCompletion() {
+        val appointment = _state.value.dispatch?.appointment ?: return
+        if (!isClient || _state.value.completing ||
+            appointment.status != com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION
+        ) return
+        _state.value = _state.value.copy(completing = true, actionFailed = false)
+        viewModelScope.launch {
+            when (val result = dispatchRepository.confirmCompletion(appointment.id, appointment.revision)) {
+                is MobileDispatchResult.Success -> _state.value = _state.value.copy(
+                    dispatch = result.snapshot, completing = false,
+                )
+                else -> _state.value = _state.value.copy(completing = false, actionFailed = true)
             }
         }
     }

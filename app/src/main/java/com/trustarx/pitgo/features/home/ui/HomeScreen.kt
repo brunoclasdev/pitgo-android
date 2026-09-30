@@ -25,6 +25,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,9 +36,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -50,7 +56,6 @@ import coil3.compose.AsyncImage
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.account.model.Profile
 import com.trustarx.pitgo.core.catalog.model.HomeService
-import com.trustarx.pitgo.core.catalog.model.ServiceDispatchKind
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 import com.trustarx.pitgo.core.ui.BottomItemId
@@ -163,6 +168,25 @@ private fun HomeGrid(
     onOpenGarage: () -> Unit,
     onOpenAddress: () -> Unit,
 ) {
+    val categories = services.groupBy { it.categoryName }.toSortedMap().entries.toList()
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
+    selectedCategory?.let { category ->
+        AlertDialog(
+            onDismissRequest = { selectedCategory = null },
+            title = { Text(category) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    services.filter { it.categoryName == category }.forEach { service ->
+                        TextButton(
+                            onClick = { selectedCategory = null; onServiceClick(service) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(service.name) }
+                    }
+                }
+            },
+            confirmButton = {},
+        )
+    }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 148.dp),
         modifier = Modifier.fillMaxSize(),
@@ -210,8 +234,16 @@ private fun HomeGrid(
                 }
             }
         }
-        items(services, key = { it.id }) { service ->
-            ServiceCard(service = service, onClick = { onServiceClick(service) })
+        items(categories, key = { it.key }) { category ->
+            val categoryServices = category.value
+            val minimumPrice = categoryServices.mapNotNull { it.minimumPrice?.toBigDecimalOrNull() }.minOrNull()
+            ServiceCard(
+                service = categoryServices.first().copy(name = category.key, minimumPrice = minimumPrice?.toPlainString()),
+                onClick = {
+                    if (categoryServices.size == 1) onServiceClick(categoryServices.single())
+                    else selectedCategory = category.key
+                },
+            )
         }
         if (services.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
             Text(
@@ -314,28 +346,18 @@ private fun AddressRow(address: ClientAddress?, onClick: () -> Unit) {
 
 @Composable
 fun ServiceCard(service: HomeService, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val enabled = service.dispatchKind == ServiceDispatchKind.PITTEC_AUTO_SEQUENTIAL
     PitGoOutlinedCard(
-        onClick = onClick.takeIf { enabled },
-        modifier = modifier
-            .sizeIn(minHeight = PitGoSize.MinimumTouchTarget)
-            .alpha(if (enabled) 1f else 0.55f),
+        onClick = onClick,
+        modifier = modifier.sizeIn(minHeight = PitGoSize.MinimumTouchTarget),
     ) {
         IconContainer(R.drawable.ic_service_mechanic)
         Spacer(Modifier.height(PitGoSpacing.Medium))
         Text(service.name, style = MaterialTheme.typography.titleMedium)
-        if (enabled) {
-            Text(
-                service.minimumPrice?.let { stringResource(R.string.service_map_price, it) }
-                    ?: service.categoryName,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            Text(
-                stringResource(R.string.home_service_maintenance),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(
+            service.minimumPrice?.let { stringResource(R.string.service_map_price, it) }
+                ?: service.categoryName,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

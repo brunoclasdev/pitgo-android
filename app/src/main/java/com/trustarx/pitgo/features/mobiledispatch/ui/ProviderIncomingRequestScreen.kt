@@ -21,6 +21,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,12 +46,17 @@ import java.util.Locale
 fun ProviderIncomingRequestRoute(
     viewModel: ProviderIncomingRequestViewModel,
     onBack: () -> Unit,
+    onFinished: () -> Unit,
     onSessionExpired: () -> Unit,
     onTrack: (String) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val mapState by viewModel.mapState.collectAsStateWithLifecycle()
     if (state == ProviderIncomingUiState.SessionExpired) onSessionExpired()
+    LaunchedEffect(state) {
+        val appointment = (state as? ProviderIncomingUiState.Active)?.snapshot?.appointment
+        if (appointment?.status == MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION) onTrack(appointment.id)
+    }
     ProviderIncomingRequestScreen(
         state, mapState, onBack, viewModel::accept, viewModel::decline, viewModel::startService,
         viewModel::complete, viewModel::cancel, onTrack, viewModel::setFollowMap,

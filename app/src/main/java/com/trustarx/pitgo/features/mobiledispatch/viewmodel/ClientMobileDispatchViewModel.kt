@@ -15,7 +15,7 @@ import com.trustarx.pitgo.features.mobiledispatch.model.PendingDispatchAction
 import com.trustarx.pitgo.features.mobiledispatch.repository.MobileDispatchRepository
 import com.trustarx.pitgo.features.payment.model.PaymentEvent
 import com.trustarx.pitgo.features.payment.model.PaymentStatus
-import com.trustarx.pitgo.features.payment.repository.PaymentRepository
+import com.trustarx.pitgo.features.payment.repository.PaymentGateway
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,7 +35,7 @@ class ClientMobileDispatchViewModel(
     // then starts immediately with that already-paid id instead of waiting for a manual tap, and
     // instead of trying to restore an (impossible, brand new) older session — see spec 018.
     initialRequestId: String? = null,
-    private val paymentRepository: PaymentRepository? = null,
+    private val paymentRepository: PaymentGateway? = null,
 ) : ViewModel() {
     private val _state = MutableStateFlow<ClientMobileDispatchUiState>(ClientMobileDispatchUiState.Restoring)
     val state: StateFlow<ClientMobileDispatchUiState> = _state.asStateFlow()
@@ -272,7 +272,7 @@ class ClientMobileDispatchViewModel(
             repository: MobileDispatchRepository,
             locationRepository: DeviceLocationRepository,
             initialRequestId: String? = null,
-            paymentRepository: PaymentRepository? = null,
+            paymentRepository: PaymentGateway? = null,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = ClientMobileDispatchViewModel(

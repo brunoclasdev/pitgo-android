@@ -17,7 +17,9 @@ class PitGoApplication : Application() {
         HttpRequestUtil.setLogEnabled(false)
         HttpRequestUtil.setPrintRequestUrlOnFailure(false)
         // Public Key only — the Access Token never ships in the app (see mp-* Edge Functions).
-        MercadoPagoSDK.initialize(this, BuildConfig.MERCADO_PAGO_PUBLIC_KEY, CountryCode.BRA)
+        if (!com.trustarx.pitgo.core.environment.EnvironmentConfig.simulated) {
+            MercadoPagoSDK.initialize(this, BuildConfig.MERCADO_PAGO_PUBLIC_KEY, CountryCode.BRA)
+        }
         container = PitGoAppContainer(this)
     }
 }
