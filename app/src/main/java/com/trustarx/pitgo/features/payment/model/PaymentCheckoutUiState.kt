@@ -6,6 +6,7 @@ import com.trustarx.pitgo.features.paymentmethods.model.SavedCard
 sealed interface PaymentCheckoutUiState {
     data object Loading : PaymentCheckoutUiState
     data object InvalidService : PaymentCheckoutUiState
+    data object QuoteChanged : PaymentCheckoutUiState
 
     data class SelectingMethod(
         val amount: java.math.BigDecimal,

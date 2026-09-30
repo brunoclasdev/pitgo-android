@@ -12,7 +12,7 @@ import java.math.BigDecimal
 enum class MobileDispatchStatus {
     SEARCHING, OPTION_FOUND, AWAITING_PROVIDER, AWAITING_CLIENT_CONFIRMATION, AWAITING_PAYMENT,
     ACCEPTED, IN_PROGRESS, AWAITING_CLIENT_COMPLETION_CONFIRMATION,
-    CANCELLED, COMPLETED, EXHAUSTED,
+    CANCELLED, COMPLETED, EXHAUSTED, DISPUTED,
 }
 
 /**
@@ -21,7 +21,7 @@ enum class MobileDispatchStatus {
  * so legacy `private.dispatch_snapshot()` responses — which never include this field — keep
  * working unchanged.
  */
-enum class MobileDispatchKind { MOBILE_SEQUENTIAL, PITTEC_AUTO_SEQUENTIAL }
+enum class MobileDispatchKind { MOBILE_SEQUENTIAL, PITTEC_AUTO_SEQUENTIAL, GUINCHO_DIRECT }
 
 /** Approximate, decision-safe offer metadata PitTec exposes to the currently offered provider. */
 data class PitTecOfferSummary(
@@ -38,12 +38,12 @@ data class PitTecOfferSummary(
 enum class MobileAppointmentStatus {
     PENDING, AWAITING_CLIENT_CONFIRMATION, AWAITING_PAYMENT,
     ACCEPTED, IN_PROGRESS, AWAITING_CLIENT_COMPLETION_CONFIRMATION,
-    COMPLETED, CANCELLED, PROVIDER_REJECTED, EXPIRED,
+    COMPLETED, CANCELLED, PROVIDER_REJECTED, EXPIRED, DISPUTED,
 }
 
 enum class MobileDispatchAction {
     NEXT, REQUEST, CANCEL, ACCEPT, DECLINE, CONFIRM_QUOTE, DECLINE_QUOTE,
-    OPEN_PAYMENT, OPEN_TRACKING, START, ARRIVE, COMPLETE, CONFIRM_COMPLETION,
+    OPEN_PAYMENT, OPEN_TRACKING, START, ARRIVE, COMPLETE, CONFIRM_COMPLETION, DISPUTE,
 }
 
 data class MobileCandidate(
@@ -99,6 +99,10 @@ data class MobileDispatchSnapshot(
     val offer: PitTecOfferSummary? = null,
     val paymentStatus: PaymentStatus? = null,
     val trackingAuthorized: Boolean = false,
+    val guinchoTrip: com.trustarx.pitgo.features.guincho.model.GuinchoTripSummary? = null,
+    val guinchoDispute: com.trustarx.pitgo.features.guincho.model.GuinchoDispute? = null,
+    val providerName: String? = null,
+    val createdAt: String? = null,
 ) {
     fun isValid() = searchId.isUuid() && serviceId.isUuid() && serviceName.isNotBlank() &&
         radiusMeters in setOf(10_000, 25_000, 50_000) && revision > 0 &&

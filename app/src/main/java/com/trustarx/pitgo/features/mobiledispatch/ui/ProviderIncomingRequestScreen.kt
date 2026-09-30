@@ -55,7 +55,9 @@ fun ProviderIncomingRequestRoute(
     if (state == ProviderIncomingUiState.SessionExpired) onSessionExpired()
     LaunchedEffect(state) {
         val appointment = (state as? ProviderIncomingUiState.Active)?.snapshot?.appointment
-        if (appointment?.status == MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION) onTrack(appointment.id)
+        val active=(state as? ProviderIncomingUiState.Active)?.snapshot
+        if (appointment?.status == MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION ||
+            (active?.dispatchKind==MobileDispatchKind.GUINCHO_DIRECT && appointment?.status in setOf(MobileAppointmentStatus.ACCEPTED,MobileAppointmentStatus.IN_PROGRESS))) appointment?.let { onTrack(it.id) }
     }
     ProviderIncomingRequestScreen(
         state, mapState, onBack, viewModel::accept, viewModel::decline, viewModel::startService,
@@ -98,6 +100,11 @@ private fun ProviderIncomingRequestScreen(
                     val offer = state.snapshot.offer
                     val appointment = state.snapshot.appointment
                     Text(state.snapshot.serviceName, style = MaterialTheme.typography.headlineSmall)
+                    state.snapshot.guinchoTrip?.let { trip ->
+                        Text(trip.clientName); Text(trip.vehicle)
+                        Text(stringResource(R.string.guincho_pickup_label,trip.pickupAddress))
+                        Text(stringResource(R.string.guincho_destination_label,trip.destinationAddress))
+                    }
                     if (isPitTec) {
                         Text(offer?.region.orEmpty())
                         offer?.let {

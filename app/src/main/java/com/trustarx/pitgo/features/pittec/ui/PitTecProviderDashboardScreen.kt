@@ -97,6 +97,7 @@ fun PitTecProviderDashboardRoute(
     homeViewModel: PitTecProviderViewModel,
     incomingViewModel: ProviderIncomingRequestViewModel,
     onLogout: () -> Unit,
+    onOpenGuinchoHistory: () -> Unit,
     onOpenTracking: (String) -> Unit,
 ) {
     val dashboardState by dashboardViewModel.state.collectAsStateWithLifecycle()
@@ -158,6 +159,7 @@ fun PitTecProviderDashboardRoute(
         incomingState = incomingState,
         styleController = remember { ParticipantMapStyleController() },
         onLogout = onLogout,
+        onOpenGuinchoHistory = onOpenGuinchoHistory,
         onGrantLocationPermission = {
             locationPermission.launch(
                 arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION),
@@ -218,6 +220,7 @@ private fun PitTecProviderDashboardScreen(
     incomingState: ProviderIncomingUiState,
     styleController: ParticipantMapStyleController,
     onLogout: () -> Unit,
+    onOpenGuinchoHistory: () -> Unit,
     onGrantLocationPermission: () -> Unit,
     onOpenLocationSettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
@@ -269,6 +272,7 @@ private fun PitTecProviderDashboardScreen(
                     showBatteryOptimizationBanner = showBatteryOptimizationBanner,
                     onRequestBatteryExemption = onRequestBatteryExemption,
                     onLogout = onLogout,
+        onOpenGuinchoHistory = onOpenGuinchoHistory,
                 )
             }
         }
@@ -594,6 +598,7 @@ private fun ProfileTab(
     showBatteryOptimizationBanner: Boolean,
     onRequestBatteryExemption: () -> Unit,
     onLogout: () -> Unit,
+    onOpenGuinchoHistory: () -> Unit,
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PitGoSpacing.Large),
@@ -664,6 +669,9 @@ private fun ProfileTab(
                     }
                 }
             }
+        }
+        OutlinedButton(onClick = onOpenGuinchoHistory, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.guincho_history))
         }
         Button(
             onClick = onLogout,

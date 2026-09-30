@@ -60,6 +60,7 @@ fun ProfileRoute(
     onOpenGarage: () -> Unit,
     onOpenPaymentMethods: () -> Unit,
     onOpenPaymentHistory: () -> Unit,
+    onOpenGuinchoHistory: () -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -73,6 +74,7 @@ fun ProfileRoute(
         onOpenGarage = onOpenGarage,
         onOpenPaymentMethods = onOpenPaymentMethods,
         onOpenPaymentHistory = onOpenPaymentHistory,
+        onOpenGuinchoHistory = onOpenGuinchoHistory,
         onAppearanceSelected = viewModel::setAppearanceMode,
         onBottomItemClick = onBottomItemClick,
         onLogout = onLogout,
@@ -89,6 +91,7 @@ private fun ProfileScreen(
     onOpenGarage: () -> Unit,
     onOpenPaymentMethods: () -> Unit,
     onOpenPaymentHistory: () -> Unit,
+    onOpenGuinchoHistory: () -> Unit,
     onAppearanceSelected: (AppearanceMode) -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
     onLogout: () -> Unit,
@@ -129,6 +132,9 @@ private fun ProfileScreen(
             ProfilePaymentMethodsCard(onOpenPaymentMethods)
             OutlinedButton(onClick = onOpenPaymentHistory, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.payment_history))
+            }
+            OutlinedButton(onClick = onOpenGuinchoHistory, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.guincho_history))
             }
             ProfileAppearanceCard(profileState.appearanceMode, onAppearanceSelected)
 

@@ -42,6 +42,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Charges and status for the checkout step (features/payment). Mirrors the Edge-Function-call
@@ -69,7 +70,7 @@ class PaymentRepository(private val client: SupabaseClient) : PaymentGateway {
         rows.map { requireNotNull(it.toDomainOrNull()) }
     }
     override suspend fun createPayment(command: CreatePaymentCommand): CreatePaymentResult {
-        val pitTecContextValid = command.dispatchKind.name != "PITTEC_AUTO_SEQUENTIAL" ||
+        val pitTecContextValid = command.dispatchKind.name == "MOBILE_SEQUENTIAL" ||
             (command.appointmentId?.isUuid() == true && (command.quoteVersion ?: 0) > 0)
         if (!command.requestId.isUuid() || command.amount.signum() <= 0 || !pitTecContextValid) {
             return CreatePaymentResult.Failure(PaymentFailure.CONTRACT)
@@ -152,6 +153,13 @@ class PaymentRepository(private val client: SupabaseClient) : PaymentGateway {
     /** One-shot fallback used when the Realtime channel drops or hasn't emitted yet (10 s rule). */
     override suspend fun quoteTotal(requestId: String, appointmentId: String?, quoteVersion: Long?): java.math.BigDecimal? {
         return try {
+            val guincho = try { client.postgrest.rpc("get_my_active_guincho_request")
+                .decodeAs<com.trustarx.pitgo.features.mobiledispatch.data.MobileDispatchEnvelopeDto>().domainOrNull()
+            } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+            catch (_: Exception) { null }
+            val guinchoAppointment=guincho?.appointment
+            if (guincho?.searchId == requestId && guinchoAppointment!=null && guinchoAppointment.id == appointmentId &&
+                guinchoAppointment.quoteVersion == quoteVersion) return guinchoAppointment.quotedPrice
             val envelope = withTimeout(RPC_TIMEOUT_MILLIS) {
                 client.postgrest.rpc("get_my_active_pittec_dispatch").decodeAs<com.trustarx.pitgo.features.pittec.data.PitTecDispatchEnvelopeDto>()
             }
@@ -163,6 +171,11 @@ class PaymentRepository(private val client: SupabaseClient) : PaymentGateway {
         catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
         catch (_: Exception) { null }
     }
+    override suspend fun cancelUnpaidGuincho(requestId: String): Boolean = try {
+        client.postgrest.rpc("cancel_unpaid_guincho_request",buildJsonObject { put("p_request_id",requestId) })
+            .decodeAs<kotlinx.serialization.json.JsonObject>()["outcome"]?.jsonPrimitive?.content=="CANCELLED"
+    } catch(cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+    catch (_: Exception) { false }
 
     override suspend fun getStatus(requestId: String): PaymentEvent {
         if (!requestId.isUuid()) return PaymentEvent.Failure(PaymentFailure.CONTRACT)
@@ -241,7 +254,7 @@ class PaymentRepository(private val client: SupabaseClient) : PaymentGateway {
             body?.code == "CARD_NOT_FOUND" -> PaymentFailure.CARD_NOT_FOUND
             body?.code == "PAYER_DOCUMENT_REQUIRED" -> PaymentFailure.PAYER_DOCUMENT_REQUIRED
             body?.code == "QUOTE_EXPIRED" -> PaymentFailure.QUOTE_EXPIRED
-            body?.code == "QUOTE_CONFLICT" -> PaymentFailure.QUOTE_CONFLICT
+            body?.code in setOf("QUOTE_CONFLICT", "PRICE_CHANGED") -> PaymentFailure.QUOTE_CONFLICT
             body?.code == "INVALID_PAYMENT_CONTEXT" -> PaymentFailure.INVALID_PAYMENT_CONTEXT
             error.statusCode == 400 -> PaymentFailure.CONTRACT
             error.statusCode >= 500 -> PaymentFailure.SERVICE_UNAVAILABLE

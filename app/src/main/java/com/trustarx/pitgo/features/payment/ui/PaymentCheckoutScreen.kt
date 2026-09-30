@@ -106,12 +106,15 @@ fun PaymentCheckoutRoute(
     }
     PaymentCheckoutScreen(
         uiState = uiState,
-        onBack = { viewModel.cancelPayment(onCancel) },
+        onBack = { if(viewModel.directed) onBack() else viewModel.cancelPayment(onCancel) },
         onCancel = { viewModel.cancelPayment(onCancel) },
         onPayWithPix = viewModel::payWithPix,
         onPayWithSavedCard = viewModel::payWithSavedCard,
         onRetry = viewModel::retry,
-        onChooseAnotherMethod = viewModel::chooseAnotherMethod,
+        onChooseAnotherMethod = {
+            if (viewModel.directed && (uiState is PaymentCheckoutUiState.Expired || uiState is PaymentCheckoutUiState.Declined)) onCancel()
+            else viewModel.chooseAnotherMethod()
+        },
         onManagePaymentMethods = onManagePaymentMethods,
     )
     }
@@ -183,6 +186,10 @@ private fun PaymentCheckoutScreen(
                     OutlinedButton(onClick = onRetry) { Text(stringResource(R.string.payment_check_status)) }
                 }
 
+                PaymentCheckoutUiState.QuoteChanged -> {
+                    Text(stringResource(R.string.guincho_quote_changed))
+                    Button(onClick = onCancel) { Text(stringResource(R.string.guincho_refresh)) }
+                }
                 PaymentCheckoutUiState.InvalidService, PaymentCheckoutUiState.Failure -> FailureContent(onRetry)
 
                 is PaymentCheckoutUiState.SelectingMethod ->

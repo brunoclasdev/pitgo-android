@@ -13,7 +13,8 @@ object PitGoRoutes {
     const val ProviderMigration = "provider-migration"
     const val AppointmentIdArg = "appointmentId"
     const val ProviderTracking = "provider-tracking/{$AppointmentIdArg}"
-    const val AppointmentTracking = "appointment-tracking/{$AppointmentIdArg}"
+    const val AppointmentHistoryArg = "history"
+    const val AppointmentTracking = "appointment-tracking/{$AppointmentIdArg}?history={$AppointmentHistoryArg}"
     const val ServiceMapArg = "serviceId"
     const val ServiceMap = "service-map/{$ServiceMapArg}"
     const val PitTecServiceArg = "pittecServiceId"
@@ -41,6 +42,8 @@ object PitGoRoutes {
             "&$PaymentAppointmentIdArg={$PaymentAppointmentIdArg}&$PaymentQuoteVersionArg={$PaymentQuoteVersionArg}&$PaymentAmountArg={$PaymentAmountArg}"
     const val ProviderRequest = "provider-request/{$AppointmentIdArg}"
     const val Home = "home"
+    const val GuinchoMap = "guincho-map"
+    const val GuinchoHistory = "guincho-history"
     const val VehicleOnboarding = "vehicle-onboarding"
     const val Garage = "garage"
     const val Profile = "profile"
@@ -64,7 +67,7 @@ object PitGoRoutes {
         "$VehicleForm?$VehicleFormOriginArg=${Uri.encode(origin)}"
 
     fun providerTracking(appointmentId: String) = "provider-tracking/${Uri.encode(appointmentId)}"
-    fun appointmentTracking(appointmentId: String) = "appointment-tracking/${Uri.encode(appointmentId)}"
+    fun appointmentTracking(appointmentId: String, historical: Boolean = false) = "appointment-tracking/${Uri.encode(appointmentId)}?history=$historical"
     fun serviceMap(serviceId: String) = "service-map/${Uri.encode(serviceId)}"
 
     fun pitTec(serviceId: String) = "pittec/${Uri.encode(serviceId)}"

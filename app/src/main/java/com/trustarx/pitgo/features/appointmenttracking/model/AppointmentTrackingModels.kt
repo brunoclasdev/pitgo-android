@@ -104,6 +104,7 @@ data class AppointmentTrackingUiState(
     val route: RouteSnapshot? = null,
 ) {
     val isPitTec: Boolean get() = dispatch?.dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL
+    val isGuincho: Boolean get() = dispatch?.dispatchKind == MobileDispatchKind.GUINCHO_DIRECT
 
     val visibleLocation: AppointmentProviderLocation?
         get() = when (val current = data) {

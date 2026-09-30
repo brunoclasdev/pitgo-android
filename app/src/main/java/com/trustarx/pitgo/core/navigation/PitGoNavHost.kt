@@ -238,7 +238,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         val active = dispatchResumeState as? DispatchResumeState.Active ?: return@LaunchedEffect
         val related = currentRoute in setOf(
             PitGoRoutes.MobileDispatchNew, PitGoRoutes.MobileDispatch,
-            PitGoRoutes.ProviderRequest, PitGoRoutes.AppointmentTracking,
+            PitGoRoutes.ProviderRequest, PitGoRoutes.AppointmentTracking, PitGoRoutes.GuinchoMap, PitGoRoutes.Payment,
         )
         if (related) return@LaunchedEffect
         val target = when (sessionState) {
@@ -253,7 +253,10 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         when (sessionState) {
             is AppSessionState.Authenticated.Client -> {
                 val appointment = active.snapshot.appointment
-                if (appointment != null && appointment.status in setOf(MobileAppointmentStatus.ACCEPTED, MobileAppointmentStatus.IN_PROGRESS, MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION)) {
+                if(active.snapshot.dispatchKind==MobileDispatchKind.GUINCHO_DIRECT && appointment!=null && appointment.status==MobileAppointmentStatus.AWAITING_PAYMENT) {
+                    navController.navigate(PitGoRoutes.payment(active.snapshot.serviceId,"GUINCHO_DIRECT",active.snapshot.searchId,
+                        appointment.id,appointment.quoteVersion,appointment.quotedPrice.toPlainString())) { launchSingleTop=true }
+                } else if (appointment != null && (active.snapshot.dispatchKind==MobileDispatchKind.GUINCHO_DIRECT || appointment.status in setOf(MobileAppointmentStatus.ACCEPTED, MobileAppointmentStatus.IN_PROGRESS, MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION))) {
                     navController.navigate(PitGoRoutes.appointmentTracking(appointment.id)) { launchSingleTop = true }
                 } else navController.navigate(PitGoRoutes.mobileDispatch(active.snapshot.searchId)) { launchSingleTop = true }
             }
@@ -462,10 +465,8 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         if (!navigationPending) {
                             navigationPending = true
                             val destination = when (service.dispatchKind) {
-                                // Payment (spec 018) still sits before dispatch for guincho móvel —
-                                // generates the request_id and forwards it once approved.
                                 ServiceDispatchKind.MOBILE_SEQUENTIAL ->
-                                    PitGoRoutes.payment(service.id, service.dispatchKind.name)
+                                    PitGoRoutes.GuinchoMap
                                 // (019) PitTec agora abre direto no mapa/busca, sem pagamento
                                 // prévio — o pagamento passa a ser cobrado depois do aceite, a
                                 // partir da própria tela do PitTec (ver PitTecRoute).
@@ -561,6 +562,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     onOpenPaymentMethods = {
                         navController.navigate(PitGoRoutes.PaymentMethods) { launchSingleTop = true }
                     },
+                    onOpenGuinchoHistory = { navController.navigate(PitGoRoutes.GuinchoHistory) { launchSingleTop = true } },
                     onOpenPaymentHistory = { navController.navigate(PitGoRoutes.PaymentHistory) { launchSingleTop = true } },
                     onBottomItemClick = { item ->
                         when (item) {
@@ -693,6 +695,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         dashboardViewModel = dashboardViewModel,
                         homeViewModel = pitTecHomeViewModel,
                         incomingViewModel = incomingViewModel,
+                        onOpenGuinchoHistory = { navController.navigate(PitGoRoutes.GuinchoHistory) { launchSingleTop = true } },
                         onLogout = sessionViewModel::logout,
                         onOpenTracking = {
                             navController.navigate(PitGoRoutes.appointmentTracking(it)) { launchSingleTop = true }
@@ -701,6 +704,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                 } else {
                     ProviderDashboardRoute(
                         viewModel = dashboardViewModel,
+                        onOpenGuinchoHistory = { navController.navigate(PitGoRoutes.GuinchoHistory) { launchSingleTop = true } },
                         onLogout = sessionViewModel::logout,
                         onOpenIncomingRequest = { navController.navigate(PitGoRoutes.providerRequest(it)) },
                     )
@@ -725,7 +729,10 @@ fun PitGoNavHost(container: PitGoAppContainer) {
 
         composable(
             route = PitGoRoutes.AppointmentTracking,
-            arguments = listOf(navArgument(PitGoRoutes.AppointmentIdArg) { type = NavType.StringType }),
+            arguments = listOf(
+                navArgument(PitGoRoutes.AppointmentIdArg) { type = NavType.StringType },
+                navArgument(PitGoRoutes.AppointmentHistoryArg) { type = NavType.BoolType; defaultValue = false },
+            ),
         ) { entry ->
             val appointmentId = entry.arguments?.getString(PitGoRoutes.AppointmentIdArg).orEmpty()
             if (sessionState is AppSessionState.Authenticated && appointmentId.isNotBlank()) {
@@ -741,6 +748,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                 AppointmentTrackingRoute(
                     viewModel = trackingViewModel,
                     isClient = isClientSession,
+                    historical = entry.arguments?.getBoolean(PitGoRoutes.AppointmentHistoryArg) == true,
                     onBack = { navController.popBackStack() },
                     onFinished = {
                         navController.navigateRoot(
@@ -750,6 +758,31 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     onSessionExpired = sessionViewModel::refresh,
                 )
             }
+        }
+
+        composable(PitGoRoutes.GuinchoMap) {
+            val guinchoSession = sessionState as? AppSessionState.Authenticated.Client
+            if (guinchoSession != null) {
+                val guinchoViewModel: com.trustarx.pitgo.features.guincho.viewmodel.GuinchoMapViewModel = viewModel(
+                    factory = com.trustarx.pitgo.features.guincho.viewmodel.GuinchoMapViewModel.factory(
+                        guinchoSession.userId, container.guinchoRepository, container.vehicleRepository,
+                        container.deviceLocationRepository, container.guinchoAddressRepository, container.connectivityObserver),
+                )
+                com.trustarx.pitgo.features.guincho.ui.GuinchoMapRoute(
+                    guinchoViewModel, onBack = { navController.popBackStack() },
+                    onContract = { snapshot -> snapshot.appointment?.let { appointment ->
+                        navController.navigate(PitGoRoutes.payment(snapshot.serviceId,"GUINCHO_DIRECT",snapshot.searchId,
+                            appointment.id,appointment.quoteVersion,appointment.quotedPrice.toPlainString())) { launchSingleTop=true }
+                    } }, contractingEnabled = true, onSessionExpired = sessionViewModel::refresh,
+                    onGarage = { navController.navigate(PitGoRoutes.Garage) },
+                )
+            }
+        }
+        composable(PitGoRoutes.GuinchoHistory) {
+            val historyViewModel: com.trustarx.pitgo.features.guincho.viewmodel.GuinchoHistoryViewModel = viewModel(
+                factory=com.trustarx.pitgo.features.guincho.viewmodel.GuinchoHistoryViewModel.factory(container.guinchoRepository))
+            com.trustarx.pitgo.features.guincho.ui.GuinchoHistoryScreen(historyViewModel,
+                onBack={ navController.popBackStack() },onOpen={ navController.navigate(PitGoRoutes.appointmentTracking(it, historical = true)) })
         }
 
         composable(
@@ -825,14 +858,19 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                     },
                     onCancel = {
                         if (!container.paymentRepository.simulated) pitTecViewModel?.cancelSearch()
-                        navController.popBackStack()
+                        if(dispatchKind=="GUINCHO_DIRECT") navController.navigateRoot(PitGoRoutes.Home)
+                        else navController.popBackStack()
                     },
                     onApproved = { requestId ->
                         // (019) PitTec já chega aqui com uma busca/appointment ACEITO em
                         // andamento (requestId = search_id, ver PitTecRoute.onNeedsPayment) — só
                         // volta para a mesma tela, que já detecta a aprovação sozinha. Guincho
                         // móvel continua indo para o despacho com o requestId recém-gerado.
-                        if (container.paymentRepository.simulated) {
+                        if (dispatchKind == "GUINCHO_DIRECT") {
+                            entry.arguments?.getString(PitGoRoutes.PaymentAppointmentIdArg)?.let { appointmentId ->
+                                navController.navigate(PitGoRoutes.appointmentTracking(appointmentId)) { popUpTo(PitGoRoutes.Home); launchSingleTop=true }
+                            }
+                        } else if (container.paymentRepository.simulated) {
                             navController.navigate(PitGoRoutes.simulatedPitTec(requestId)) { popUpTo(PitGoRoutes.Home); launchSingleTop = true }
                         } else if (dispatchKind == "PITTEC_AUTO_SEQUENTIAL") {
                             if (navController.previousBackStackEntry?.destination?.route == PitGoRoutes.PitTec) navController.popBackStack()

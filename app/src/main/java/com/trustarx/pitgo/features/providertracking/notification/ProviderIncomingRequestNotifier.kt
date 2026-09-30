@@ -62,7 +62,7 @@ class ProviderIncomingRequestNotifier(private val context: Context) {
      * correct provider screen on every foreground/session-state change — see "Notification
      * tap opens the existing MainActivity" in contracts/pittec-routing-ui.md.
      */
-    fun notifyIncoming(appointmentId: String, remainingSeconds: Long) {
+    fun notifyIncoming(appointmentId: String, remainingSeconds: Long, guincho: Boolean = false) {
         ensureChannel()
         val id = notificationId(appointmentId)
         val contentIntent = PendingIntent.getActivity(
@@ -74,7 +74,7 @@ class ProviderIncomingRequestNotifier(private val context: Context) {
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_pittec)
-            .setContentTitle(context.getString(R.string.pittec_incoming_title))
+            .setContentTitle(context.getString(if (guincho) R.string.guincho_incoming_title else R.string.pittec_incoming_title))
             .setContentText(context.getString(R.string.pittec_incoming_body, remainingSeconds.coerceAtLeast(0)))
             .setContentIntent(contentIntent)
             .setAutoCancel(true)

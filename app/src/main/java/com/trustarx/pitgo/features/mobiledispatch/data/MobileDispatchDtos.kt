@@ -35,6 +35,10 @@ internal data class MobileDispatchEnvelopeDto(
     val offer: PitTecOfferSummaryDto? = null,
     val payment: MobilePaymentSummaryDto? = null,
     @SerialName("tracking_authorized") val trackingAuthorized: Boolean = false,
+    val trip: com.trustarx.pitgo.features.guincho.data.GuinchoTripDto? = null,
+    val dispute: com.trustarx.pitgo.features.guincho.data.GuinchoDisputeDto? = null,
+    val provider: MobileProviderSummaryDto? = null,
+    @SerialName("created_at") val createdAt: String? = null,
 ) {
     fun domainOrNull(): MobileDispatchSnapshot? = (snapshot ?: MobileDispatchSnapshotDto(
         searchId = searchId,
@@ -51,6 +55,8 @@ internal data class MobileDispatchEnvelopeDto(
         offer = offer,
         payment = payment,
         trackingAuthorized = trackingAuthorized,
+        trip = trip, dispute = dispute, provider = provider,
+        createdAt = createdAt,
     )).toDomainOrNull()
 }
 
@@ -70,6 +76,10 @@ internal data class MobileDispatchSnapshotDto(
     val offer: PitTecOfferSummaryDto? = null,
     val payment: MobilePaymentSummaryDto? = null,
     @SerialName("tracking_authorized") val trackingAuthorized: Boolean = false,
+    val trip: com.trustarx.pitgo.features.guincho.data.GuinchoTripDto? = null,
+    val dispute: com.trustarx.pitgo.features.guincho.data.GuinchoDisputeDto? = null,
+    val provider: MobileProviderSummaryDto? = null,
+    @SerialName("created_at") val createdAt: String? = null,
 ) {
     fun toDomainOrNull(): MobileDispatchSnapshot? = runCatching {
         MobileDispatchSnapshot(
@@ -91,6 +101,9 @@ internal data class MobileDispatchSnapshotDto(
             offer = offer?.toDomain(),
             paymentStatus = payment?.toStatusOrNull(),
             trackingAuthorized = trackingAuthorized,
+            guinchoTrip = trip?.summary(), guinchoDispute = dispute?.domain(),
+            providerName = provider?.displayName,
+            createdAt = createdAt,
         ).takeIf(MobileDispatchSnapshot::isValid)
     }.getOrNull()
 
@@ -181,3 +194,6 @@ internal data class MobileAppointmentDto(
 internal data class MobilePaymentSummaryDto(val status: String) {
     fun toStatusOrNull(): PaymentStatus? = runCatching { PaymentStatus.valueOf(status) }.getOrNull()
 }
+
+@Serializable
+internal data class MobileProviderSummaryDto(@SerialName("display_name") val displayName: String)

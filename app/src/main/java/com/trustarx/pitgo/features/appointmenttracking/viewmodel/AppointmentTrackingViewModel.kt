@@ -57,8 +57,9 @@ class AppointmentTrackingViewModel(
             // A PitTec appointment is invisible to `restore()` (MOBILE_SEQUENTIAL-only, see
             // contracts/pittec-rpcs.md), so this tries PitTec too — a caller's effective
             // modality/service is exclusive, so at most one ever resolves.
-            when (val dispatch = dispatchRepository.restoreAnyDispatchKind()) {
-                is MobileDispatchResult.Success -> _state.value = _state.value.copy(dispatch = dispatch.snapshot)
+            val direct=dispatchRepository.appointmentSnapshot(appointmentId)
+            when (val dispatch = if(direct is MobileDispatchResult.Success) direct else dispatchRepository.restoreAnyDispatchKind()) {
+                is MobileDispatchResult.Success -> if(dispatch.snapshot.appointment?.id==appointmentId) _state.value = _state.value.copy(dispatch = dispatch.snapshot)
                 else -> Unit
             }
             // Only the client publishes their own position (publish_client_location is a
@@ -68,11 +69,11 @@ class AppointmentTrackingViewModel(
             // ProviderLocationTrackingService — a real contributor to inconsistent provider
             // location updates.
             if (isClient) launch {
-                while (!terminal) { publishOwnLocation(); delay(5_000) }
+                while (!terminal) { if(!_state.value.isGuincho) publishOwnLocation(); delay(5_000) }
             }
             launch {
                 while (!terminal) {
-                    val result = if (_state.value.isPitTec) dispatchRepository.appointmentSnapshot(appointmentId)
+                    val result = if (_state.value.isPitTec || _state.value.isGuincho) dispatchRepository.appointmentSnapshot(appointmentId)
                         else dispatchRepository.restoreAnyDispatchKind()
                     if (result is MobileDispatchResult.Success && result.snapshot.appointment?.id == appointmentId) {
                         val current = _state.value.dispatch
@@ -141,7 +142,7 @@ class AppointmentTrackingViewModel(
         if (_state.value.arriving) return
         _state.value = _state.value.copy(arriving = true, actionFailed = false)
         viewModelScope.launch {
-            val result = if (_state.value.isPitTec && appointment.arrivedAt == null)
+            val result = if ((_state.value.isPitTec || _state.value.isGuincho) && appointment.arrivedAt == null)
                 dispatchRepository.arrive(appointment.id, appointment.revision)
             else dispatchRepository.startAppointment(appointment.id, appointment.revision)
             when (result) {
@@ -174,6 +175,10 @@ class AppointmentTrackingViewModel(
             when (val result = dispatchRepository.complete(appointment.id, appointment.revision)) {
                 is MobileDispatchResult.Success -> _state.value = _state.value.copy(
                     dispatch = result.snapshot, completing = false,
+                    actionFailed = result.snapshot.appointment?.status !in setOf(
+                        com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION,
+                        com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus.COMPLETED,
+                    ),
                 )
                 else -> _state.value = _state.value.copy(completing = false, actionFailed = true)
             }
@@ -191,8 +196,22 @@ class AppointmentTrackingViewModel(
             when (val result = dispatchRepository.confirmCompletion(appointment.id, appointment.revision)) {
                 is MobileDispatchResult.Success -> _state.value = _state.value.copy(
                     dispatch = result.snapshot, completing = false,
+                    actionFailed = result.snapshot.appointment?.status != com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus.COMPLETED,
                 )
                 else -> _state.value = _state.value.copy(completing = false, actionFailed = true)
+            }
+        }
+    }
+
+    fun dispute(reason: String) {
+        val appointment=_state.value.dispatch?.appointment ?: return
+        if(!isClient || !_state.value.isGuincho || _state.value.completing || reason.trim().length !in 1..1000) return
+        _state.value=_state.value.copy(completing=true,actionFailed=false)
+        viewModelScope.launch {
+            when(val result=dispatchRepository.dispute(appointment.id,appointment.revision,reason)) {
+                is MobileDispatchResult.Success -> _state.value=_state.value.copy(dispatch=result.snapshot,completing=false,
+                    actionFailed=result.snapshot.guinchoDispute==null)
+                else -> _state.value=_state.value.copy(completing=false,actionFailed=true)
             }
         }
     }
@@ -306,7 +325,9 @@ class AppointmentTrackingViewModel(
                 } else accept(location)
             }
             is AppointmentLocationEvent.Ended -> {
-                terminal = true
+                // Guincho keeps polling the appointment after location access ends,
+                // including client confirmation and support resolution.
+                terminal = !_state.value.isGuincho
                 latest = null
                 routeJob?.cancel()
                 _state.value = _state.value.copy(route = null, clientLocation = null)

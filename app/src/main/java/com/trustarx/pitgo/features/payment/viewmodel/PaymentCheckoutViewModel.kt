@@ -49,6 +49,7 @@ class PaymentCheckoutViewModel(
     private val dispatchKind = runCatching {
         MobileDispatchKind.valueOf(savedStateHandle.get<String>(PitGoRoutes.PaymentDispatchKindArg).orEmpty())
     }.getOrDefault(MobileDispatchKind.MOBILE_SEQUENTIAL)
+    val directed get() = dispatchKind==MobileDispatchKind.GUINCHO_DIRECT
     private val appointmentId: String? = savedStateHandle.get<String>(PitGoRoutes.PaymentAppointmentIdArg)
     private val quoteVersion: Long? = savedStateHandle.get<String>(PitGoRoutes.PaymentQuoteVersionArg)
         ?.toLongOrNull()
@@ -92,6 +93,9 @@ class PaymentCheckoutViewModel(
         currentPayment = null
         _uiState.value = PaymentCheckoutUiState.Loading
         viewModelScope.launch {
+            if (directed && (appointmentId?.isUuid() != true || quoteVersion == null || quoteVersion <= 0)) {
+                _uiState.value = PaymentCheckoutUiState.InvalidService; return@launch
+            }
             when (val existing = paymentRepository.getStatus(requestId)) {
                 is PaymentEvent.StatusChanged -> {
                     existing.payment?.let {
@@ -108,15 +112,18 @@ class PaymentCheckoutViewModel(
                 PaymentEvent.NotFound -> Unit
             }
             if (simulated) {
-                amount = TEST_PAYMENT_AMOUNT
+                amount = if(dispatchKind == MobileDispatchKind.GUINCHO_DIRECT)
+                    savedStateHandle.get<String>(PitGoRoutes.PaymentAmountArg)?.toBigDecimalOrNull() ?: BigDecimal.ZERO
+                    else TEST_PAYMENT_AMOUNT
+                if(amount.signum()<=0) { _uiState.value=PaymentCheckoutUiState.InvalidService; return@launch }
                 paymentOrderAmount = amount
                 savedCards = (savedCardRepository.list() as? SavedCardsResult.Success)?.cards.orEmpty()
                 _uiState.value = PaymentCheckoutUiState.SelectingMethod(amount, savedCards)
                 return@launch
             }
-            val service = if (dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) null
+            val service = if (dispatchKind != MobileDispatchKind.MOBILE_SEQUENTIAL) null
                 else (catalogRepository.service(serviceId) as? CatalogItemResult.Success)?.item
-            val parsedAmount = if (dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) {
+            val parsedAmount = if (dispatchKind != MobileDispatchKind.MOBILE_SEQUENTIAL) {
                 paymentRepository.quoteTotal(requestId, appointmentId, quoteVersion)
             } else TEST_PAYMENT_AMOUNT.takeIf { service != null }
             if ((dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL &&
@@ -184,7 +191,13 @@ class PaymentCheckoutViewModel(
                     // Only an ambiguous provider/network result can have created a payment
                     // without returning it. Deterministic failures must be actionable and must
                     // not be presented as an indefinitely pending payment.
-                    if (result.reason in setOf(
+                    if (directed && result.reason in setOf(
+                        com.trustarx.pitgo.features.payment.model.PaymentFailure.QUOTE_EXPIRED,
+                        com.trustarx.pitgo.features.payment.model.PaymentFailure.QUOTE_CONFLICT,
+                        com.trustarx.pitgo.features.payment.model.PaymentFailure.INVALID_PAYMENT_CONTEXT,
+                    )) {
+                        _uiState.value = PaymentCheckoutUiState.QuoteChanged
+                    } else if (result.reason in setOf(
                             com.trustarx.pitgo.features.payment.model.PaymentFailure.TIMEOUT,
                             com.trustarx.pitgo.features.payment.model.PaymentFailure.UNKNOWN,
                         )) {
@@ -265,8 +278,12 @@ class PaymentCheckoutViewModel(
         _uiState.value = PaymentCheckoutUiState.Cancelling
         viewModelScope.launch {
             try {
-                when (val existing = paymentRepository.getStatus(requestId)) {
-                    PaymentEvent.NotFound -> onNoPayment()
+                if (directed && (appointmentId?.isUuid() != true || quoteVersion == null || quoteVersion <= 0)) {
+                _uiState.value = PaymentCheckoutUiState.InvalidService; return@launch
+            }
+            when (val existing = paymentRepository.getStatus(requestId)) {
+                    PaymentEvent.NotFound -> if(!directed || paymentRepository.cancelUnpaidGuincho(requestId)) onNoPayment()
+                        else _uiState.value=PaymentCheckoutUiState.Failure
                     is PaymentEvent.Failure -> _uiState.value = PaymentCheckoutUiState.Failure
                     is PaymentEvent.StatusChanged -> {
                         val id = existing.paymentId ?: run { onNoPayment(); return@launch }

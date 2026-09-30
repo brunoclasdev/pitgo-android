@@ -84,11 +84,27 @@ class MobileDispatchRepository(private val client: SupabaseClient) {
         "start_mobile_appointment", appointmentId, revision,
     )
 
-    suspend fun arrive(appointmentId: String, revision: Long): MobileDispatchResult = call("arrive_pittec_appointment", buildJsonObject {
+    suspend fun arrive(appointmentId: String, revision: Long): MobileDispatchResult {
+        val current=appointmentSnapshot(appointmentId)
+        if(current is MobileDispatchResult.Success && current.snapshot.dispatchKind==com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchKind.GUINCHO_DIRECT) {
+            return call("arrive_guincho_appointment",buildJsonObject {
+                put("p_operation_id",java.util.UUID.randomUUID().toString()); put("p_appointment_id",appointmentId); put("p_expected_revision",revision)
+            })
+        }
+        return call("arrive_pittec_appointment", buildJsonObject {
         put("p_request_id", java.util.UUID.randomUUID().toString())
         put("p_appointment_id", appointmentId)
         put("p_expected_revision", revision)
-    })
+        })
+    }
+
+    suspend fun dispute(appointmentId: String,revision: Long,reason: String): MobileDispatchResult {
+        if(!appointmentId.isUuid() || reason.trim().length !in 1..1000) return contractFailure()
+        return call("dispute_guincho_completion",buildJsonObject {
+            put("p_appointment_id",appointmentId); put("p_expected_revision",revision)
+            put("p_operation_id",java.util.UUID.randomUUID().toString()); put("p_reason",reason.trim())
+        })
+    }
 
     suspend fun acknowledgeStart(appointmentId: String, revision: Long) = appointmentCommand(
         "acknowledge_pittec_start", appointmentId, revision,

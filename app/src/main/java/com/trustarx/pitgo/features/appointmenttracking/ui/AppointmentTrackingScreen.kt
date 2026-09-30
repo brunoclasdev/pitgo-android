@@ -73,16 +73,24 @@ fun AppointmentTrackingRoute(
     onBack: () -> Unit,
     onFinished: () -> Unit,
     onSessionExpired: () -> Unit,
+    historical: Boolean = false,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LifecycleStartEffect(viewModel) {
         viewModel.onVisible()
         onStopOrDispose { viewModel.onHidden() }
     }
+    var wasDisputed by remember(viewModel) { mutableStateOf(false) }
     LaunchedEffect(state.data, state.dispatch?.appointment?.status) {
         if (state.data is TrackingDataState.SessionExpired) onSessionExpired()
         val status = state.dispatch?.appointment?.status
-        if (status == MobileAppointmentStatus.COMPLETED) onFinished()
+        if (status == MobileAppointmentStatus.DISPUTED) wasDisputed = true
+        if (!historical && (status == MobileAppointmentStatus.COMPLETED ||
+                (wasDisputed && status == MobileAppointmentStatus.CANCELLED))) onFinished()
+    }
+    if(state.isGuincho) {
+        com.trustarx.pitgo.features.guincho.ui.GuinchoTrackingContent(state,viewModel,isClient,onBack)
+        return
     }
     AppointmentTrackingScreen(
         state = state,

@@ -10,10 +10,11 @@ Deno.serve(async req => {
     if (!user) return json(401, { code: 'SESSION_REQUIRED' });
     const input = object(await req.json().catch(() => null));
     if (!isUuid(input.request_id) || !['PIX','SAVED_CARD'].includes(String(input.method))
-      || !['MOBILE_SEQUENTIAL','PITTEC_AUTO_SEQUENTIAL'].includes(String(input.dispatch_kind))
+      || !['MOBILE_SEQUENTIAL','PITTEC_AUTO_SEQUENTIAL','GUINCHO_DIRECT'].includes(String(input.dispatch_kind))
       || (input.dispatch_kind === 'MOBILE_SEQUENTIAL' && !isUuid(input.service_id))
-      || (input.dispatch_kind === 'PITTEC_AUTO_SEQUENTIAL' && (!isUuid(input.appointment_id)
+      || (['PITTEC_AUTO_SEQUENTIAL','GUINCHO_DIRECT'].includes(String(input.dispatch_kind)) && (!isUuid(input.appointment_id)
         || !Number.isSafeInteger(input.quote_version) || Number(input.quote_version) <= 0))
+      || (input.dispatch_kind === 'GUINCHO_DIRECT' && (!isUuid(input.service_id) || cents(input.amount) === null))
       || (input.amount != null && cents(input.amount) === null)) return json(400, { code: 'INVALID_INPUT' });
     let card = null;
     if (input.method === 'SAVED_CARD') {

@@ -54,6 +54,7 @@ import com.trustarx.pitgo.features.providerdashboard.viewmodel.ProviderDashboard
 fun ProviderDashboardRoute(
     viewModel: ProviderDashboardViewModel,
     onLogout: () -> Unit,
+    onOpenGuinchoHistory: () -> Unit,
     onOpenIncomingRequest: (String) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -83,7 +84,7 @@ fun ProviderDashboardRoute(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
         if (result[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
-            if (pendingMode == ProviderLocationMode.PITTEC && Build.VERSION.SDK_INT >= 33) {
+            if (pendingMode in TRACKED_MODES && Build.VERSION.SDK_INT >= 33) {
                 notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             } else {
                 viewModel.enableTrackedAvailability(pendingMode)
@@ -92,6 +93,7 @@ fun ProviderDashboardRoute(
     }
     ProviderDashboardScreen(
         state, onLogout,
+        onOpenGuinchoHistory = onOpenGuinchoHistory,
         onAvailabilityChanged = { available ->
             val content = state as? ProviderDashboardUiState.Content
             val mode = content?.provider?.locationMode
@@ -141,6 +143,7 @@ private fun isIgnoringBatteryOptimizations(context: android.content.Context): Bo
 private fun ProviderDashboardScreen(
     state: ProviderDashboardUiState,
     onLogout: () -> Unit,
+    onOpenGuinchoHistory: () -> Unit,
     onAvailabilityChanged: (Boolean) -> Unit,
     onModeChanged: (ProviderLocationMode) -> Unit,
     onOpenIncomingRequest: (String) -> Unit,
@@ -159,6 +162,9 @@ private fun ProviderDashboardScreen(
                 stringResource(R.string.provider_dashboard_title),
                 style = MaterialTheme.typography.headlineMedium,
             )
+            androidx.compose.material3.OutlinedButton(onClick = onOpenGuinchoHistory) {
+                Text(stringResource(R.string.guincho_history))
+            }
             val content = state as? ProviderDashboardUiState.Content
             if (showBatteryOptimizationBanner && content?.provider?.locationMode in TRACKED_MODES) {
                 Card(

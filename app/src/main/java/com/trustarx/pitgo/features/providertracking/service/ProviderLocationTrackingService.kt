@@ -92,11 +92,9 @@ class ProviderLocationTrackingService : Service() {
                     }
                 }
             }
-            // Guincho/MOBILE has no equivalent alert in this delivery (no FCM, see research.md #6)
-            // — only an available PitTec needs this background offer-watching subroutine, and it
-            // lives inside this same job so it is cancelled/restarted alongside location tracking.
+            // Paid directed Guincho and PitTec offers use the same private polling alert.
             incomingRequestJob?.cancel()
-            if (session.account.locationMode == ProviderLocationMode.PITTEC) {
+            if (session.account.locationMode in TRACKABLE_MODES) {
                 incomingRequestJob = launch { runIncomingRequestAlerts(session.account.providerId) }
             }
             try {
@@ -164,7 +162,7 @@ class ProviderLocationTrackingService : Service() {
             val appointment = snapshot?.appointment
             val isPendingPitTecOffer = appointment != null &&
                 appointment.status == MobileAppointmentStatus.PENDING &&
-                snapshot.dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL
+                snapshot.dispatchKind in setOf(MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL, MobileDispatchKind.GUINCHO_DIRECT)
             if (isPendingPitTecOffer) {
                 val key = appointment!!.id to appointment.revision
                 if (key != lastNotifiedOffer) {
@@ -172,7 +170,7 @@ class ProviderLocationTrackingService : Service() {
                     if (incomingRequestNotifier.isReady()) {
                         val remainingSeconds = ((appointment.responseDeadlineEpochMillis ?: 0L) -
                             System.currentTimeMillis()) / 1000
-                        incomingRequestNotifier.notifyIncoming(appointment.id, remainingSeconds)
+                        incomingRequestNotifier.notifyIncoming(appointment.id, remainingSeconds, snapshot.dispatchKind == MobileDispatchKind.GUINCHO_DIRECT)
                     }
                     lastNotifiedOffer = key
                 }

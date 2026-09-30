@@ -10,6 +10,7 @@ interface PaymentGateway {
     suspend fun history(before: Payment? = null): List<Payment>
     suspend fun createPayment(command: CreatePaymentCommand): CreatePaymentResult
     suspend fun cancel(paymentId: String): CreatePaymentResult
+    suspend fun cancelUnpaidGuincho(requestId: String): Boolean = false
     suspend fun refund(paymentId: String): RefundResult
     suspend fun quoteTotal(requestId: String, appointmentId: String?, quoteVersion: Long?): BigDecimal?
     suspend fun getStatus(requestId: String): PaymentEvent
