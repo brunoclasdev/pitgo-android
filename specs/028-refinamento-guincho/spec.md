@@ -10,6 +10,10 @@
 
 ## Clarifications
 
+### Alteração de fluxo solicitada em 30/09/2026
+
+Esta orientação substitui a ordem de pagamento/aceite descrita originalmente: escolher/contratar envia um convite ao guincheiro; o cliente aguarda o aceite; aceitar abre o checkout do cliente; somente a aprovação financeira libera deslocamento e acompanhamento. O mapa enquadra cliente/ponto de coleta e guincho, atualizando conforme o prestador se move. "Cheguei" registra chegada e inicia o serviço; conclusão bilateral permanece obrigatória. Dados pessoais do cliente e trajeto completo permanecem restritos ao prestador até o pagamento ser aprovado. Homol continua com cobrança real aleatória de R$ 1,00 a R$ 2,00. Clientes antigos e pedidos já pagos conservam o caminho compatível; registros financeiros anteriores não são reescritos pela migration.
+
 ### Session 2026-09-30
 
 - Q: Como cobrar o percurso da retirada até o destino? → A: R$ 3/km como tarifa inicial configurável; aplicar 10% sobre preço-base mais adicional por km e depois somar as taxas (opção A).

@@ -9,6 +9,7 @@ import com.trustarx.pitgo.features.providerdashboard.model.ProviderDashboardUiSt
 import com.trustarx.pitgo.features.providerdashboard.model.ProviderAvailabilityIssue
 import com.trustarx.pitgo.features.providerdashboard.repository.ProviderDashboardRepository
 import com.trustarx.pitgo.core.auth.repository.SessionRepository
+import com.trustarx.pitgo.core.auth.model.AppSessionState
 import com.trustarx.pitgo.features.providertracking.repository.ProviderTrackingStateRepository
 import com.trustarx.pitgo.features.providertracking.notification.ProviderIncomingRequestNotifier
 import com.trustarx.pitgo.features.mobiledispatch.repository.MobileDispatchRepository
@@ -35,6 +36,16 @@ class ProviderDashboardViewModel(
     val state: StateFlow<ProviderDashboardUiState> = _state.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            sessionRepository.state.collect { session ->
+                val provider = (session as? AppSessionState.Authenticated.ProviderReady)?.account
+                    ?: return@collect
+                val content = _state.value as? ProviderDashboardUiState.Content ?: return@collect
+                if (provider.providerId == content.provider.providerId && provider.userId == content.provider.userId) {
+                    _state.value = content.copy(provider = provider)
+                }
+            }
+        }
         // The tracking service never survives a process restart (no invisible auto-restart, per
         // contract). If the server still has this provider marked available/MOBILE-or-PITTEC from
         // a previous session, the dashboard reopening is the "visible retomada" that must resume
@@ -51,6 +62,7 @@ class ProviderDashboardViewModel(
         }
         viewModelScope.launch {
             // A PitTec offer is invisible to `restore()` alone (see contracts/pittec-rpcs.md).
+            if (snapshot.locationMode == ProviderLocationMode.MOBILE) return@launch
             val result = dispatchRepository.restoreAnyDispatchKind()
             if (result is MobileDispatchResult.Success) {
                 val appointmentId = result.snapshot.appointment?.id

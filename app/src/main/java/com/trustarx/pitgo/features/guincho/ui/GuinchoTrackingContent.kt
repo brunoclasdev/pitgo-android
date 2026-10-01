@@ -23,19 +23,32 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GuinchoTrackingContent(state: AppointmentTrackingUiState,viewModel: AppointmentTrackingViewModel,
-    isClient: Boolean,onBack: () -> Unit) {
+    isClient: Boolean,onBack: () -> Unit,onReturnHome: () -> Unit = onBack) {
     val snapshot=state.dispatch ?: return
     val appointment=snapshot.appointment ?: return
-    val trip=snapshot.guinchoTrip ?: return
+    val trip=snapshot.guinchoTrip
+    if (trip == null) {
+        Scaffold(topBar={ TopAppBar(title={ Text(stringResource(R.string.guincho_title)) },
+            navigationIcon={ TextButton(onClick=onBack) { Text(stringResource(R.string.guincho_back)) } }) }) { padding ->
+            Column(Modifier.fillMaxSize().padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+                Text(stringResource(if(appointment.status==MobileAppointmentStatus.CANCELLED)
+                    R.string.guincho_cancelled else R.string.pittec_awaiting_payment))
+                if(appointment.status!=MobileAppointmentStatus.CANCELLED) Text(stringResource(R.string.guincho_details_after_payment))
+                TextButton(onClick=if(appointment.status==MobileAppointmentStatus.CANCELLED) onReturnHome else onBack) { Text(stringResource(R.string.guincho_home)) }
+            }
+        }
+        return
+    }
     var problem by remember(appointment.id) { mutableStateOf(false) }
     var reason by remember(appointment.id) { mutableStateOf("") }
     val money=remember { NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")) }
     val controller=remember { ParticipantMapStyleController() }
-    val viewport=remember(appointment.id) { framingViewport(trip.pickup,trip.destination) }
+    val viewport=if(state.cameraCommand != null) state.viewport else MapViewport(trip.pickup,15.0)
     val markers=buildList {
         add(MapMarkerSpec("pickup",trip.pickup,MapMarkerKind.CLIENT_LOCATION,accessibilityLabel=trip.pickupAddress))
         add(MapMarkerSpec("destination",trip.destination,MapMarkerKind.CLIENT_LOCATION,accessibilityLabel=trip.destinationAddress))
-        if(snapshot.trackingAuthorized) state.visibleLocation?.let { add(MapMarkerSpec("tow",it.coordinate,MapMarkerKind.LIVE,
+        if(snapshot.trackingAuthorized) state.visibleLocation?.let { add(MapMarkerSpec("tow",it.coordinate,
+            if(state.data is com.trustarx.pitgo.features.appointmenttracking.model.TrackingDataState.Live) MapMarkerKind.LIVE else MapMarkerKind.STALE,
             accessibilityLabel=snapshot.providerName.orEmpty())) }
     }
     Scaffold(topBar={ TopAppBar(title={ Text(stringResource(R.string.guincho_title)) },
@@ -56,7 +69,12 @@ fun GuinchoTrackingContent(state: AppointmentTrackingUiState,viewModel: Appointm
                 if(state.actionFailed) Text(stringResource(R.string.pittec_action_retry),color=MaterialTheme.colorScheme.error)
                 if(state.arriving || state.completing) LinearProgressIndicator(Modifier.fillMaxWidth())
                 when(appointment.status) {
-                    MobileAppointmentStatus.PENDING -> Text(stringResource(R.string.guincho_waiting_accept))
+                    MobileAppointmentStatus.PENDING -> {
+                        Text(stringResource(R.string.guincho_waiting_accept))
+                        if(isClient) OutlinedButton(onClick={ viewModel.cancel("CLIENT_CANCELLED_BEFORE_ACCEPTANCE") },
+                            enabled=!state.cancelling,modifier=Modifier.fillMaxWidth()) { Text(stringResource(R.string.guincho_cancel_request)) }
+                    }
+                    MobileAppointmentStatus.AWAITING_PAYMENT -> Text(stringResource(R.string.pittec_awaiting_payment))
                     MobileAppointmentStatus.ACCEPTED -> {
                         Text(stringResource(if(appointment.arrivedAt==null) R.string.guincho_on_way else R.string.guincho_arrived))
                         if(!isClient) Button(onClick=viewModel::arrive,enabled=!state.arriving,modifier=Modifier.fillMaxWidth()) {
@@ -93,6 +111,7 @@ fun GuinchoTrackingContent(state: AppointmentTrackingUiState,viewModel: Appointm
                             com.trustarx.pitgo.features.payment.model.PaymentStatus.REFUND_FAILED -> R.string.payment_support
                             else -> R.string.payment_cancelled
                         }))
+                        TextButton(onClick=onReturnHome) { Text(stringResource(R.string.guincho_home)) }
                     }
                     MobileAppointmentStatus.COMPLETED -> Text(stringResource(R.string.pittec_service_finished))
                     else -> Text(stringResource(R.string.mobile_dispatch_restoring))

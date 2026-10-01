@@ -1,6 +1,7 @@
 package com.trustarx.pitgo.features.payment.viewmodel
 
 import androidx.lifecycle.SavedStateHandle
+import com.trustarx.pitgo.BuildConfig
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.createSavedStateHandle
@@ -17,6 +18,7 @@ import com.trustarx.pitgo.features.payment.model.CreatePaymentResult
 import com.trustarx.pitgo.features.payment.model.Payment
 import com.trustarx.pitgo.features.payment.model.PaymentCheckoutUiState
 import com.trustarx.pitgo.features.payment.model.PaymentEvent
+import com.trustarx.pitgo.features.payment.model.PaymentFailure
 import com.trustarx.pitgo.features.payment.model.PaymentMethod
 import com.trustarx.pitgo.features.payment.model.PaymentStatus
 import com.trustarx.pitgo.features.payment.repository.PaymentGateway
@@ -24,15 +26,16 @@ import com.trustarx.pitgo.features.paymentmethods.model.SavedCard
 import com.trustarx.pitgo.features.paymentmethods.model.SavedCardsResult
 import com.trustarx.pitgo.features.paymentmethods.repository.SavedCardRepository
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.math.BigDecimal
 import java.util.UUID
+import kotlin.random.Random
 
 /**
  * Checkout shared by the MOBILE_SEQUENTIAL and PitTec flows (spec 018): reached from Home instead
@@ -50,6 +53,12 @@ class PaymentCheckoutViewModel(
         MobileDispatchKind.valueOf(savedStateHandle.get<String>(PitGoRoutes.PaymentDispatchKindArg).orEmpty())
     }.getOrDefault(MobileDispatchKind.MOBILE_SEQUENTIAL)
     val directed get() = dispatchKind==MobileDispatchKind.GUINCHO_DIRECT
+    private val homol = BuildConfig.ENVIRONMENT_ID == "homol"
+    private fun homolAmount(): BigDecimal = savedStateHandle.get<String>("homol_payment_amount")
+        ?.toBigDecimalOrNull()
+        ?: BigDecimal.valueOf(Random.nextLong(100, 201), 2).also {
+            savedStateHandle["homol_payment_amount"] = it.toPlainString()
+        }
     private val appointmentId: String? = savedStateHandle.get<String>(PitGoRoutes.PaymentAppointmentIdArg)
     private val quoteVersion: Long? = savedStateHandle.get<String>(PitGoRoutes.PaymentQuoteVersionArg)
         ?.toLongOrNull()
@@ -100,7 +109,7 @@ class PaymentCheckoutViewModel(
                 is PaymentEvent.StatusChanged -> {
                     existing.payment?.let {
                         paymentOrderAmount = it.amount
-                        amount = if (dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) {
+                        amount = if (!homol && dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) {
                             paymentRepository.quoteTotal(requestId, appointmentId, quoteVersion) ?: it.amount
                         } else it.amount
                         applyPayment(it)
@@ -133,8 +142,8 @@ class PaymentCheckoutViewModel(
                 _uiState.value = PaymentCheckoutUiState.InvalidService
                 return@launch
             }
-            amount = parsedAmount
-            paymentOrderAmount = if (dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) {
+            amount = if (homol) homolAmount() else parsedAmount
+            paymentOrderAmount = if (homol) amount else if (dispatchKind == MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) {
                 TEST_PAYMENT_AMOUNT
             } else parsedAmount
             savedCards = (savedCardRepository.list() as? SavedCardsResult.Success)?.cards.orEmpty()
@@ -214,7 +223,7 @@ class PaymentCheckoutViewModel(
     private fun applyPayment(payment: Payment) {
         if (currentPayment?.id == payment.id && payment.revision < (currentPayment?.revision ?: 0)) return
         currentPayment = payment
-        if (dispatchKind != MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) amount = payment.amount
+        if (homol || dispatchKind != MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL) amount = payment.amount
         if (payment.cancelRequested || (payment.status == PaymentStatus.APPROVED && payment.serviceId == null)
             || payment.status in setOf(PaymentStatus.REFUND_PENDING, PaymentStatus.REFUNDED, PaymentStatus.REFUND_FAILED)) {
             _uiState.value = PaymentCheckoutUiState.FinancialStatus(payment)
@@ -252,20 +261,18 @@ class PaymentCheckoutViewModel(
         if (!screenActive || (currentPayment == null && _uiState.value != PaymentCheckoutUiState.Verifying)) return
         observeJob?.cancel()
         observeJob = viewModelScope.launch {
-            while (isActive && screenActive) {
-                when (val event = paymentRepository.getStatus(requestId)) {
+            paymentRepository.observe(requestId).takeWhile { event ->
+                when (event) {
                     is PaymentEvent.StatusChanged -> event.payment?.let(::applyPayment)
-                    PaymentEvent.NotFound,
-                    is PaymentEvent.Failure,
-                    -> if (_uiState.value == PaymentCheckoutUiState.Verifying) {
+                    PaymentEvent.NotFound -> Unit
+                    is PaymentEvent.Failure -> if (event.reason in setOf(PaymentFailure.SESSION_EXPIRED, PaymentFailure.CONTRACT)) {
                         _uiState.value = PaymentCheckoutUiState.Failure
-                    }
+                    } // Keep waiting through transient connectivity/read failures.
                 }
-                if (_uiState.value !is PaymentCheckoutUiState.Verifying &&
-                    _uiState.value !is PaymentCheckoutUiState.AwaitingPix &&
-                    _uiState.value !is PaymentCheckoutUiState.AwaitingCardConfirmation) return@launch
-                delay(5_000L)
-            }
+                screenActive && (_uiState.value is PaymentCheckoutUiState.Verifying ||
+                    _uiState.value is PaymentCheckoutUiState.AwaitingPix ||
+                    _uiState.value is PaymentCheckoutUiState.AwaitingCardConfirmation)
+            }.collect()
         }
     }
 

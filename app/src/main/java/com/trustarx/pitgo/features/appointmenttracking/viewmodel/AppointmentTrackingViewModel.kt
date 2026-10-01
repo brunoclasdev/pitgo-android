@@ -59,7 +59,10 @@ class AppointmentTrackingViewModel(
             // modality/service is exclusive, so at most one ever resolves.
             val direct=dispatchRepository.appointmentSnapshot(appointmentId)
             when (val dispatch = if(direct is MobileDispatchResult.Success) direct else dispatchRepository.restoreAnyDispatchKind()) {
-                is MobileDispatchResult.Success -> if(dispatch.snapshot.appointment?.id==appointmentId) _state.value = _state.value.copy(dispatch = dispatch.snapshot)
+                is MobileDispatchResult.Success -> if(dispatch.snapshot.appointment?.id==appointmentId) {
+                    _state.value = _state.value.copy(dispatch = dispatch.snapshot)
+                    applyGuinchoPickup()
+                }
                 else -> Unit
             }
             // Only the client publishes their own position (publish_client_location is a
@@ -79,6 +82,7 @@ class AppointmentTrackingViewModel(
                         val current = _state.value.dispatch
                         if (current == null || result.snapshot.revision >= current.revision) {
                             _state.value = _state.value.copy(dispatch = result.snapshot)
+                            applyGuinchoPickup()
                         }
                         if (result.snapshot.appointment.status in setOf(
                             com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus.CANCELLED,
@@ -90,7 +94,7 @@ class AppointmentTrackingViewModel(
                             _state.value = _state.value.copy(data = TrackingDataState.Ended, clientLocation = null, route = null, summaryExpanded = false)
                         }
                     }
-                    delay(5_000)
+                    delay(2_000)
                 }
             }
             // repository.observe()'s underlying channelFlow sends one Failure/Offline event and
@@ -100,6 +104,10 @@ class AppointmentTrackingViewModel(
             // listening anymore for the appointment actually finishing or the provider's position
             // updating. Keeps resubscribing until the appointment reaches a terminal state.
             while (!terminal) {
+                if (_state.value.isGuincho && !_state.value.dispatch!!.trackingAuthorized) {
+                    delay(OBSERVE_RESUBSCRIBE_DELAY_MS)
+                    continue
+                }
                 try {
                     coroutineScope {
                         launch {
@@ -303,6 +311,12 @@ class AppointmentTrackingViewModel(
         } else {
             if (!_state.value.isPitTec || cameraRevision == 0L) centerOnClientOnly(clientLocation)
         }
+    }
+
+    private fun applyGuinchoPickup() {
+        val trip = _state.value.dispatch?.guinchoTrip ?: return
+        if (_state.value.clientLocation == null) applyClientLocation(AppointmentClientLocation(
+            trip.pickup.latitude, trip.pickup.longitude, _state.value.dispatch!!.serverNowEpochMillis))
     }
 
     private fun centerOnClientOnly(clientLocation: AppointmentClientLocation) {

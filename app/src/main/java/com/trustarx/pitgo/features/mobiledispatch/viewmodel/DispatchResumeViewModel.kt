@@ -32,6 +32,11 @@ class DispatchResumeViewModel(
         viewModelScope.launch {
             sessionRepository.state.collectLatest { session ->
                 val authenticated = session as? AppSessionState.Authenticated
+                if ((authenticated as? AppSessionState.Authenticated.ProviderReady)?.account?.locationMode ==
+                    com.trustarx.pitgo.core.account.model.ProviderLocationMode.MOBILE) {
+                    _state.value = DispatchResumeState.None
+                    return@collectLatest
+                }
                 if (authenticated == null) { _state.value = DispatchResumeState.None; return@collectLatest }
                 _state.value = DispatchResumeState.Loading
                 // Providers stay on this snapshot for the whole session (dashboard, tracking, etc.),

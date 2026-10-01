@@ -56,7 +56,7 @@ class PitGoAppContainer(context: Context) {
     val providerTrackingPreferences = ProviderTrackingPreferences(context)
     val appointmentTrackingRepository = AppointmentTrackingRepository(supabase)
     val serviceMapRepository = ServiceMapRepository(supabase)
-    val guinchoAddressRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoAddressRepository(context)
+    val guinchoAddressRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoAddressRepository(context, supabase)
     val guinchoRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoRepository(supabase)
     val providerDashboardRepository = ProviderDashboardRepository(supabase)
     val mobileDispatchRepository = MobileDispatchRepository(supabase)
@@ -94,7 +94,7 @@ class PitGoAppContainer(context: Context) {
                     mode = provider.locationMode ?: com.trustarx.pitgo.core.account.model.ProviderLocationMode.MOBILE,
                 )
             }
-            providerTrackingStateRepository.stop()
+            providerTrackingStateRepository.stop(updateAvailability = false)
             providerTrackingPreferences.clear()
             deviceLocationRepository.clearAllVisibleUses()
         },

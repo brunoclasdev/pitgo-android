@@ -51,6 +51,12 @@ val PitTecBottomNavigationItems = listOf(
     BottomNavigationItem(BottomItemId.PROFILE, R.string.nav_profile, R.drawable.ic_nav_profile, 3),
 )
 
+val GuinchoBottomNavigationItems = listOf(
+    BottomNavigationItem(BottomItemId.MAP, R.string.guincho_home_map, R.drawable.ic_nav_map, 0),
+    BottomNavigationItem(BottomItemId.APPOINTMENTS, R.string.guincho_home_history, R.drawable.ic_nav_appointments, 1),
+    BottomNavigationItem(BottomItemId.PROFILE, R.string.nav_profile, R.drawable.ic_nav_profile, 2),
+)
+
 @Composable
 fun PitGoBottomNavigation(
     items: List<BottomNavigationItem>,

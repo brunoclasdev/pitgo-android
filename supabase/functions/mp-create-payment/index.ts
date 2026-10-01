@@ -9,6 +9,12 @@ Deno.serve(async req => {
     const db = serviceClient(), user = await authenticatedUser(db, req);
     if (!user) return json(401, { code: 'SESSION_REQUIRED' });
     const input = object(await req.json().catch(() => null));
+    const homol = input.checkout_environment === 'homol';
+    if (input.checkout_environment != null && !['prod', 'homol'].includes(String(input.checkout_environment))) {
+      return json(400, { code: 'INVALID_INPUT' });
+    }
+    const testCents = cents(input.amount);
+    if (homol && (testCents === null || testCents < 100 || testCents > 200)) return json(400, { code: 'INVALID_INPUT' });
     if (!isUuid(input.request_id) || !['PIX','SAVED_CARD'].includes(String(input.method))
       || !['MOBILE_SEQUENTIAL','PITTEC_AUTO_SEQUENTIAL','GUINCHO_DIRECT'].includes(String(input.dispatch_kind))
       || (input.dispatch_kind === 'MOBILE_SEQUENTIAL' && !isUuid(input.service_id))
@@ -38,7 +44,7 @@ Deno.serve(async req => {
       }
     }
     if (!user.email) return json(422, { code: 'PAYER_DOCUMENT_REQUIRED' });
-    const { data, error } = await db.rpc('reserve_order_payment', {
+    const { data, error } = await db.rpc(homol ? 'reserve_homol_order_payment' : 'reserve_order_payment', {
       p_client_id: user.id, p_request_id: input.request_id, p_dispatch_kind: input.dispatch_kind,
       p_service_id: input.service_id ?? null, p_appointment_id: input.appointment_id ?? null,
       p_quote_version: input.quote_version ?? null, p_method: input.method, p_card_id: input.saved_card_id ?? null,

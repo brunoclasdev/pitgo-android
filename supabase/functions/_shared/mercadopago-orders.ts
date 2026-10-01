@@ -37,7 +37,7 @@ export function normalizeOrder(order: JsonObject): PaymentEvidence | null {
   if (status === 'processed' && detail === 'accredited' && ps === 'processed' && pd === 'accredited'
     && paid === amount && refunded === 0) result = 'APPROVED';
   else if (['created','processing','action_required'].includes(status)
-    && ['created','processing','action_required'].includes(ps) && (paid === null || paid === 0)) result = 'PENDING';
+    && ['created','processing','action_required'].includes(ps) && refunded === 0) result = 'PENDING';
   // Orders can report total_paid_amount even when the card transaction is
   // rejected by risk analysis. The provider status pair is authoritative for
   // this terminal outcome; otherwise the checkout would remain VERIFYING.
@@ -62,7 +62,9 @@ export function normalizeOrder(order: JsonObject): PaymentEvidence | null {
     currency: ['BR', 'BRA'].includes(String(order.country_code ?? '').toUpperCase())
       ? 'BRL' : String(order.currency_id ?? ''),
     status, detail, transaction_status: ps, transaction_detail: pd, result,
-    settled_amount: paid === null ? null : decimal(paid),
+    // A pending Order can report its nominal paid amount before crediting funds.
+    // Only accredited/terminal evidence can establish settlement.
+    settled_amount: result === 'PENDING' ? '0.00' : paid === null ? null : decimal(paid),
     refunded_amount: refunded === null ? null : decimal(refunded),
     refund_id: confirmed[0]?.id == null ? null : String(confirmed[0].id),
     method: method.id === 'pix' ? 'PIX' : 'SAVED_CARD', pix,

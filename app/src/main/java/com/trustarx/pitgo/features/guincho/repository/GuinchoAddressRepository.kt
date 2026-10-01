@@ -5,6 +5,14 @@ import android.location.Geocoder
 import android.os.Build
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.map.model.MapCoordinate
+import com.trustarx.pitgo.features.guincho.model.*
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.functions.functions
+import io.github.jan.supabase.exceptions.RestException
+import io.ktor.client.call.body
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -13,10 +21,41 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.coroutines.resume
 
-class GuinchoAddressRepository(context: Context) {
+class GuinchoAddressRepository(context: Context, private val client: SupabaseClient) {
     private val application = context.applicationContext
 
-    suspend fun pickupAddress(coordinate: MapCoordinate): String {
+    suspend fun suggestions(query: String, proximity: MapCoordinate): GuinchoResult<List<GuinchoAddressSuggestion>> =
+        search(query, proximity, reverse = false)
+
+    suspend fun destinationAddress(coordinate: MapCoordinate): String {
+        val result = search("", coordinate, reverse = true)
+        if (result is GuinchoResult.Success) result.value.firstOrNull()?.let { return it.label }
+        return addressAtCoordinate(coordinate, R.string.guincho_destination_coordinates)
+    }
+
+    private suspend fun search(query: String, coordinate: MapCoordinate, reverse: Boolean): GuinchoResult<List<GuinchoAddressSuggestion>> = try {
+        val response = withTimeoutOrNull(10_000L) {
+            client.functions.invoke("guincho-address-search", body = buildJsonObject {
+                put("query", query); put("latitude", coordinate.latitude); put("longitude", coordinate.longitude)
+                put("reverse", reverse)
+            }).body<AddressSuggestionsDto>()
+        }
+        if (response == null) GuinchoResult.Failure(GuinchoFailure.TIMEOUT)
+        else GuinchoResult.Success(response.suggestions.map {
+            require(it.label.isNotBlank() && it.label.length <= 500)
+            val point = MapCoordinate(it.latitude, it.longitude)
+            require(point.isValid)
+            GuinchoAddressSuggestion(it.id, it.label, point)
+        })
+    } catch (cancel: CancellationException) { throw cancel }
+      catch (error: RestException) {
+          GuinchoResult.Failure(if (error.statusCode == 401) GuinchoFailure.SESSION_EXPIRED else GuinchoFailure.SERVICE_UNAVAILABLE)
+      } catch (_: Exception) { GuinchoResult.Failure(GuinchoFailure.SERVICE_UNAVAILABLE) }
+
+    suspend fun pickupAddress(coordinate: MapCoordinate): String =
+        addressAtCoordinate(coordinate, R.string.guincho_pickup_coordinates)
+
+    private suspend fun addressAtCoordinate(coordinate: MapCoordinate, fallbackRes: Int): String {
         require(coordinate.isValid)
         val address = try {
             withTimeoutOrNull(3_000L) {
@@ -42,8 +81,11 @@ class GuinchoAddressRepository(context: Context) {
             null
         }
         return address?.trim()?.takeIf { it.isNotEmpty() }?.take(500)
-            ?: application.getString(R.string.guincho_pickup_coordinates,
+            ?: application.getString(fallbackRes,
                 String.format(Locale.US, "%.6f", coordinate.latitude),
                 String.format(Locale.US, "%.6f", coordinate.longitude))
     }
 }
+
+@Serializable private data class AddressSuggestionsDto(val suggestions: List<AddressSuggestionDto>)
+@Serializable private data class AddressSuggestionDto(val id: String, val label: String, val latitude: Double, val longitude: Double)

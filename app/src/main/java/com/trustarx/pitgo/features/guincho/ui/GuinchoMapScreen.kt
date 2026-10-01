@@ -7,11 +7,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
@@ -36,6 +40,11 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
     onGarage: () -> Unit, contractingEnabled: Boolean, onSessionExpired: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context=LocalContext.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    androidx.lifecycle.compose.LifecycleStartEffect(viewModel) {
+        viewModel.startDiscoveryUpdates()
+        onStopOrDispose { viewModel.stopDiscoveryUpdates() }
+    }
     LaunchedEffect(state.checkout?.searchId) { state.checkout?.let(onContract) }
     LaunchedEffect(state.failure) { if(state.failure==com.trustarx.pitgo.features.guincho.model.GuinchoFailure.SESSION_EXPIRED) onSessionExpired() }
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { viewModel.loadVehicles() }
@@ -53,11 +62,11 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
     val money=remember { NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")) }
     Scaffold(topBar={ TopAppBar(title={ Text(stringResource(R.string.guincho_title)) },
         navigationIcon={ TextButton(onClick=onBack) { Text(stringResource(R.string.guincho_back)) } }) }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 MapLibreMapHost(PitGoManagedMapStyle.configuration,MapRenderModel(state.markers),state.viewport,
                     state.camera,0,state.online,controller,viewModel::viewport,viewModel::select,viewModel::surface,
-                    Modifier.fillMaxSize())
+                    Modifier.fillMaxSize(),onUserGesture={ keyboard?.hide(); viewModel.mapGesture() })
                 if(state.stage==GuinchoMapStage.PICKUP || state.stage==GuinchoMapStage.DESTINATION) {
                     val label=stringResource(R.string.guincho_confirm_point)
                     Surface(Modifier.align(Alignment.Center).semantics { contentDescription=label },shape=MaterialTheme.shapes.small) {
@@ -97,12 +106,36 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
                         Text(stringResource(R.string.guincho_pickup_label,state.pickupAddress))
                         Text(stringResource(R.string.guincho_destination_instruction))
                         OutlinedTextField(value=state.destinationAddress,onValueChange=viewModel::address,
-                            label={ Text(stringResource(R.string.guincho_destination_address)) },modifier=Modifier.fillMaxWidth())
-                        Button(onClick=viewModel::confirmPoint,enabled=state.operation==GuinchoMapOperation.IDLE,
+                            label={ Text(stringResource(R.string.guincho_destination_address)) },modifier=Modifier.fillMaxWidth(),
+                            singleLine=true,keyboardOptions=KeyboardOptions(imeAction=ImeAction.Search),
+                            keyboardActions=KeyboardActions(onSearch={ keyboard?.hide() }))
+                        if (state.searchingAddress) {
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Text(stringResource(R.string.guincho_address_searching))
+                        }
+                        state.addressSuggestions.forEach { suggestion ->
+                            TextButton(onClick={ keyboard?.hide(); viewModel.chooseDestination(suggestion) },
+                                modifier=Modifier.fillMaxWidth()) {
+                                Text(suggestion.label,modifier=Modifier.fillMaxWidth())
+                            }
+                        }
+                        if (state.addressSearchFailure) Text(stringResource(R.string.guincho_address_search_failure))
+                        else if (state.addressSearchCompleted && state.addressSuggestions.isEmpty())
+                            Text(stringResource(R.string.guincho_address_no_results))
+                        OutlinedTextField(value=state.destinationNumber,onValueChange=viewModel::number,
+                            label={ Text(stringResource(R.string.guincho_destination_number)) },
+                            placeholder={ Text(stringResource(R.string.guincho_destination_number_hint)) },
+                            modifier=Modifier.fillMaxWidth(),singleLine=true,
+                            keyboardOptions=KeyboardOptions(imeAction=ImeAction.Done),
+                            keyboardActions=KeyboardActions(onDone={ keyboard?.hide() }))
+                        if (state.destination!=null && state.destinationNumber.isNotBlank())
+                            Text(stringResource(R.string.guincho_destination_label,state.fullDestinationAddress))
+                        Button(onClick={ keyboard?.hide(); viewModel.confirmPoint() },enabled=state.operation==GuinchoMapOperation.IDLE &&
+                            state.canConfirmDestination,
                             modifier=Modifier.fillMaxWidth()) { Text(stringResource(R.string.guincho_confirm_point)) }
                     }
                     GuinchoMapStage.CONFIRM -> {
-                        Text(state.pickupAddress+" → "+state.destinationAddress)
+                        Text(state.pickupAddress+" → "+state.fullDestinationAddress)
                         Text(stringResource(R.string.guincho_vehicle))
                         state.vehicles.forEach { vehicle ->
                             FilterChip(selected=state.vehicleId==vehicle.id,onClick={ viewModel.vehicle(vehicle.id) },

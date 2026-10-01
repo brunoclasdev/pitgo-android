@@ -16,12 +16,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlin.math.ceil
 
 class ProviderIncomingRequestViewModel(
     private val providerId: String,
     private val repository: MobileDispatchRepository,
     private val appointmentTrackingRepository: AppointmentTrackingRepository,
+    private val automaticStart: Boolean = true,
 ) : ViewModel() {
     private val _state = MutableStateFlow<ProviderIncomingUiState>(ProviderIncomingUiState.Loading)
     val state = _state.asStateFlow()
@@ -33,30 +35,47 @@ class ProviderIncomingRequestViewModel(
     private var revision = 0L
     private var cameraRevision = 0L
 
-    init {
+    private var observing: Job? = null
+    private var clockOffset = 0L
+    private val refreshVersion = MutableStateFlow(0L)
+    val refreshSequence = refreshVersion.asStateFlow()
+    var validatedState: ProviderIncomingUiState = ProviderIncomingUiState.Loading
+        private set
+    private val response = MutableStateFlow<PendingDispatchAction?>(null)
+    val completedResponse = response.asStateFlow()
+    fun consumeResponse() { response.value = null }
+    init { if (automaticStart) startObserving() }
+
+    fun startObserving() {
+        if (observing?.isActive == true) return
         refresh()
-        viewModelScope.launch {
-            repository.observeProvider(providerId).collect { refresh() }
-        }
-        viewModelScope.launch {
-            while (true) { updateCountdown(); delay(1_000) }
-        }
-        // Realtime is only a notification channel.  Keep the screen authoritative even when the
-        // websocket is silently stale (a common case after backgrounding or changing networks).
-        // The repository restore is status-aware and moves Request -> Active/None as soon as the
-        // server changes the appointment, so the UI never remains indefinitely on PENDING.
-        viewModelScope.launch {
-            while (true) {
-                delay(POLL_INTERVAL_MS)
-                refresh()
+        observing = viewModelScope.launch {
+            launch {
+                while (isActive) {
+                    try { repository.observeProvider(providerId).collect { refresh() } }
+                    catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+                    catch (_: Exception) { refresh() }
+                    delay(3_000)
+                }
+            }
+            launch { while (isActive) { updateCountdown(); delay(1_000) } }
+            launch { while (isActive) { delay(POLL_INTERVAL_MS); refresh() } }
+            if (automaticStart) launch {
+                state.collect { current ->
+                    val id = (current as? ProviderIncomingUiState.Active)?.snapshot?.appointment?.id
+                    if (id != observedAppointmentId) observeAppointmentLocation(id)
+                }
             }
         }
-        viewModelScope.launch {
-            state.collect { current ->
-                val appointmentId = (current as? ProviderIncomingUiState.Active)?.snapshot?.appointment?.id
-                if (appointmentId != observedAppointmentId) observeAppointmentLocation(appointmentId)
-            }
-        }
+    }
+    fun stopObserving() {
+        observing?.cancel(); observing = null
+        actionJob?.cancel(); actionJob = null
+        locationJob?.cancel(); locationJob = null
+        observedAppointmentId = null
+        _state.value = ProviderIncomingUiState.Loading
+        validatedState = ProviderIncomingUiState.Loading
+        _mapState.value = ProviderMapState()
     }
 
     fun refresh() = submit(null) { repository.restoreAnyDispatchKind() }
@@ -81,13 +100,23 @@ class ProviderIncomingRequestViewModel(
             else -> return
         }
         val appointment = snapshot.appointment ?: return
+        if (snapshot.dispatchKind == MobileDispatchKind.GUINCHO_DIRECT &&
+            pending in setOf(PendingDispatchAction.ACCEPT, PendingDispatchAction.DECLINE)) {
+            val current = _state.value as? ProviderIncomingUiState.Request ?: return
+            if (current.failure != null || current.pending != null ||
+                (appointment.responseDeadlineEpochMillis ?: 0L) <= System.currentTimeMillis() + clockOffset) return
+        }
         submit(pending) { block(appointment.id, appointment.revision) }
     }
 
     private fun submit(pending: PendingDispatchAction?, block: suspend () -> MobileDispatchResult) {
-        if (actionJob?.isActive == true) return
         val requestState = _state.value as? ProviderIncomingUiState.Request
         val activeState = _state.value as? ProviderIncomingUiState.Active
+        if (actionJob?.isActive == true) {
+            if (pending == null || requestState?.pending != null || activeState?.pending != null) return
+            // A user response takes precedence over a read-only background refresh.
+            actionJob?.cancel()
+        }
         if (pending != null) {
             val marker = DispatchPendingAction(pending, ++revision)
             when {
@@ -96,8 +125,12 @@ class ProviderIncomingRequestViewModel(
             }
         }
         actionJob = viewModelScope.launch {
-            when (val result = block()) {
-                MobileDispatchResult.None -> _state.value = ProviderIncomingUiState.None
+            val result = block()
+            when (result) {
+                MobileDispatchResult.None -> {
+                    _state.value = ProviderIncomingUiState.None
+                    if (pending == PendingDispatchAction.DECLINE) response.value = pending
+                }
                 is MobileDispatchResult.Failure -> _state.value = when (result.reason) {
                     MobileDispatchFailure.SESSION_EXPIRED -> ProviderIncomingUiState.SessionExpired
                     else -> requestState?.copy(pending = null, failure = result.reason)
@@ -105,19 +138,23 @@ class ProviderIncomingRequestViewModel(
                         ?: ProviderIncomingUiState.Failure(result.reason)
                 }
                 is MobileDispatchResult.Success -> {
+                    clockOffset = result.snapshot.serverNowEpochMillis - System.currentTimeMillis()
                     val appointment = result.snapshot.appointment
+                    if (pending in setOf(PendingDispatchAction.ACCEPT, PendingDispatchAction.DECLINE)) response.value = pending
                     _state.value = if (appointment?.status == MobileAppointmentStatus.PENDING) {
-                        ProviderIncomingUiState.Request(result.snapshot)
+                        ProviderIncomingUiState.Request(result.snapshot, remainingSeconds = ceil(((appointment.responseDeadlineEpochMillis ?: 0L) - result.snapshot.serverNowEpochMillis) / 1000.0).toLong().coerceAtLeast(0))
                     } else ProviderIncomingUiState.Active(result.snapshot)
                 }
             }
+            validatedState = _state.value
+            refreshVersion.value += 1
         }
     }
 
     private fun updateCountdown() {
         val current = _state.value as? ProviderIncomingUiState.Request ?: return
         val deadline = current.snapshot.appointment?.responseDeadlineEpochMillis ?: return
-        val offset = current.snapshot.serverNowEpochMillis - System.currentTimeMillis()
+        val offset = clockOffset
         _state.value = current.copy(
             remainingSeconds = ceil((deadline - (System.currentTimeMillis() + offset)) / 1000.0)
                 .toLong().coerceAtLeast(0),
@@ -167,17 +204,18 @@ class ProviderIncomingRequestViewModel(
     }
 
     companion object {
-        private const val POLL_INTERVAL_MS = 5_000L
+        private const val POLL_INTERVAL_MS = 2_000L
 
         fun factory(
             providerId: String,
             repository: MobileDispatchRepository,
             appointmentTrackingRepository: AppointmentTrackingRepository,
+            automaticStart: Boolean = true,
         ) =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    ProviderIncomingRequestViewModel(providerId, repository, appointmentTrackingRepository) as T
+                    ProviderIncomingRequestViewModel(providerId, repository, appointmentTrackingRepository, automaticStart) as T
             }
     }
 }

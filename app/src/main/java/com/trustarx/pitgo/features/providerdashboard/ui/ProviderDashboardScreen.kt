@@ -328,7 +328,7 @@ private fun ProviderDashboardScreen(
                     }
                 }
             }
-            (state as? ProviderDashboardUiState.Content)?.incomingAppointmentId?.let { appointmentId ->
+            (state as? ProviderDashboardUiState.Content)?.takeIf { it.provider.locationMode != ProviderLocationMode.MOBILE }?.incomingAppointmentId?.let { appointmentId ->
                 Button(
                     onClick = { onOpenIncomingRequest(appointmentId) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = PitGoSize.PrimaryActionMinHeight),

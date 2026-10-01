@@ -16,7 +16,7 @@ import kotlinx.serialization.json.*
 
 class GuinchoRepository(private val client: SupabaseClient) {
     suspend fun reserve(quote: GuinchoQuote,operationId: String) = call {
-        requireNotNull(client.postgrest.rpc("create_guincho_request",buildJsonObject {
+        requireNotNull(client.postgrest.rpc("create_guincho_request_before_payment",buildJsonObject {
             put("p_quote_id",quote.id); put("p_operation_id",operationId)
         }).decodeAs<com.trustarx.pitgo.features.mobiledispatch.data.MobileDispatchEnvelopeDto>().domainOrNull())
     }

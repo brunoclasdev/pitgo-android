@@ -24,6 +24,7 @@ internal data class CreatePaymentRequestDto(
     val method: String,
     @SerialName("saved_card_id") val savedCardId: String? = null,
     @SerialName("card_security_code_token") val cardSecurityCodeToken: String? = null,
+    @SerialName("checkout_environment") val checkoutEnvironment: String = "prod",
 )
 
 @Serializable

@@ -74,6 +74,7 @@ fun AppointmentTrackingRoute(
     onFinished: () -> Unit,
     onSessionExpired: () -> Unit,
     historical: Boolean = false,
+    onNeedsPayment: (com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchSnapshot) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LifecycleStartEffect(viewModel) {
@@ -81,6 +82,11 @@ fun AppointmentTrackingRoute(
         onStopOrDispose { viewModel.onHidden() }
     }
     var wasDisputed by remember(viewModel) { mutableStateOf(false) }
+    LaunchedEffect(state.dispatch?.appointment?.status, historical, isClient) {
+        val snapshot = state.dispatch
+        if (!historical && isClient && state.isGuincho &&
+            snapshot?.appointment?.status == MobileAppointmentStatus.AWAITING_PAYMENT) onNeedsPayment(snapshot)
+    }
     LaunchedEffect(state.data, state.dispatch?.appointment?.status) {
         if (state.data is TrackingDataState.SessionExpired) onSessionExpired()
         val status = state.dispatch?.appointment?.status
@@ -89,7 +95,8 @@ fun AppointmentTrackingRoute(
                 (wasDisputed && status == MobileAppointmentStatus.CANCELLED))) onFinished()
     }
     if(state.isGuincho) {
-        com.trustarx.pitgo.features.guincho.ui.GuinchoTrackingContent(state,viewModel,isClient,onBack)
+        com.trustarx.pitgo.features.guincho.ui.GuinchoTrackingContent(state,viewModel,isClient,onBack,
+            onReturnHome = if(historical) onBack else onFinished)
         return
     }
     AppointmentTrackingScreen(

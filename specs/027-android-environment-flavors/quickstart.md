@@ -2,6 +2,12 @@
 
 **Configuração vigente (30/09/2026)**: Dev usa o projeto de desenvolvimento e simulação local. Homol espelha as propriedades públicas de Prod e usa o mesmo backend, conta Mercado Pago e pagamentos reais. Seções datadas abaixo registram etapas anteriores e não descrevem a configuração vigente quando citam Dev/Homol compartilhados. Um APK Android sem assinatura não pode ser instalado; use `homolDebug`, assinado automaticamente com a chave de debug, para testar sem chave de release.
 
+**Exceção solicitada para pagamentos Homol (30/09/2026)**: o checkout Homol sorteia um valor em centavos entre R$ 1,00 e R$ 2,00 (inclusive), uma vez por entrada de checkout. O valor fica em SavedStateHandle; pagamentos já criados reutilizam o valor persistido no banco. Pix e cartão usam o mesmo valor exibido. Dev mantém simulação; o checkout Prod mantém a regra anterior.
+
+A requisição Homol envia `checkout_environment=homol`. A Edge Function autenticada usa a reserva exclusiva de Homol, acessível apenas ao service_role, valida faixa/precisão e conserva os controles de proprietário, cotação, prazo e idempotência. `payments.checkout_environment` identifica a cobrança; a cotação comercial/remuneração não é recalculada. Para atendimentos direcionados, `appointments.payment_amount` registra o valor efetivamente cobrado e é usado pelos controles de aprovação e continuidade. O campo de ambiente identifica o fluxo do aplicativo; não substitui a autenticação da conta.
+
+Migration `20260930153000_homol_random_checkout_amount.sql` aplicada com `npx supabase` nos dois bancos e Edge Function `mp-create-payment` publicada em ambos. Auditoria de permissões/contratos aprovada. Build Homol, compilação Kotlin Dev/Prod e lint Homol passaram; nenhum pagamento foi criado durante a validação. Para conferir manualmente, abrir um checkout Homol novo, verificar a faixa, recriar a tela e confirmar que o valor não muda; realizar Pix/cartão com autorização do usuário e conferir valor do pagamento e liberação do atendimento. Cobranças antigas conservam seus valores.
+
 ## Prerequisites
 
 - Android SDK configurado para compile SDK 37 e JDK compatível com o projeto.

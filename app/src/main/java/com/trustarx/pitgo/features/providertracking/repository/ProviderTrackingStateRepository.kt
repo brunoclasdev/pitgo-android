@@ -14,8 +14,10 @@ class ProviderTrackingStateRepository(private val context: Context) {
     val state: StateFlow<ProviderTrackingState> = _state.asStateFlow()
 
     fun start() {
-        if (_state.value !is ProviderTrackingState.Stopped) return
-        _state.value = ProviderTrackingState.Starting
+        if (_state.value == ProviderTrackingState.Stopping) return
+        // A process can survive a service kill without receiving onDestroy.
+        // The service handles repeated START commands idempotently.
+        if (_state.value == ProviderTrackingState.Stopped) _state.value = ProviderTrackingState.Starting
         ContextCompat.startForegroundService(
             context,
             Intent(context, ProviderLocationTrackingService::class.java)
@@ -23,12 +25,13 @@ class ProviderTrackingStateRepository(private val context: Context) {
         )
     }
 
-    fun stop() {
+    fun stop(updateAvailability: Boolean = true) {
         if (_state.value == ProviderTrackingState.Stopped) return
         _state.value = ProviderTrackingState.Stopping
         context.startService(
             Intent(context, ProviderLocationTrackingService::class.java)
-                .setAction(ProviderLocationTrackingService.ACTION_STOP),
+                .setAction(ProviderLocationTrackingService.ACTION_STOP)
+                .putExtra(ProviderLocationTrackingService.EXTRA_UPDATE_AVAILABILITY, updateAvailability),
         )
     }
 

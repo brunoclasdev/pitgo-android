@@ -71,6 +71,8 @@ class DeviceLocationRepository(private val dataSource: AndroidLocationDataSource
         }
     }
 
+    fun areLocationServicesEnabled(): Boolean = dataSource.areLocationServicesEnabled()
+
     fun preciseUpdates(): Flow<DeviceLocationFix> = dataSource.preciseUpdates()
         .filter { it.isHighQuality(System.currentTimeMillis()) }
 

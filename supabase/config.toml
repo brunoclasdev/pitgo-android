@@ -72,3 +72,7 @@ verify_jwt = false
 verify_jwt = false
 [functions.guincho-quote]
 verify_jwt = false
+
+[functions.guincho-address-search]
+# The function validates the caller with auth.getUser and requires a ready client account.
+verify_jwt = false

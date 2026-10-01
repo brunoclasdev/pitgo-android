@@ -1,6 +1,9 @@
 package com.trustarx.pitgo
 
 import android.os.Bundle
+import android.content.Intent
+import com.trustarx.pitgo.features.providertracking.notification.GuinchoNotificationOpen
+import com.trustarx.pitgo.features.providertracking.notification.ProviderIncomingRequestNotifier
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -30,6 +33,19 @@ import com.trustarx.pitgo.core.navigation.PitGoNavHost
 import com.trustarx.pitgo.core.preferences.AppearanceMode
 
 class MainActivity : ComponentActivity() {
+    private var incomingOpen by mutableStateOf<GuinchoNotificationOpen?>(null)
+    private fun readIncoming(intent: Intent?) {
+        val id = intent?.getStringExtra(ProviderIncomingRequestNotifier.EXTRA_APPOINTMENT) ?: return
+        val provider = intent.getStringExtra(ProviderIncomingRequestNotifier.EXTRA_PROVIDER) ?: return
+        incomingOpen = GuinchoNotificationOpen(id, provider, SystemClock.elapsedRealtimeNanos())
+        intent.removeExtra(ProviderIncomingRequestNotifier.EXTRA_APPOINTMENT)
+        intent.removeExtra(ProviderIncomingRequestNotifier.EXTRA_PROVIDER)
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        readIncoming(intent)
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
         val startedAt = SystemClock.elapsedRealtime()
@@ -38,6 +54,7 @@ class MainActivity : ComponentActivity() {
             !startupReady || SystemClock.elapsedRealtime() - startedAt < 500L
         }
         super.onCreate(savedInstanceState)
+        readIncoming(intent)
         enableEdgeToEdge()
         setContent {
             val container = (application as PitGoApplication).container
@@ -55,7 +72,7 @@ class MainActivity : ComponentActivity() {
                     showBrandSplash = false
                 }
                 Box(Modifier.fillMaxSize()) {
-                    PitGoNavHost(container = container)
+                    PitGoNavHost(container = container, incomingOpen = incomingOpen, onIncomingConsumed = { incomingOpen = null })
                     if (showBrandSplash) {
                         Image(
                             painter = painterResource(R.drawable.pitgo_image1200),

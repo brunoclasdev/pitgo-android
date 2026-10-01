@@ -1,6 +1,24 @@
 package com.trustarx.pitgo.core.navigation
 
 import android.app.Activity
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.compose.LifecycleStartEffect
+import com.trustarx.pitgo.features.mobiledispatch.model.ProviderIncomingUiState
+import com.trustarx.pitgo.features.mobiledispatch.model.PendingDispatchAction
+import com.trustarx.pitgo.features.guincho.ui.GuinchoIncomingRequestCard
+import com.trustarx.pitgo.features.guincho.ui.GuinchoProviderHomeRoute
+import com.trustarx.pitgo.features.guincho.viewmodel.GuinchoProviderHomeViewModel
+import com.trustarx.pitgo.features.providertracking.notification.GuinchoNotificationOpen
+import com.trustarx.pitgo.features.payment.model.PaymentStatus
+import com.trustarx.pitgo.R
 import android.content.Context
 import android.content.ContextWrapper
 import com.trustarx.pitgo.core.account.model.ProviderLocationMode
@@ -89,10 +107,14 @@ import com.trustarx.pitgo.features.payment.viewmodel.PaymentCheckoutViewModel
 import com.trustarx.pitgo.features.paymentmethods.ui.PaymentMethodsRoute
 import com.trustarx.pitgo.features.paymentmethods.viewmodel.PaymentMethodsViewModel
 
+private class GuinchoSessionViewModelOwner : ViewModelStoreOwner {
+    override val viewModelStore = ViewModelStore()
+}
+
 private const val TRACKING_WATCHDOG_INTERVAL_MS = 30_000L
 
 @Composable
-fun PitGoNavHost(container: PitGoAppContainer) {
+fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotificationOpen? = null, onIncomingConsumed: () -> Unit = {}) {
     val navController = rememberNavController()
     val sessionViewModel: SessionViewModel = viewModel(
         factory = SessionViewModel.factory(container.sessionRepository),
@@ -111,6 +133,98 @@ fun PitGoNavHost(container: PitGoAppContainer) {
     val migrationStage by container.providerMigrationCoordinator.stage.collectAsStateWithLifecycle()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
+    val guinchoAccount = (sessionState as? AppSessionState.Authenticated.ProviderReady)?.account
+        ?.takeIf { it.locationMode == ProviderLocationMode.MOBILE }
+    val guinchoOwner = remember(guinchoAccount?.providerId) { GuinchoSessionViewModelOwner() }
+    DisposableEffect(guinchoOwner) { onDispose { guinchoOwner.viewModelStore.clear() } }
+    val guinchoIncoming = guinchoAccount?.let { account ->
+        viewModel<ProviderIncomingRequestViewModel>(viewModelStoreOwner = guinchoOwner,
+            factory = ProviderIncomingRequestViewModel.factory(account.providerId, container.mobileDispatchRepository,
+                container.appointmentTrackingRepository, automaticStart = false))
+    }
+    if (guinchoIncoming != null) LifecycleStartEffect(guinchoIncoming) {
+        guinchoIncoming.startObserving()
+        onStopOrDispose { guinchoIncoming.stopObserving() }
+    }
+    val guinchoState = guinchoIncoming?.state?.collectAsStateWithLifecycle()?.value
+    val response = guinchoIncoming?.completedResponse?.collectAsStateWithLifecycle()?.value
+    val request = (guinchoState as? ProviderIncomingUiState.Request)?.takeIf {
+        it.snapshot.dispatchKind == MobileDispatchKind.GUINCHO_DIRECT &&
+            (it.remainingSeconds ?: 0) > 0
+    }
+    val context = LocalContext.current
+    val requestFailureMessage = stringResource(R.string.guincho_failure)
+    val closedRequestMessage = stringResource(R.string.guincho_home_request_closed)
+    val refreshLabel = stringResource(R.string.guincho_refresh)
+    var lastGuinchoNotice by remember(guinchoAccount?.providerId) { mutableStateOf<String?>(null) }
+    DisposableEffect(guinchoAccount?.providerId) {
+        onDispose { lastGuinchoNotice?.let(container.providerIncomingRequestNotifier::cancel) }
+    }
+    LaunchedEffect(request?.snapshot?.appointment?.id, request?.remainingSeconds, guinchoState) {
+        val providerId = guinchoAccount?.providerId ?: return@LaunchedEffect
+        val appointment = request?.snapshot?.appointment
+        if (appointment != null) {
+            lastGuinchoNotice = appointment.id
+            container.providerIncomingRequestNotifier.notifyGuincho(providerId, appointment.id,
+                requireNotNull(appointment.responseDeadlineEpochMillis))
+        } else if (guinchoState is ProviderIncomingUiState.Active || guinchoState is ProviderIncomingUiState.None ||
+            (guinchoState is ProviderIncomingUiState.Request && guinchoState.remainingSeconds == 0L)) {
+            lastGuinchoNotice?.let { container.providerIncomingRequestNotifier.finishGuincho(providerId, it) }
+            lastGuinchoNotice = null
+        }
+    }
+    LaunchedEffect(guinchoAccount?.providerId) {
+        if (guinchoAccount != null) container.providerIncomingRequestNotifier.purgeExpiredDelivery()
+    }
+    LaunchedEffect(guinchoState) {
+        if (guinchoState == ProviderIncomingUiState.SessionExpired) sessionViewModel.refresh()
+    }
+    LaunchedEffect(response) {
+        if (response == PendingDispatchAction.DECLINE) navController.navigateRoot(PitGoRoutes.ProviderDashboard)
+        if (response != null) guinchoIncoming?.consumeResponse()
+    }
+    var resumedGuinchoId by remember(guinchoAccount?.providerId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(guinchoState, currentRoute) {
+        val active = (guinchoState as? ProviderIncomingUiState.Active)?.snapshot ?: return@LaunchedEffect
+        val appointment = active.appointment ?: return@LaunchedEffect
+        val resumeStage = "${appointment.id}:${appointment.status}"
+        if (active.dispatchKind == MobileDispatchKind.GUINCHO_DIRECT && appointment.status in setOf(
+            MobileAppointmentStatus.AWAITING_PAYMENT, MobileAppointmentStatus.ACCEPTED, MobileAppointmentStatus.IN_PROGRESS, MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION)
+            && resumeStage != resumedGuinchoId && currentRoute != PitGoRoutes.AppointmentTracking) {
+            resumedGuinchoId = resumeStage
+            navController.navigate(PitGoRoutes.appointmentTracking(appointment.id)) { launchSingleTop = true }
+        }
+    }
+    val refreshedSequence = guinchoIncoming?.refreshSequence?.collectAsStateWithLifecycle()?.value
+    var incomingValidationStart by remember(incomingOpen?.token) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(incomingOpen?.token, guinchoIncoming) {
+        if (incomingOpen != null && guinchoIncoming != null) {
+            incomingValidationStart = refreshedSequence ?: 0L
+            guinchoIncoming.refresh()
+        }
+    }
+    LaunchedEffect(incomingOpen, guinchoState, guinchoAccount?.providerId, refreshedSequence) {
+        val open = incomingOpen ?: return@LaunchedEffect
+        if (sessionState is AppSessionState.Initializing || sessionState is AppSessionState.Verifying) return@LaunchedEffect
+        if (open.providerId != guinchoAccount?.providerId) { onIncomingConsumed(); return@LaunchedEffect }
+        if (guinchoState == ProviderIncomingUiState.Loading || guinchoState == null || incomingValidationStart == null ||
+            (refreshedSequence ?: 0L) <= requireNotNull(incomingValidationStart)) return@LaunchedEffect
+        if (guinchoState is ProviderIncomingUiState.Failure || (guinchoState is ProviderIncomingUiState.Request && guinchoState.failure != null)) {
+            android.widget.Toast.makeText(context, requestFailureMessage, android.widget.Toast.LENGTH_LONG).show()
+            onIncomingConsumed()
+            return@LaunchedEffect
+        }
+        val snapshot = when (val verified = guinchoIncoming?.validatedState) {
+            is ProviderIncomingUiState.Request -> verified.snapshot
+            is ProviderIncomingUiState.Active -> verified.snapshot
+            else -> null
+        }
+        if (snapshot?.appointment?.id != open.appointmentId || snapshot.appointment?.status !in setOf(
+                MobileAppointmentStatus.PENDING, MobileAppointmentStatus.AWAITING_PAYMENT, MobileAppointmentStatus.ACCEPTED, MobileAppointmentStatus.IN_PROGRESS,
+                MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION))
+            android.widget.Toast.makeText(context, closedRequestMessage, android.widget.Toast.LENGTH_LONG).show()
+        onIncomingConsumed()
+    }
     val usesAppSurface = currentRoute in setOf(
         PitGoRoutes.SessionGate,
         PitGoRoutes.Home,
@@ -205,6 +319,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
             is AppSessionState.Authenticated.ProviderReady -> {
                 if (currentRoute !in setOf(
                         PitGoRoutes.ProviderDashboard,
+                        PitGoRoutes.GuinchoHistory,
                         PitGoRoutes.ProviderTracking,
                         PitGoRoutes.AppointmentTracking,
                         PitGoRoutes.ProviderRequest,
@@ -298,7 +413,8 @@ fun PitGoNavHost(container: PitGoAppContainer) {
         }
     }
 
-    NavHost(navController = navController, startDestination = PitGoRoutes.SessionGate) {
+    Column(Modifier.fillMaxSize()) {
+    NavHost(navController = navController, startDestination = PitGoRoutes.SessionGate, modifier = Modifier.weight(1f)) {
         composable(PitGoRoutes.SessionGate) {
             SessionGateScreen(
                 state = sessionState,
@@ -701,6 +817,23 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                             navController.navigate(PitGoRoutes.appointmentTracking(it)) { launchSingleTop = true }
                         },
                     )
+                } else if (account.locationMode == ProviderLocationMode.MOBILE) {
+                    val homeViewModel: GuinchoProviderHomeViewModel = viewModel(factory = GuinchoProviderHomeViewModel.factory(container.deviceLocationRepository))
+                    GuinchoProviderHomeRoute(homeViewModel, dashboardViewModel,
+                        onHistory = { navController.navigate(PitGoRoutes.GuinchoHistory) { launchSingleTop = true } },
+                        incomingContent = {
+                            if (guinchoState is ProviderIncomingUiState.Failure) {
+                                Text(requestFailureMessage)
+                                TextButton(onClick = { guinchoIncoming?.refresh() }) { Text(refreshLabel) }
+                            }
+                            request?.let {
+                                GuinchoIncomingRequestCard(it, { guinchoIncoming?.accept() }, { guinchoIncoming?.decline() },
+                                    { guinchoIncoming?.refresh() }, Modifier.fillMaxWidth().heightIn(max = 280.dp))
+                            }
+                        }) {
+                        ProviderDashboardRoute(dashboardViewModel, sessionViewModel::logout,
+                            onOpenGuinchoHistory = { navController.navigate(PitGoRoutes.GuinchoHistory) { launchSingleTop = true } })
+                    }
                 } else {
                     ProviderDashboardRoute(
                         viewModel = dashboardViewModel,
@@ -756,6 +889,10 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                         )
                     },
                     onSessionExpired = sessionViewModel::refresh,
+                    onNeedsPayment = { snapshot -> snapshot.appointment?.let { appointment ->
+                        navController.navigate(PitGoRoutes.payment(snapshot.serviceId,"GUINCHO_DIRECT",snapshot.searchId,
+                            appointment.id,appointment.quoteVersion,appointment.quotedPrice.toPlainString())) { launchSingleTop = true }
+                    } },
                 )
             }
         }
@@ -771,8 +908,7 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                 com.trustarx.pitgo.features.guincho.ui.GuinchoMapRoute(
                     guinchoViewModel, onBack = { navController.popBackStack() },
                     onContract = { snapshot -> snapshot.appointment?.let { appointment ->
-                        navController.navigate(PitGoRoutes.payment(snapshot.serviceId,"GUINCHO_DIRECT",snapshot.searchId,
-                            appointment.id,appointment.quoteVersion,appointment.quotedPrice.toPlainString())) { launchSingleTop=true }
+                        navController.navigate(PitGoRoutes.appointmentTracking(appointment.id)) { launchSingleTop=true }
                     } }, contractingEnabled = true, onSessionExpired = sessionViewModel::refresh,
                     onGarage = { navController.navigate(PitGoRoutes.Garage) },
                 )
@@ -1051,6 +1187,15 @@ fun PitGoNavHost(container: PitGoAppContainer) {
                 )
             }
         }
+    }
+    if (currentRoute != PitGoRoutes.ProviderDashboard && guinchoState is ProviderIncomingUiState.Failure) {
+        Text(requestFailureMessage)
+        TextButton(onClick = { guinchoIncoming?.refresh() }) { Text(refreshLabel) }
+    }
+    if (currentRoute != PitGoRoutes.ProviderDashboard && request != null) {
+        GuinchoIncomingRequestCard(request, { guinchoIncoming?.accept() }, { guinchoIncoming?.decline() },
+            { guinchoIncoming?.refresh() }, Modifier.fillMaxWidth().fillMaxHeight(0.40f).windowInsetsPadding(WindowInsets.navigationBars))
+    }
     }
 }
 

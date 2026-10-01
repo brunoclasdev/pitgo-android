@@ -62,6 +62,7 @@ fun MapLibreMapHost(
     onFeatureClick: (MapFeatureSelection) -> Unit,
     onSurfaceState: (MapSurfaceState) -> Unit,
     modifier: Modifier = Modifier,
+    onUserGesture: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -77,7 +78,7 @@ fun MapLibreMapHost(
     }
     var boundView by remember { mutableStateOf<MapView?>(null) }
 
-    holder.updateCallbacks(onViewportIdle, onFeatureClick, onSurfaceState)
+    holder.updateCallbacks(onViewportIdle, onFeatureClick, onSurfaceState, onUserGesture)
     holder.update(
         model = renderModel,
         viewport = viewport,
@@ -162,9 +163,13 @@ private class MapLibreHostHolder(
     private var onViewportIdle = onViewportIdle
     private var onFeatureClick = onFeatureClick
     private var onSurfaceState = onSurfaceState
+    private var onUserGesture: () -> Unit = {}
     private var gestureCamera = false
     private val cameraMoveStartedListener = MapLibreMap.OnCameraMoveStartedListener { reason ->
-        if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) gestureCamera = true
+        if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+            gestureCamera = true
+            onUserGesture()
+        }
     }
 
     private val tileDegrade = Runnable {
@@ -235,10 +240,12 @@ private class MapLibreHostHolder(
         viewport: (MapViewport) -> Unit,
         feature: (MapFeatureSelection) -> Unit,
         surface: (MapSurfaceState) -> Unit,
+        gesture: () -> Unit,
     ) {
         onViewportIdle = viewport
         onFeatureClick = feature
         onSurfaceState = surface
+        onUserGesture = gesture
     }
 
     fun bind(view: MapView) {

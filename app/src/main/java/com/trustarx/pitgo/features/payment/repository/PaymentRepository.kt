@@ -1,6 +1,7 @@
 package com.trustarx.pitgo.features.payment.repository
 
 import android.util.Log
+import com.trustarx.pitgo.BuildConfig
 import com.trustarx.pitgo.features.mobiledispatch.model.isUuid
 import com.trustarx.pitgo.features.payment.data.CreatePaymentRequestDto
 import com.trustarx.pitgo.features.payment.data.CreatePaymentResponseDto
@@ -84,13 +85,14 @@ class PaymentRepository(private val client: SupabaseClient) : PaymentGateway {
                         dispatchKind = command.dispatchKind.name,
                         serviceId = command.serviceId,
                         amount = command.amount.toPlainString().takeUnless {
-                            command.dispatchKind.name == "PITTEC_AUTO_SEQUENTIAL"
+                            command.dispatchKind.name == "PITTEC_AUTO_SEQUENTIAL" && BuildConfig.ENVIRONMENT_ID != "homol"
                         },
                         appointmentId = command.appointmentId,
                         quoteVersion = command.quoteVersion,
                         method = command.method.name,
                         savedCardId = command.savedCardId,
                         cardSecurityCodeToken = command.cardSecurityCodeToken,
+                        checkoutEnvironment = BuildConfig.ENVIRONMENT_ID,
                     ),
                 )
             }
@@ -217,7 +219,7 @@ class PaymentRepository(private val client: SupabaseClient) : PaymentGateway {
             }
             send(event)
         }
-        launch { while (true) { refresh(); delay(10_000L) } }
+        launch { while (true) { refresh(); delay(2_000L) } }
         try {
             client.realtime.setAuth()
             val changed = channel.broadcastFlow<PaymentRealtimeEventDto>("CHANGED")
@@ -238,7 +240,7 @@ class PaymentRepository(private val client: SupabaseClient) : PaymentGateway {
         } catch (error: Throwable) {
             // Realtime is an optimization. A private-channel authorization failure must not
             // turn a valid payment into a generic service-unavailable screen: the polling job
-            // above continues calling get_payment_status every 10 seconds.
+            // above continues calling get_payment_status every two seconds.
             Log.w("PaymentRepository", "payment Realtime unavailable; using status polling")
             awaitCancellation()
         } finally {

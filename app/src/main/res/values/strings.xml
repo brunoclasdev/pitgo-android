@@ -708,7 +708,7 @@
     <string name="guincho_map_pin">📍</string>
     <string name="guincho_my_location">Minha localização</string>
     <string name="guincho_pickup_instruction">Aproxime o mapa e posicione o ponto de retirada no centro.</string>
-    <string name="guincho_destination_instruction">Aproxime o mapa e posicione o destino do veículo no centro.</string>
+    <string name="guincho_destination_instruction">Digite o destino e escolha uma sugestão. Você também pode ajustar o ponto no centro do mapa.</string>
     <string name="guincho_address">Endereço e número do ponto</string>
     <string name="guincho_confirm_point">Confirmar ponto no mapa</string>
     <string name="guincho_vehicle">Qual veículo será transportado?</string>
@@ -724,7 +724,9 @@
     <string name="guincho_location_manual">Localização indisponível. Você pode escolher o ponto diretamente no mapa.</string>
     <string name="guincho_pickup_label">Retirada: %1$s</string>
     <string name="guincho_destination_label">Destino: %1$s</string>
-    <string name="guincho_waiting_accept">Pagamento aprovado. Aguardando o aceite do guincheiro.</string>
+    <string name="guincho_waiting_accept">Aguardando o aceite do guincheiro. O pagamento será solicitado após a confirmação.</string>
+    <string name="guincho_cancel_request">Cancelar solicitação</string>
+    <string name="guincho_details_after_payment">Os dados do cliente e do trajeto serão liberados após a aprovação do pagamento.</string>
     <string name="guincho_on_way">Guincheiro a caminho da retirada.</string>
     <string name="guincho_arrived">Guincheiro chegou à retirada.</string>
     <string name="guincho_start_transport">Iniciar transporte</string>
@@ -746,4 +748,23 @@
     <string name="guincho_pickup_automatic">A retirada será na sua localização atual.</string>
     <string name="guincho_pickup_coordinates">Local de retirada (%1$s, %2$s)</string>
     <string name="guincho_destination_address">Endereço do destino</string>
+    <string name="guincho_destination_number">Número do imóvel</string>
+    <string name="guincho_destination_number_hint">Ex.: 123, 123A ou s/n</string>
+    <string name="guincho_address_searching">Buscando endereço…</string>
+    <string name="guincho_address_search_failure">Não foi possível buscar o endereço. Tente digitar novamente ou escolha o destino no mapa.</string>
+    <string name="guincho_address_no_results">Nenhum endereço encontrado. Inclua a cidade ou escolha o destino no mapa.</string>
+    <string name="guincho_destination_coordinates">Destino no mapa (%1$s, %2$s)</string>
+    <string name="guincho_home_map">Mapa</string>
+    <string name="guincho_home_profile">Perfil</string>
+    <string name="guincho_home_history">Histórico</string>
+    <string name="guincho_home_position">Guincho — sua posição</string>
+    <string name="guincho_home_recenter">Recentralizar</string>
+    <string name="guincho_home_locating">Obtendo sua localização…</string>
+    <string name="guincho_home_permission">Permita a localização precisa para ver sua posição no mapa.</string>
+    <string name="guincho_home_gps">Ative a localização do aparelho para ver sua posição.</string>
+    <string name="guincho_home_stale">Última posição conhecida. A localização está desatualizada.</string>
+    <string name="guincho_home_unavailable">Não foi possível obter sua posição. Tente novamente.</string>
+    <string name="guincho_home_settings">Configurações</string>
+    <string name="guincho_home_availability_issue">Não foi possível atualizar a disponibilidade. Verifique as permissões no Perfil.</string>
+    <string name="guincho_home_request_closed">Esta solicitação não está mais disponível.</string>
 </resources>

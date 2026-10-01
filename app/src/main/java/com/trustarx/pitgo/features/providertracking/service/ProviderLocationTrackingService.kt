@@ -49,13 +49,13 @@ class ProviderLocationTrackingService : Service() {
     private var incomingRequestJob: Job? = null
     private var lastNotifiedOffer: Pair<String, Long>? = null
     private val container get() = (application as PitGoApplication).container
-    private val incomingRequestNotifier by lazy { ProviderIncomingRequestNotifier(applicationContext) }
+    private val incomingRequestNotifier get() = container.providerIncomingRequestNotifier
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_STOP -> stopTracking(updateAvailability = true)
+            ACTION_STOP -> stopTracking(updateAvailability = intent.getBooleanExtra(EXTRA_UPDATE_AVAILABILITY, true))
             ACTION_START, null -> startTracking()
         }
         return START_STICKY
@@ -81,12 +81,13 @@ class ProviderLocationTrackingService : Service() {
             trackerId = lease.trackerId
             var sequence = lease.sequence
             container.providerTrackingStateRepository.update(ProviderTrackingState.Starting)
+            val acquisitionStartedAt = System.currentTimeMillis()
             watchdogJob?.cancel()
             watchdogJob = scope.launch {
                 while (true) {
                     delay(10_000)
                     val lastFix = lastPreciseFixAt
-                    if (lastFix == null || System.currentTimeMillis() - lastFix > 30_000L) {
+                    if (System.currentTimeMillis() - (lastFix ?: acquisitionStartedAt) > 30_000L) {
                         degradeAndStop(TrackingStopReason.NO_PRECISE_FIX)
                         return@launch
                     }
@@ -156,28 +157,39 @@ class ProviderLocationTrackingService : Service() {
      * cancels the notification the moment the offer is no longer the active PENDING one.
      */
     private suspend fun runIncomingRequestAlerts(providerId: String) = coroutineScope {
+        val refreshLock = kotlinx.coroutines.sync.Mutex()
         suspend fun refresh() {
-            val result = container.mobileDispatchRepository.restoreAnyDispatchKind()
-            val snapshot = (result as? MobileDispatchResult.Success)?.snapshot
-            val appointment = snapshot?.appointment
-            val isPendingPitTecOffer = appointment != null &&
-                appointment.status == MobileAppointmentStatus.PENDING &&
-                snapshot.dispatchKind in setOf(MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL, MobileDispatchKind.GUINCHO_DIRECT)
-            if (isPendingPitTecOffer) {
-                val key = appointment!!.id to appointment.revision
-                if (key != lastNotifiedOffer) {
-                    if (lastNotifiedOffer?.first != appointment.id) lastNotifiedOffer?.let { incomingRequestNotifier.cancel(it.first) }
-                    if (incomingRequestNotifier.isReady()) {
-                        val remainingSeconds = ((appointment.responseDeadlineEpochMillis ?: 0L) -
-                            System.currentTimeMillis()) / 1000
-                        incomingRequestNotifier.notifyIncoming(appointment.id, remainingSeconds, snapshot.dispatchKind == MobileDispatchKind.GUINCHO_DIRECT)
+            if (!refreshLock.tryLock()) return
+            try {
+                val before = container.sessionRepository.state.value as? AppSessionState.Authenticated.ProviderReady
+                if (before?.account?.providerId != providerId) return
+                val result = container.mobileDispatchRepository.restoreAnyDispatchKind()
+                if ((container.sessionRepository.state.value as? AppSessionState.Authenticated.ProviderReady)?.account?.providerId != providerId) return
+                if (result is MobileDispatchResult.Failure) return
+                val snapshot = (result as? MobileDispatchResult.Success)?.snapshot
+                val appointment = snapshot?.appointment
+                val isPendingPitTecOffer = appointment != null &&
+                    appointment.status == MobileAppointmentStatus.PENDING &&
+                    snapshot.dispatchKind in setOf(MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL, MobileDispatchKind.GUINCHO_DIRECT) &&
+                    (appointment.responseDeadlineEpochMillis ?: 0L) > System.currentTimeMillis()
+                if (isPendingPitTecOffer) {
+                    val key = appointment!!.id to appointment.revision
+                    if (key != lastNotifiedOffer) {
+                        if (lastNotifiedOffer?.first != appointment.id) lastNotifiedOffer?.let { incomingRequestNotifier.cancel(it.first) }
+                        if (incomingRequestNotifier.isReady()) {
+                            val remainingSeconds = ((appointment.responseDeadlineEpochMillis ?: 0L) -
+                                System.currentTimeMillis()) / 1000
+                            if (snapshot.dispatchKind == MobileDispatchKind.GUINCHO_DIRECT)
+                                incomingRequestNotifier.notifyGuincho(providerId, appointment.id, requireNotNull(appointment.responseDeadlineEpochMillis))
+                            else incomingRequestNotifier.notifyIncoming(appointment.id, remainingSeconds)
+                        }
+                        lastNotifiedOffer = key
                     }
-                    lastNotifiedOffer = key
+                } else {
+                    lastNotifiedOffer?.let { incomingRequestNotifier.finishGuincho(providerId, it.first) }
+                    lastNotifiedOffer = null
                 }
-            } else {
-                lastNotifiedOffer?.let { incomingRequestNotifier.cancel(it.first) }
-                lastNotifiedOffer = null
-            }
+            } finally { refreshLock.unlock() }
         }
         launch { while (true) { delay(5_000); refresh() } }
         while (true) {
@@ -251,7 +263,9 @@ class ProviderLocationTrackingService : Service() {
         lastNotifiedOffer = null
         scope.launch {
             val current = container.sessionRepository.state.value as? AppSessionState.Authenticated.ProviderReady
-            if (current != null) {
+            // Another device owns a valid publisher lease. Stopping this device must not
+            // disable the shared provider account and remove the winning device from discovery.
+            if (current != null && reason != TrackingStopReason.PUBLISHER_CONFLICT) {
                 when (val updated = container.providerDashboardRepository.update(
                     current.account,
                     available = false,
@@ -323,6 +337,7 @@ class ProviderLocationTrackingService : Service() {
     companion object {
         const val ACTION_START = "com.trustarx.pitgo.action.START_PROVIDER_TRACKING"
         const val ACTION_STOP = "com.trustarx.pitgo.action.STOP_PROVIDER_TRACKING"
+        const val EXTRA_UPDATE_AVAILABILITY = "update_availability"
         private const val CHANNEL_ID = "provider_location_tracking"
         private const val NOTIFICATION_ID = 7001
 
