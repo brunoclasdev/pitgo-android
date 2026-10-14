@@ -304,6 +304,8 @@ dependencies {
     implementation(libs.supabase.postgrest)
     implementation(libs.supabase.functions)
     implementation(libs.supabase.realtime)
+    implementation(libs.supabase.storage)
+    implementation(libs.androidx.exifinterface)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.maplibre.android.opengl)
     implementation(libs.kotlinx.serialization.json)

@@ -84,6 +84,13 @@ class MobileDispatchRepository(private val client: SupabaseClient) {
         "start_mobile_appointment", appointmentId, revision,
     )
 
+    suspend fun startGuinchoTransport(appointmentId: String, revision: Long): MobileDispatchResult = call(
+        "start_guincho_transport", buildJsonObject {
+            put("p_appointment_id", appointmentId); put("p_expected_revision", revision)
+            put("p_operation_id", java.util.UUID.randomUUID().toString())
+        },
+    )
+
     suspend fun arrive(appointmentId: String, revision: Long): MobileDispatchResult {
         val current=appointmentSnapshot(appointmentId)
         if(current is MobileDispatchResult.Success && current.snapshot.dispatchKind==com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchKind.GUINCHO_DIRECT) {

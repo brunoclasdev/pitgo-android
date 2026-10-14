@@ -44,6 +44,8 @@ object PitGoRoutes {
     const val Home = "home"
     const val GuinchoMap = "guincho-map"
     const val GuinchoHistory = "guincho-history"
+    const val GuinchoInspection = "guincho-inspection/{$AppointmentIdArg}?history={$AppointmentHistoryArg}"
+    fun guinchoInspection(appointmentId: String, historical: Boolean = false) = "guincho-inspection/${Uri.encode(appointmentId)}?history=$historical"
     const val VehicleOnboarding = "vehicle-onboarding"
     const val Garage = "garage"
     const val Profile = "profile"

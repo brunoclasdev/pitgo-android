@@ -74,6 +74,7 @@ fun AppointmentTrackingRoute(
     onFinished: () -> Unit,
     onSessionExpired: () -> Unit,
     historical: Boolean = false,
+    onOpenInspection: (String) -> Unit = {},
     onNeedsPayment: (com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchSnapshot) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -81,6 +82,7 @@ fun AppointmentTrackingRoute(
         viewModel.onVisible()
         onStopOrDispose { viewModel.onHidden() }
     }
+    var openingInspection by remember(viewModel) { mutableStateOf(false) }
     var wasDisputed by remember(viewModel) { mutableStateOf(false) }
     LaunchedEffect(state.dispatch?.appointment?.status, historical, isClient) {
         val snapshot = state.dispatch
@@ -94,9 +96,16 @@ fun AppointmentTrackingRoute(
         if (!historical && (status == MobileAppointmentStatus.COMPLETED ||
                 (wasDisputed && status == MobileAppointmentStatus.CANCELLED))) onFinished()
     }
+    LaunchedEffect(state.dispatch?.appointment?.arrivedAt, state.arriving, openingInspection) {
+        if (openingInspection && state.dispatch?.appointment?.arrivedAt != null && state.dispatch?.guinchoInspection?.required == true) {
+            openingInspection = false
+            onOpenInspection(requireNotNull(state.dispatch?.appointment).id)
+        } else if (openingInspection && !state.arriving && state.actionFailed) openingInspection = false
+    }
     if(state.isGuincho) {
         com.trustarx.pitgo.features.guincho.ui.GuinchoTrackingContent(state,viewModel,isClient,onBack,
-            onReturnHome = if(historical) onBack else onFinished)
+            onReturnHome = if(historical) onBack else onFinished,
+            onOpenInspection = onOpenInspection, onArrive = { openingInspection = true; viewModel.arrive() })
         return
     }
     AppointmentTrackingScreen(

@@ -25,6 +25,14 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Pitgo.Starting">
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.inspection-files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/guincho_inspection_file_paths" />
+        </provider>
         <service
             android:name=".features.providertracking.service.ProviderLocationTrackingService"
             android:exported="false"

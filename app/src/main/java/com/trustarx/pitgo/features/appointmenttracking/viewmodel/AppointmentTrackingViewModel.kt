@@ -147,7 +147,7 @@ class AppointmentTrackingViewModel(
     /** Provider-only "Cheguei" — mirrors the ACCEPTED "Iniciar atendimento" RPC for Mobile. */
     fun arrive() {
         val appointment = _state.value.dispatch?.appointment ?: return
-        if (_state.value.arriving) return
+        if (_state.value.arriving || (_state.value.isGuincho && appointment.arrivedAt != null)) return
         _state.value = _state.value.copy(arriving = true, actionFailed = false)
         viewModelScope.launch {
             val result = if ((_state.value.isPitTec || _state.value.isGuincho) && appointment.arrivedAt == null)
@@ -157,6 +157,21 @@ class AppointmentTrackingViewModel(
                 is MobileDispatchResult.Success -> _state.value = _state.value.copy(
                     dispatch = result.snapshot, arriving = false,
                 )
+                else -> _state.value = _state.value.copy(arriving = false, actionFailed = true)
+            }
+        }
+    }
+
+    fun startTransport() {
+        val snapshot = _state.value.dispatch ?: return
+        val appointment = snapshot.appointment ?: return
+        val inspection = snapshot.guinchoInspection ?: return
+        if (!_state.value.isGuincho || isClient || _state.value.arriving || appointment.arrivedAt == null ||
+            (inspection.required && inspection.state != com.trustarx.pitgo.features.guincho.model.InspectionVersionState.APPROVED)) return
+        _state.value = _state.value.copy(arriving = true, actionFailed = false)
+        viewModelScope.launch {
+            when (val result = dispatchRepository.startGuinchoTransport(appointment.id, appointment.revision)) {
+                is MobileDispatchResult.Success -> _state.value = _state.value.copy(dispatch = result.snapshot, arriving = false)
                 else -> _state.value = _state.value.copy(arriving = false, actionFailed = true)
             }
         }

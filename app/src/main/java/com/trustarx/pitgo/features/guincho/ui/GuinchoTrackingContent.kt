@@ -23,7 +23,8 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GuinchoTrackingContent(state: AppointmentTrackingUiState,viewModel: AppointmentTrackingViewModel,
-    isClient: Boolean,onBack: () -> Unit,onReturnHome: () -> Unit = onBack) {
+    isClient: Boolean,onBack: () -> Unit,onReturnHome: () -> Unit = onBack,
+    onOpenInspection: (String) -> Unit = {}, onArrive: () -> Unit = viewModel::arrive) {
     val snapshot=state.dispatch ?: return
     val appointment=snapshot.appointment ?: return
     val trip=snapshot.guinchoTrip
@@ -54,6 +55,20 @@ fun GuinchoTrackingContent(state: AppointmentTrackingUiState,viewModel: Appointm
     Scaffold(topBar={ TopAppBar(title={ Text(stringResource(R.string.guincho_title)) },
         navigationIcon={ TextButton(onClick=onBack) { Text(stringResource(R.string.guincho_back)) } }) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            snapshot.guinchoInspection?.let { inspection ->
+                Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Text(stringResource(inspectionStateLabel(inspection.state)), style = MaterialTheme.typography.titleSmall)
+                        if (inspection.state == com.trustarx.pitgo.features.guincho.model.InspectionVersionState.APPROVED &&
+                            appointment.status == MobileAppointmentStatus.ACCEPTED && isClient) Text(stringResource(R.string.inspection_wait_start))
+                        if (inspection.versionId != null) TextButton(onClick = { onOpenInspection(appointment.id) }) {
+                            Text(stringResource(if (!isClient && inspection.state == com.trustarx.pitgo.features.guincho.model.InspectionVersionState.DRAFT)
+                                R.string.inspection_continue else R.string.inspection_history))
+                        }
+                    }
+                }
+            }
+
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 MapLibreMapHost(PitGoManagedMapStyle.configuration,MapRenderModel(markers),viewport,state.cameraCommand,
                     state.styleReloadRevision,state.data !is com.trustarx.pitgo.features.appointmenttracking.model.TrackingDataState.Offline,controller,viewModel::onViewportIdle,{},viewModel::updateSurfaceState,Modifier.fillMaxSize())
@@ -77,9 +92,17 @@ fun GuinchoTrackingContent(state: AppointmentTrackingUiState,viewModel: Appointm
                     MobileAppointmentStatus.AWAITING_PAYMENT -> Text(stringResource(R.string.pittec_awaiting_payment))
                     MobileAppointmentStatus.ACCEPTED -> {
                         Text(stringResource(if(appointment.arrivedAt==null) R.string.guincho_on_way else R.string.guincho_arrived))
-                        if(!isClient) Button(onClick=viewModel::arrive,enabled=!state.arriving,modifier=Modifier.fillMaxWidth()) {
-                            Text(stringResource(if(appointment.arrivedAt==null) R.string.pittec_arrive else R.string.guincho_start_transport))
-                        }
+                        if(!isClient && snapshot.guinchoInspection != null) {
+                            val inspection = snapshot.guinchoInspection
+                            if (appointment.arrivedAt == null) Button(onClick = onArrive, enabled = !state.arriving, modifier = Modifier.fillMaxWidth()) {
+                                Text(stringResource(R.string.pittec_arrive))
+                            } else if ((!inspection.required || inspection.state == com.trustarx.pitgo.features.guincho.model.InspectionVersionState.APPROVED) &&
+                                com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchAction.START in snapshot.allowedActions) {
+                                Button(onClick = viewModel::startTransport, enabled = !state.arriving, modifier = Modifier.fillMaxWidth()) {
+                                    Text(stringResource(R.string.guincho_start_transport))
+                                }
+                            }
+                        } else if (snapshot.guinchoInspection == null) Text(stringResource(R.string.inspection_error_unknown))
                     }
                     MobileAppointmentStatus.IN_PROGRESS -> {
                         Text(stringResource(R.string.guincho_transport_started))

@@ -15,6 +15,7 @@ kotlinSerialization = "2.2.10"
 serializationJson = "1.9.0"
 dataStore = "1.2.1"
 coil = "3.3.0"
+exifInterface = "1.4.2"
 # Confirm against https://github.com/mercadopago/sdk-android/releases before upgrading.
 mercadoPagoSdk = "1.0.0"
 
@@ -35,6 +36,8 @@ supabase-core = { group = "io.github.jan-tennert.supabase", name = "supabase-kt"
 supabase-auth = { group = "io.github.jan-tennert.supabase", name = "auth-kt", version.ref = "supabase" }
 supabase-postgrest = { group = "io.github.jan-tennert.supabase", name = "postgrest-kt", version.ref = "supabase" }
 supabase-functions = { group = "io.github.jan-tennert.supabase", name = "functions-kt", version.ref = "supabase" }
+supabase-storage = { group = "io.github.jan-tennert.supabase", name = "storage-kt", version.ref = "supabase" }
+androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterface", version.ref = "exifInterface" }
 supabase-realtime = { group = "io.github.jan-tennert.supabase", name = "realtime-kt", version.ref = "supabase" }
 ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
 maplibre-android-opengl = { group = "org.maplibre.gl", name = "android-sdk-opengl", version.ref = "mapLibre" }

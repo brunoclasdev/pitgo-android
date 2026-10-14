@@ -37,6 +37,7 @@ internal data class MobileDispatchEnvelopeDto(
     @SerialName("tracking_authorized") val trackingAuthorized: Boolean = false,
     val trip: com.trustarx.pitgo.features.guincho.data.GuinchoTripDto? = null,
     val dispute: com.trustarx.pitgo.features.guincho.data.GuinchoDisputeDto? = null,
+    val inspection: com.trustarx.pitgo.features.guincho.model.GuinchoInspectionSummary? = null,
     val provider: MobileProviderSummaryDto? = null,
     @SerialName("created_at") val createdAt: String? = null,
 ) {
@@ -56,6 +57,7 @@ internal data class MobileDispatchEnvelopeDto(
         payment = payment,
         trackingAuthorized = trackingAuthorized,
         trip = trip, dispute = dispute, provider = provider,
+        inspection = inspection,
         createdAt = createdAt,
     )).toDomainOrNull()
 }
@@ -78,6 +80,7 @@ internal data class MobileDispatchSnapshotDto(
     @SerialName("tracking_authorized") val trackingAuthorized: Boolean = false,
     val trip: com.trustarx.pitgo.features.guincho.data.GuinchoTripDto? = null,
     val dispute: com.trustarx.pitgo.features.guincho.data.GuinchoDisputeDto? = null,
+    val inspection: com.trustarx.pitgo.features.guincho.model.GuinchoInspectionSummary? = null,
     val provider: MobileProviderSummaryDto? = null,
     @SerialName("created_at") val createdAt: String? = null,
 ) {
@@ -104,6 +107,7 @@ internal data class MobileDispatchSnapshotDto(
             guinchoTrip = trip?.summary(), guinchoDispute = dispute?.domain(),
             providerName = provider?.displayName,
             createdAt = createdAt,
+            guinchoInspection = inspection?.validate(),
         ).takeIf(MobileDispatchSnapshot::isValid)
     }.getOrNull()
 

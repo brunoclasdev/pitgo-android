@@ -103,6 +103,7 @@ data class MobileDispatchSnapshot(
     val guinchoDispute: com.trustarx.pitgo.features.guincho.model.GuinchoDispute? = null,
     val providerName: String? = null,
     val createdAt: String? = null,
+    val guinchoInspection: com.trustarx.pitgo.features.guincho.model.GuinchoInspectionSummary? = null,
 ) {
     fun isValid() = searchId.isUuid() && serviceId.isUuid() && serviceName.isNotBlank() &&
         radiusMeters in setOf(10_000, 25_000, 50_000) && revision > 0 &&

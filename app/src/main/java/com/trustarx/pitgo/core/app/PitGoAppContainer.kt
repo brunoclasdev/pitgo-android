@@ -57,6 +57,8 @@ class PitGoAppContainer(context: Context) {
     val appointmentTrackingRepository = AppointmentTrackingRepository(supabase)
     val serviceMapRepository = ServiceMapRepository(supabase)
     val guinchoAddressRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoAddressRepository(context, supabase)
+    val guinchoInspectionFiles = com.trustarx.pitgo.features.guincho.data.GuinchoInspectionCaptureFiles(context)
+    val guinchoInspectionRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoInspectionRepository(supabase, guinchoInspectionFiles)
     val guinchoRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoRepository(supabase)
     val providerDashboardRepository = ProviderDashboardRepository(supabase)
     val mobileDispatchRepository = MobileDispatchRepository(supabase)
@@ -77,6 +79,7 @@ class PitGoAppContainer(context: Context) {
         beforeInitialize = {
             supabase.auth.awaitInitialization()
             com.trustarx.pitgo.core.environment.EnvironmentStateRepository(context).validate {
+                guinchoInspectionFiles.clear()
                 supabase.auth.sessionManager.deleteSession()
                 context.stopService(android.content.Intent(context, com.trustarx.pitgo.features.providertracking.service.ProviderLocationTrackingService::class.java))
                 providerTrackingPreferences.clear()
@@ -87,6 +90,7 @@ class PitGoAppContainer(context: Context) {
             supabase.auth.loadFromStorage()
         },
         beforeSignOut = { provider ->
+            guinchoInspectionFiles.clear()
             if (provider != null) {
                 providerDashboardRepository.update(
                     provider,
