@@ -17,6 +17,8 @@ import io.ktor.client.plugins.HttpRequestTimeoutException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.filter
@@ -26,7 +28,6 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.time.Instant
@@ -38,9 +39,15 @@ class AppointmentTrackingRepository(private val client: SupabaseClient) {
             return@channelFlow
         }
         val channel = client.channel("appointment-location:$appointmentId") { isPrivate = true }
+        // Polling, reconnect and broadcasts can coincide. Keep one RPC snapshot in flight
+        // and one pending refresh so slower responses never overwrite newer positions.
+        val refreshRequests = Channel<Unit>(Channel.CONFLATED)
+        val refreshJob = launch {
+            for (request in refreshRequests) send(snapshotSafely(appointmentId))
+        }
         launch {
             while (true) {
-                send(snapshotSafely(appointmentId))
+                refreshRequests.trySend(Unit)
                 kotlinx.coroutines.delay(5_000)
             }
         }
@@ -56,21 +63,26 @@ class AppointmentTrackingRepository(private val client: SupabaseClient) {
             // payload, any insert/update/delete on either table just re-fetches the authoritative
             // combined snapshot via RPC (same "broadcast wakes the repository up" philosophy used
             // for mobile dispatch — see specs/013 realtime contract).
-            launch { insert.collect { send(snapshotSafely(appointmentId)) } }
-            launch { update.collect { send(snapshotSafely(appointmentId)) } }
-            launch { delete.collect { send(snapshotSafely(appointmentId)) } }
-            launch { ended.collect { payload -> parseEnded(payload)?.let { send(it) } } }
+            launch { insert.collect { refreshRequests.trySend(Unit) } }
+            launch { update.collect { refreshRequests.trySend(Unit) } }
+            launch { delete.collect { refreshRequests.trySend(Unit) } }
+            launch { ended.collect { payload ->
+                parseEnded(payload)?.let {
+                    refreshJob.cancelAndJoin()
+                    send(it)
+                }
+            } }
             launch {
                 channel.status
                     .filter { it == RealtimeChannel.Status.SUBSCRIBED }
-                    .collect { send(snapshotSafely(appointmentId)) }
+                    .collect { refreshRequests.trySend(Unit) }
             }
 
             channel.subscribe(blockUntilSubscribed = true)
             // This explicit first snapshot also covers implementations that update the channel
             // status before the status collector is scheduled. Later SUBSCRIBED transitions
             // resnapshot after every reconnect.
-            send(snapshotSafely(appointmentId))
+            refreshRequests.trySend(Unit)
             awaitCancellation()
         } catch (cancel: CancellationException) {
             throw cancel

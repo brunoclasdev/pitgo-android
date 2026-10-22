@@ -45,6 +45,8 @@ class ClientMobileDispatchViewModel(
     private var pollJob: Job? = null
     private var clockJob: Job? = null
     private var refundWatcherJob: Job? = null
+    private var previewLocationJob: Job? = null
+    private var clientCoordinate: com.trustarx.pitgo.core.map.model.MapCoordinate? = null
     private var searchId = initialRequestId ?: UUID.randomUUID().toString()
 
     init {
@@ -90,6 +92,7 @@ class ClientMobileDispatchViewModel(
             _state.value = ClientMobileDispatchUiState.Locating
             val result = when (val location = locationRepository.currentPreciseFix(30_000)) {
                 is DeviceLocationResult.Success -> {
+                    clientCoordinate = com.trustarx.pitgo.core.map.model.MapCoordinate(location.fix.latitude, location.fix.longitude)
                     _state.value = ClientMobileDispatchUiState.StartingSearch
                     repository.start(MobileDispatchStartCommand(searchId, serviceId, location.fix))
                 }
@@ -159,7 +162,16 @@ class ClientMobileDispatchViewModel(
                     MobileDispatchStatus.EXHAUSTED -> ClientMobileDispatchUiState.Empty(snapshot.serviceName)
                     MobileDispatchStatus.CANCELLED, MobileDispatchStatus.COMPLETED ->
                         ClientMobileDispatchUiState.Terminal(snapshot.status)
-                    else -> ClientMobileDispatchUiState.Content(snapshot)
+                    else -> ClientMobileDispatchUiState.Content(snapshot, clientCoordinate = clientCoordinate)
+                }
+                if (clientCoordinate == null && previewLocationJob?.isActive != true) {
+                    previewLocationJob = viewModelScope.launch {
+                        val fix = locationRepository.currentPreciseFix(30_000)
+                        if (fix is DeviceLocationResult.Success) {
+                            clientCoordinate = com.trustarx.pitgo.core.map.model.MapCoordinate(fix.fix.latitude, fix.fix.longitude)
+                            _state.update { if (it is ClientMobileDispatchUiState.Content) it.copy(clientCoordinate = clientCoordinate) else it }
+                        }
+                    }
                 }
                 observe(snapshot.searchId)
                 startClock()

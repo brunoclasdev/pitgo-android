@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
@@ -51,6 +54,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.trustarx.pitgo.core.routing.ui.*
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
@@ -165,12 +169,22 @@ private fun ServiceMapScreen(
             }
             return@Scaffold
         }
+        val selected = state.selectedProvider
+        val mobile = selected?.locationMode == ProviderLocationMode.MOBILE
+        val journey = rememberJourneyRoute(
+            origin = if (mobile) selected?.addressCoordinate else state.clientCoordinate,
+            destination = if (mobile) state.clientCoordinate else selected?.addressCoordinate,
+            enabled = selected != null,
+            online = state.dataState != DiscoveryDataState.Offline,
+            routeKey = selected?.id,
+        )
         Column(Modifier.fillMaxSize().padding(padding)) {
             ModeAndLocationControls(state, onMode, onUseLocation)
             StateBanner(state, onSearch, onRetryStyle)
             when (state.mode) {
                 ServiceMapMode.MAP -> ProviderMap(
                     state = state,
+                    journey = journey,
                     styleController = styleController,
                     onSearch = onSearch,
                     onFeatureSelected = onFeatureSelected,
@@ -191,6 +205,7 @@ private fun ServiceMapScreen(
         state.selectedProvider?.let { provider ->
             ProviderSummarySheet(
                 provider = provider,
+                journey = journey,
                 onDismiss = onDismissSelection,
                 onRequest = { onRequestService(provider.id, state.serviceId) },
             )
@@ -300,6 +315,7 @@ private fun StateBanner(
 @Composable
 private fun ProviderMap(
     state: ServiceMapUiState.Content,
+    journey: JourneyRouteUiState,
     styleController: ProviderMapStyleController,
     onSearch: () -> Unit,
     onFeatureSelected: (com.trustarx.pitgo.core.map.model.MapFeatureSelection) -> Unit,
@@ -318,9 +334,9 @@ private fun ProviderMap(
     ) {
         MapLibreMapHost(
             configuration = PitGoManagedMapStyle.configuration,
-            renderModel = MapRenderModel(state.markers),
+            renderModel = MapRenderModel(state.markers, journey.polyline),
             viewport = state.viewport,
-            cameraCommand = state.cameraCommand,
+            cameraCommand = rememberJourneyCamera(state.cameraCommand, journey.polyline),
             styleReloadRevision = state.styleReloadRevision,
             online = state.dataState != DiscoveryDataState.Offline,
             styleController = styleController,
@@ -387,15 +403,35 @@ private fun ProviderList(
 @Composable
 private fun ProviderSummarySheet(
     provider: PublicProvider,
+    journey: JourneyRouteUiState,
     onDismiss: () -> Unit,
     onRequest: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
-            Modifier.fillMaxWidth().padding(PitGoSpacing.Medium),
+            Modifier.fillMaxWidth().heightIn(max = 600.dp).verticalScroll(rememberScrollState()).padding(PitGoSpacing.Medium),
             verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
         ) {
             ProviderSummary(provider)
+            journey.polyline?.let { line ->
+                val mobile = provider.locationMode == ProviderLocationMode.MOBILE
+                val clientPoint = if (mobile) journey.destination else journey.origin
+                MapLibreMapHost(
+                    configuration = PitGoManagedMapStyle.configuration,
+                    renderModel = MapRenderModel(listOf(
+                        com.trustarx.pitgo.core.map.model.MapMarkerSpec("journey-origin", clientPoint ?: line.points.first(), com.trustarx.pitgo.core.map.model.MapMarkerKind.CLIENT_LOCATION, accessibilityLabel = stringResource(R.string.service_map_my_location)),
+                        com.trustarx.pitgo.core.map.model.MapMarkerSpec(provider.id, provider.addressCoordinate, if (mobile) com.trustarx.pitgo.core.map.model.MapMarkerKind.MOBILE_PROVIDER else com.trustarx.pitgo.core.map.model.MapMarkerKind.ADDRESS, accessibilityLabel = provider.displayName),
+                    ), line),
+                    viewport = com.trustarx.pitgo.core.map.model.MapViewport(line.points.first(), 13.0),
+                    cameraCommand = rememberJourneyCamera(com.trustarx.pitgo.core.map.model.MapViewportCommand(
+                        com.trustarx.pitgo.core.map.model.MapViewport(line.points.first(), 13.0), 1), line),
+                    styleReloadRevision = 0, online = true,
+                    styleController = remember { ProviderMapStyleController() },
+                    onViewportIdle = {}, onFeatureClick = {}, onSurfaceState = {},
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                )
+            }
+            JourneyRouteSummary(journey)
             Button(
                 onClick = onRequest,
                 modifier = Modifier.fillMaxWidth().heightIn(min = PitGoSize.PrimaryActionMinHeight),
@@ -419,9 +455,6 @@ private fun ProviderSummary(provider: PublicProvider, modifier: Modifier = Modif
                 } else R.string.service_map_provider_mode_mobile
             )
         )
-        provider.distanceMeters?.let { distance ->
-            Text(stringResource(R.string.service_map_distance, distance.toInt()))
-        }
         provider.minimumPrice?.let { Text(stringResource(R.string.service_map_price, it)) }
     }
 }

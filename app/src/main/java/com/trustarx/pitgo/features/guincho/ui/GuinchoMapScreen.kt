@@ -18,10 +18,10 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.trustarx.pitgo.core.routing.ui.*
+import com.trustarx.pitgo.core.map.model.*
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.map.config.PitGoManagedMapStyle
 import com.trustarx.pitgo.core.map.model.MapRenderModel
@@ -59,20 +59,25 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
         }
     }
     val controller=remember { ProviderMapStyleController() }
+    val addressConfirmed = state.stage==GuinchoMapStage.CONFIRM || state.stage==GuinchoMapStage.DISCOVERY
+    val tripJourney = rememberJourneyRoute(state.pickup, state.destination,
+        enabled = addressConfirmed, online = state.online)
+    val pickupJourney = rememberJourneyRoute(state.selected?.coordinate, state.pickup,
+        enabled = state.stage == GuinchoMapStage.DISCOVERY && state.selected != null,
+        online = state.online, routeKey = state.selected?.id)
+    val journey = if (state.stage == GuinchoMapStage.DISCOVERY && state.selected != null) pickupJourney else tripJourney
+    val journeyMarkers = state.markers + listOfNotNull(
+        state.pickup?.let { MapMarkerSpec("pickup", it, MapMarkerKind.CLIENT_LOCATION, accessibilityLabel = state.pickupAddress) },
+        state.destination?.let { MapMarkerSpec("destination", it, MapMarkerKind.CLIENT_LOCATION, accessibilityLabel = state.fullDestinationAddress) },
+    )
     val money=remember { NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")) }
     Scaffold(topBar={ TopAppBar(title={ Text(stringResource(R.string.guincho_title)) },
         navigationIcon={ TextButton(onClick=onBack) { Text(stringResource(R.string.guincho_back)) } }) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                MapLibreMapHost(PitGoManagedMapStyle.configuration,MapRenderModel(state.markers),state.viewport,
-                    state.camera,0,state.online,controller,viewModel::viewport,viewModel::select,viewModel::surface,
+                MapLibreMapHost(PitGoManagedMapStyle.configuration,MapRenderModel(journeyMarkers, journey.polyline),state.viewport,
+                    rememberJourneyCamera(state.camera, journey.polyline, addressConfirmed) ?: state.camera,0,state.online,controller,viewModel::viewport,viewModel::select,viewModel::surface,
                     Modifier.fillMaxSize(),onUserGesture={ keyboard?.hide(); viewModel.mapGesture() })
-                if(state.stage==GuinchoMapStage.PICKUP || state.stage==GuinchoMapStage.DESTINATION) {
-                    val label=stringResource(R.string.guincho_confirm_point)
-                    Surface(Modifier.align(Alignment.Center).semantics { contentDescription=label },shape=MaterialTheme.shapes.small) {
-                        Text(stringResource(R.string.guincho_map_pin),Modifier.padding(8.dp))
-                    }
-                }
                 TextButton(onClick={
                     if(ContextCompat.checkSelfPermission(context,Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED)
                         viewModel.locate()
@@ -83,6 +88,14 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
             Column(Modifier.fillMaxWidth().heightIn(max=280.dp).verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 if(state.operation!=GuinchoMapOperation.IDLE) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (state.pickup != null && state.destination != null && addressConfirmed) {
+                    Text(stringResource(R.string.journey_transport))
+                    JourneyRouteSummary(tripJourney, stale = !state.online)
+                }
+                if (state.stage == GuinchoMapStage.DISCOVERY && state.selected != null) {
+                    Text(stringResource(R.string.journey_to_pickup))
+                    JourneyRouteSummary(pickupJourney, stale = !state.online)
+                }
                 if(state.failure!=null) Text(stringResource(when(state.failure) {
                     com.trustarx.pitgo.features.guincho.model.GuinchoFailure.ROUTE_UNAVAILABLE -> R.string.guincho_route_failure
                     com.trustarx.pitgo.features.guincho.model.GuinchoFailure.QUOTE_EXPIRED,

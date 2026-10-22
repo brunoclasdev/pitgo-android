@@ -11,8 +11,9 @@ data class RoutePoint(val longitude: Double, val latitude: Double) {
     fun toMapCoordinate() = MapCoordinate(latitude, longitude)
 }
 
-data class RouteGeometry(val points: List<RoutePoint>) {
-    val isValid: Boolean get() = points.size in 2..10_000 && points.all(RoutePoint::isValid)
+data class RouteGeometry(val points: List<RoutePoint>, val durationSeconds: Int? = null) {
+    val isValid: Boolean get() = points.size in 2..10_000 && points.all(RoutePoint::isValid) &&
+        (durationSeconds == null || durationSeconds in 0..604_800)
 }
 
 enum class RoutePresentation { ROUTED, ESTIMATED_DIRECT, UNAVAILABLE }

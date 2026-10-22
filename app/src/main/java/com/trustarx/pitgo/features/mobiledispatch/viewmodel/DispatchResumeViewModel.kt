@@ -38,7 +38,9 @@ class DispatchResumeViewModel(
                     return@collectLatest
                 }
                 if (authenticated == null) { _state.value = DispatchResumeState.None; return@collectLatest }
-                _state.value = DispatchResumeState.Loading
+                if ((_state.value as? DispatchResumeState.Active)?.ownerId != authenticated.userId) {
+                    _state.value = DispatchResumeState.Loading
+                }
                 // Providers stay on this snapshot for the whole session (dashboard, tracking, etc.),
                 // not just the incoming-request screen, so a new PENDING appointment created while
                 // they are elsewhere still has to reach them. Keep the subscription open instead of
@@ -98,14 +100,21 @@ class DispatchResumeViewModel(
                         }
                     }
                 }
-                _state.value = when (val result = repository.restore()) {
-                    is MobileDispatchResult.Success -> DispatchResumeState.Active(authenticated.userId, result.snapshot)
-                    else -> DispatchResumeState.None
+                // A client needs the same periodic recovery as a provider. A transient failure
+                // cannot mean that their paid appointment disappeared.
+                while (true) {
+                    when (val result = repository.restore()) {
+                        is MobileDispatchResult.Success -> _state.value = DispatchResumeState.Active(authenticated.userId, result.snapshot)
+                        MobileDispatchResult.None -> _state.value = DispatchResumeState.None
+                        is MobileDispatchResult.Failure -> Unit
+                    }
+                    delay(CLIENT_POLL_INTERVAL_MS)
                 }
             }
         }
     }
     companion object {
+        private const val CLIENT_POLL_INTERVAL_MS = 5_000L
         private const val PROVIDER_RESUBSCRIBE_DELAY_MS = 3_000L
         private const val PROVIDER_POLL_INTERVAL_MS = 5_000L
 

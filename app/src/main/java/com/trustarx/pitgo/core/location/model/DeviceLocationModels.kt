@@ -8,7 +8,7 @@ data class DeviceLocationFix(
 ) {
     fun isHighQuality(nowEpochMillis: Long): Boolean =
         latitude in -90.0..90.0 && longitude in -180.0..180.0 &&
-            accuracyMeters in 0f..MAX_PROVIDER_ACCURACY_METERS &&
+            accuracyMeters.isFinite() && accuracyMeters > 0f && accuracyMeters <= MAX_PROVIDER_ACCURACY_METERS &&
             capturedAtEpochMillis in (nowEpochMillis - MAX_FIX_AGE_MILLIS)..nowEpochMillis
 
     companion object {

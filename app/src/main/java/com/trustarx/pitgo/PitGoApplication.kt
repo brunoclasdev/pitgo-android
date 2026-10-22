@@ -13,6 +13,11 @@ class PitGoApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Remove notices left by versions that used system notifications for inspection review.
+        getSystemService(android.app.NotificationManager::class.java).let { notifications ->
+            notifications.activeNotifications.filter { it.tag?.startsWith("inspection-review:") == true }
+                .forEach { notifications.cancel(it.tag, it.id) }
+        }
         MapLibre.getInstance(applicationContext)
         HttpRequestUtil.setLogEnabled(false)
         HttpRequestUtil.setPrintRequestUrlOnFailure(false)

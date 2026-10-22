@@ -40,6 +40,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
+import com.trustarx.pitgo.core.routing.ui.*
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
@@ -191,6 +192,7 @@ private fun DispatchContent(
     modifier: Modifier,
 ) {
     val candidate = state.snapshot.candidate
+    val journey = rememberJourneyRoute(candidate?.coordinate, state.clientCoordinate, routeKey = candidate?.id)
     val viewport = candidate?.coordinate?.let { MapViewport(it, 14.0) }
     // MapLibreMapHost only ever applies `viewport` to the camera on its very first composition
     // (see MapLibreHostHolder.applyLatest's `initializedCamera` guard) — every candidate change
@@ -222,8 +224,10 @@ private fun DispatchContent(
                         renderModel = MapRenderModel(listOf(MapMarkerSpec(
                             candidate.id, candidate.coordinate, MapMarkerKind.MOBILE_PROVIDER,
                             selected = true, accessibilityLabel = candidate.providerName,
-                        ))),
-                        viewport = requireNotNull(viewport), cameraCommand = cameraCommand,
+                        )) + listOfNotNull(state.clientCoordinate?.let { MapMarkerSpec(
+                            "client", it, MapMarkerKind.CLIENT_LOCATION, accessibilityLabel = stringResource(R.string.guincho_pickup_automatic),
+                        ) }), journey.polyline),
+                        viewport = requireNotNull(viewport), cameraCommand = rememberJourneyCamera(cameraCommand, journey.polyline),
                         styleReloadRevision = 0, online = true,
                         styleController = remember { MobileDispatchMapStyleController() },
                         onViewportIdle = {}, onFeatureClick = {}, onSurfaceState = {},
@@ -238,13 +242,7 @@ private fun DispatchContent(
                 ) {
                     Text(candidate.providerName, style = MaterialTheme.typography.titleLarge)
                     Text(candidate.locality)
-                    Text(
-                        if (candidate.distanceMeters < NEARBY_DISTANCE_METERS_THRESHOLD) {
-                            stringResource(R.string.mobile_dispatch_distance_nearby)
-                        } else {
-                            stringResource(R.string.mobile_dispatch_distance, candidate.distanceMeters / 1000.0)
-                        },
-                    )
+                    JourneyRouteSummary(journey)
                     Text(
                         if (candidate.isFree) stringResource(R.string.mobile_dispatch_free)
                         else NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")).format(candidate.price),

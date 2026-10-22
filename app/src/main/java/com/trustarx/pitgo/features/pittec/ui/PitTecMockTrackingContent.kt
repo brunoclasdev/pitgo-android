@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import com.trustarx.pitgo.core.routing.ui.*
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
@@ -83,6 +84,8 @@ fun PitTecMockTrackingContent(
         }
     }
     val isStale = appointment.providerLocation.isStale(nowElapsedRealtimeMillis)
+    val journey = rememberJourneyRoute(appointment.providerLocation.coordinate, appointment.clientLocation.coordinate,
+        enabled = appointment.status != MockAppointmentStatus.COMPLETED)
 
     Box(modifier.fillMaxSize()) {
         if (surfaceState.style !is MapStyleState.Failed) {
@@ -100,16 +103,11 @@ fun PitTecMockTrackingContent(
                     accessibilityLabel = stringResource(R.string.pittec_mock_ride_data_provider, appointment.provider.displayName),
                 ),
             )
-            val route = MapRoutePolyline(
-                id = "pittec-mock-route",
-                points = listOf(appointment.clientLocation.coordinate, appointment.providerLocation.coordinate),
-                style = MapRouteStyle.DASHED,
-            )
             MapLibreMapHost(
                 configuration = PitGoManagedMapStyle.configuration,
-                renderModel = MapRenderModel(markers, route),
+                renderModel = MapRenderModel(markers, journey.polyline),
                 viewport = viewport,
-                cameraCommand = cameraCommand,
+                cameraCommand = rememberJourneyCamera(cameraCommand ?: remember(appointment.id) { MapViewportCommand(viewport, 1) }, journey.polyline),
                 styleReloadRevision = styleReloadRevision,
                 online = true,
                 styleController = styleController,
@@ -134,7 +132,7 @@ fun PitTecMockTrackingContent(
             modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(PitGoSpacing.Small),
             verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
         ) {
-            AppointmentSummaryCard(appointment, isStale, nowElapsedRealtimeMillis)
+            AppointmentSummaryCard(appointment, isStale, journey)
             TextButton(onClick = onRecenter, modifier = Modifier.align(Alignment.End)) {
                 Text(stringResource(R.string.pittec_mock_recenter))
             }
@@ -157,7 +155,7 @@ fun PitTecMockTrackingContent(
 }
 
 @Composable
-private fun AppointmentSummaryCard(appointment: MockAppointment, isStale: Boolean, nowElapsedRealtimeMillis: Long) {
+private fun AppointmentSummaryCard(appointment: MockAppointment, isStale: Boolean, journey: JourneyRouteUiState) {
     Surface(
         shape = MaterialTheme.shapes.large,
         tonalElevation = PitGoSpacing.ExtraSmall,
@@ -176,16 +174,7 @@ private fun AppointmentSummaryCard(appointment: MockAppointment, isStale: Boolea
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.semantics { heading() },
             )
-            Text(
-                if (appointment.remainingDistanceMeters < 100) {
-                    stringResource(R.string.pittec_mock_distance_remaining, stringResource(R.string.pittec_mock_distance_close))
-                } else {
-                    stringResource(
-                        R.string.pittec_mock_distance_remaining,
-                        formatDistanceMeters(appointment.remainingDistanceMeters),
-                    )
-                },
-            )
+            JourneyRouteSummary(journey, stale = isStale)
             Text(stringResource(R.string.pittec_mock_total_value, formatCents(appointment.estimate.totalCents)))
             Text(stringResource(statusLabel(appointment.status)))
             val formatter = DateFormat.getTimeFormat(LocalContext.current)

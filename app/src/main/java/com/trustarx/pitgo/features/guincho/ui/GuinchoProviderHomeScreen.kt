@@ -36,6 +36,7 @@ import com.trustarx.pitgo.features.guincho.model.*
 import com.trustarx.pitgo.features.guincho.viewmodel.GuinchoProviderHomeViewModel
 import com.trustarx.pitgo.features.providerdashboard.model.ProviderDashboardUiState
 import com.trustarx.pitgo.features.providerdashboard.viewmodel.ProviderDashboardViewModel
+import com.trustarx.pitgo.features.providertracking.model.ProviderTrackingState
 
 @Composable
 fun GuinchoProviderHomeRoute(home: GuinchoProviderHomeViewModel, dashboard: ProviderDashboardViewModel,
@@ -129,7 +130,11 @@ fun GuinchoProviderHomeRoute(home: GuinchoProviderHomeViewModel, dashboard: Prov
                 if (content != null) {
                     Text(content.provider.name, Modifier.fillMaxWidth(), maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(if (content.provider.available) R.string.provider_dashboard_available_on else R.string.provider_dashboard_available_off), Modifier.weight(1f))
+                    Text(stringResource(when {
+                        !content.provider.available -> R.string.provider_dashboard_available_off
+                        content.tracking is ProviderTrackingState.Publishing -> R.string.provider_dashboard_available_on
+                        else -> R.string.guincho_home_sharing_pending
+                    }), Modifier.weight(1f))
                     Switch(modifier = Modifier.semantics { contentDescription = availabilityLabel }, checked = content.provider.available, enabled = !content.updating, onCheckedChange = { available ->
                         if (available) { enableAvailability = true; permission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)) }
                         else dashboard.setAvailability(false)

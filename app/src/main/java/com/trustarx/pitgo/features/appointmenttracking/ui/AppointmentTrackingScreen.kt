@@ -48,6 +48,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.trustarx.pitgo.core.routing.ui.*
+import com.trustarx.pitgo.core.routing.model.JourneyRoute
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
@@ -144,6 +146,17 @@ private fun AppointmentTrackingScreen(
     onComplete: () -> Unit,
     onAcknowledgeStart: () -> Unit,
 ) {
+    val reference = state.route?.let { snapshot ->
+        snapshot.geometry?.let { geometry ->
+            JourneyRoute(geometry.points.first().toMapCoordinate(), state.clientLocation?.coordinate ?: geometry.points.last().toMapCoordinate(),
+                geometry, snapshot.distanceMeters, snapshot.generatedAtEpochMillis)
+        }
+    }
+    val trackable = (state.dispatch?.trackingAuthorized == true || !state.isPitTec && !state.isGuincho) &&
+        state.dispatch?.appointment?.status in setOf(MobileAppointmentStatus.ACCEPTED, MobileAppointmentStatus.IN_PROGRESS)
+    val journey = rememberJourneyRoute(state.visibleLocation?.coordinate, state.clientLocation?.coordinate,
+        enabled = trackable, reference = reference, fetchDirections = !state.isPitTec,
+        online = state.data !is TrackingDataState.Offline)
     var showCancel by remember { mutableStateOf(false) }
     var reason by remember { mutableStateOf("") }
     var summaryHeight by remember { mutableStateOf(0) }
@@ -174,9 +187,9 @@ private fun AppointmentTrackingScreen(
             if ((location != null || hasClientLocation) && (!state.isPitTec || summaryHeight > 0)) {
                 MapLibreMapHost(
                     configuration = PitGoManagedMapStyle.configuration,
-                    renderModel = MapRenderModel(state.markers, state.routePolyline),
+                    renderModel = MapRenderModel(state.markers, journey.polyline),
                     viewport = state.viewport,
-                    cameraCommand = state.cameraCommand,
+                    cameraCommand = rememberJourneyCamera(state.cameraCommand, journey.polyline, state.followProvider),
                     styleReloadRevision = state.styleReloadRevision,
                     online = state.data !is TrackingDataState.Offline,
                     styleController = styleController,
@@ -224,7 +237,6 @@ private fun AppointmentTrackingScreen(
                                         }
                                     ),
                                 )
-                                PitTecDistanceLine(state)
                                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                                     TextButton(onClick = onToggleSummary) {
                                         Text(stringResource(if (state.summaryExpanded) R.string.tracking_collapse_summary else R.string.tracking_expand_summary))
@@ -234,6 +246,7 @@ private fun AppointmentTrackingScreen(
                                     }
                                 }
                             }
+                            if (trackable) JourneyRouteSummary(journey, stale = state.data !is TrackingDataState.Live)
                             if (!state.isPitTec || state.summaryExpanded ||
                                 appointment.status == MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION) {
                                 if (state.isPitTec) {
@@ -335,27 +348,6 @@ private fun AppointmentTrackingScreen(
         ) { Text(stringResource(R.string.mobile_dispatch_cancel_confirm)) } },
         dismissButton = { TextButton({ showCancel = false }) { Text(stringResource(R.string.action_back)) } },
     )
-}
-
-/** Routed distance when available, otherwise the local haversine estimate — never both. */
-@Composable
-private fun PitTecDistanceLine(state: AppointmentTrackingUiState) {
-    val meters = state.route?.distanceMeters?.toDouble() ?: state.haversineDistanceMeters
-    if (meters == null) {
-        Text(stringResource(R.string.pittec_route_unavailable))
-        return
-    }
-    if (meters <= 50) {
-        Text(stringResource(R.string.pittec_arrived_nearby))
-        return
-    }
-    val distanceText = if (meters < 1000) {
-        stringResource(R.string.service_map_distance, meters.toInt())
-    } else {
-        stringResource(R.string.mobile_dispatch_distance, meters / 1000.0)
-    }
-    Text(stringResource(R.string.pittec_route_distance, distanceText))
-    if (state.route == null) Text(stringResource(R.string.pittec_route_estimated))
 }
 
 @Composable

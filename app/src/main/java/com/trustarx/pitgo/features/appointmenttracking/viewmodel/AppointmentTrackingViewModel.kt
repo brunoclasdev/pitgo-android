@@ -31,6 +31,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.time.Instant
+import com.trustarx.pitgo.features.guincho.model.*
+import com.trustarx.pitgo.features.guincho.repository.GuinchoRouteRepository
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus
+import com.trustarx.pitgo.core.map.model.MapRoutePolyline
+import com.trustarx.pitgo.core.map.model.MapRouteStyle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.os.SystemClock
 
 class AppointmentTrackingViewModel(
     private val appointmentId: String,
@@ -39,6 +47,7 @@ class AppointmentTrackingViewModel(
     private val routeRepository: PitTecRouteRepository,
     private val deviceLocationRepository: DeviceLocationRepository,
     private val isClient: Boolean,
+    private val guinchoRoutes: GuinchoRouteRepository,
 ) : ViewModel() {
     private val _state = MutableStateFlow(AppointmentTrackingUiState())
     val state: StateFlow<AppointmentTrackingUiState> = _state.asStateFlow()
@@ -47,8 +56,15 @@ class AppointmentTrackingViewModel(
     private var latest: AppointmentProviderLocation? = null
     private var acceptedRevision: LocationRevision? = null
     private var lastRoutedRevision: Long = 0L
+    private var lastRouteAttemptMillis: Long = 0L
     private var terminal = false
     private var cameraRevision = 0L
+    private var guinchoJob: Job? = null
+    private val deviation = GuinchoRouteDeviation()
+    private var transportActive = false
+    private var guinchoGeneration = 0L
+    private var routeMeasurement: Long? = null
+    private var routeAccessDenied = false
 
     fun onVisible() {
         if (observeJob != null) return
@@ -135,6 +151,7 @@ class AppointmentTrackingViewModel(
         observeJob = null
         routeJob?.cancel()
         routeJob = null
+        guinchoGeneration++; guinchoJob?.cancel(); guinchoJob = null; transportActive = false; routeAccessDenied = false; deviation.reset()
         latest = null
         acceptedRevision = null
         lastRoutedRevision = 0L
@@ -171,7 +188,10 @@ class AppointmentTrackingViewModel(
         _state.value = _state.value.copy(arriving = true, actionFailed = false)
         viewModelScope.launch {
             when (val result = dispatchRepository.startGuinchoTransport(appointment.id, appointment.revision)) {
-                is MobileDispatchResult.Success -> _state.value = _state.value.copy(dispatch = result.snapshot, arriving = false)
+                is MobileDispatchResult.Success -> {
+                    _state.value = _state.value.copy(dispatch = result.snapshot, arriving = false)
+                    applyGuinchoPickup()
+                }
                 else -> _state.value = _state.value.copy(arriving = false, actionFailed = true)
             }
         }
@@ -328,8 +348,92 @@ class AppointmentTrackingViewModel(
         }
     }
 
+    private suspend fun checkGuinchoDeviation(location: AppointmentProviderLocation) {
+        val snapshot = _state.value.guinchoRoute.snapshot ?: return
+        val generation = guinchoGeneration
+        val needsRoute = withContext(Dispatchers.Default) { deviation.accept(location, snapshot.geometry, System.currentTimeMillis()) }
+        if (transportActive && generation == guinchoGeneration && needsRoute && guinchoJob?.isActive != true) refreshGuincho(GuinchoRouteReason.DEVIATION)
+    }
+    fun retryGuinchoRoute() {
+        if (_state.value.dispatch?.appointment?.status != MobileAppointmentStatus.IN_PROGRESS || isClient) return
+        routeAccessDenied = false; transportActive = true
+        refreshGuincho(GuinchoRouteReason.RETRY)
+    }
+    private fun refreshGuincho(reason: GuinchoRouteReason) {
+        if (!transportActive || guinchoJob?.isActive == true || System.currentTimeMillis() < _state.value.guinchoRoute.retryAt) return
+        val generation = guinchoGeneration
+        routeMeasurement = SystemClock.elapsedRealtimeNanos()
+        guinchoJob = viewModelScope.launch {
+            try {
+                _state.value = _state.value.copy(guinchoRoute = _state.value.guinchoRoute.copy(loading = true, failure = null))
+                if (_state.value.guinchoRoute.snapshot == null) guinchoRoutes.snapshot(appointmentId)?.let { applyGuinchoRoute(it) }
+                var request = if (reason == GuinchoRouteReason.INITIAL && _state.value.guinchoRoute.snapshot != null) GuinchoRouteReason.RESUME else reason
+                while (transportActive && generation == guinchoGeneration) {
+                    _state.value = _state.value.copy(guinchoRoute = _state.value.guinchoRoute.copy(loading = true, failure = null))
+                    when (val result = guinchoRoutes.refresh(appointmentId, request, _state.value.guinchoRoute.snapshot?.version ?: 0)) {
+                        is GuinchoRouteResult.Success -> {
+                            if (generation == guinchoGeneration && transportActive) applyGuinchoRoute(result.snapshot)
+                            break
+                        }
+                        is GuinchoRouteResult.Failure -> {
+                            if (generation != guinchoGeneration || !transportActive) break
+                            if (result.code in setOf("AUTH_REQUIRED", "NOT_PARTICIPANT", "APPOINTMENT_NOT_TRACKABLE")) {
+                                routeAccessDenied = true; transportActive = false; deviation.reset()
+                                _state.value = _state.value.copy(guinchoRoute = GuinchoRouteState(failure = result.code), guinchoPolyline = null)
+                                if (result.code == "AUTH_REQUIRED") updateData(TrackingDataState.SessionExpired)
+                                break
+                            }
+                            _state.value = _state.value.copy(guinchoRoute = _state.value.guinchoRoute.copy(loading = false, failure = result.code,
+                                retryAt = System.currentTimeMillis() + result.retryAfterMs))
+                            if (!result.retryable) break
+                            delay(result.retryAfterMs)
+                            request = if (reason == GuinchoRouteReason.DEVIATION) reason else GuinchoRouteReason.RETRY
+                        }
+                    }
+                }
+            } finally {
+                if (generation == guinchoGeneration) {
+                    _state.value = _state.value.copy(guinchoRoute = _state.value.guinchoRoute.copy(loading = false))
+                    guinchoJob = null
+                    if (transportActive) latest?.let { checkGuinchoDeviation(it) }
+                }
+            }
+        }
+    }
+    private fun applyGuinchoRoute(snapshot: GuinchoRouteSnapshot) {
+        val trip = _state.value.dispatch?.guinchoTrip ?: return
+        if (!transportActive || snapshot.appointmentId != appointmentId || snapshot.destination != trip.destination ||
+            snapshot.version < (_state.value.guinchoRoute.snapshot?.version ?: 0)) return
+        val changed = snapshot.version != _state.value.guinchoRoute.snapshot?.version
+        val line = if (changed) MapRoutePolyline("guincho-transport:${snapshot.version}", snapshot.geometry.points.map { it.toMapCoordinate() }, MapRouteStyle.SOLID) else _state.value.guinchoPolyline
+        _state.value = _state.value.copy(guinchoRoute = GuinchoRouteState(snapshot), guinchoPolyline = line)
+        if (changed) deviation.reset()
+        if (changed && _state.value.followProvider) {
+            cameraRevision++
+            val viewport = framingViewport(snapshot.origin, snapshot.destination)
+            _state.value = _state.value.copy(viewport = viewport, cameraCommand = MapViewportCommand(viewport, cameraRevision, line?.points.orEmpty()))
+        }
+    }
+    fun guinchoRouteFrame() {
+        val start = routeMeasurement ?: return
+        routeMeasurement = null
+        if (com.trustarx.pitgo.BuildConfig.DEBUG) Log.d(TAG, "stage=guincho_route_frame duration_ms=${(SystemClock.elapsedRealtimeNanos()-start)/1_000_000}")
+    }
+
     private fun applyGuinchoPickup() {
         val trip = _state.value.dispatch?.guinchoTrip ?: return
+        val inTransport = _state.value.dispatch?.appointment?.status == MobileAppointmentStatus.IN_PROGRESS && !isClient && !routeAccessDenied
+        if (inTransport && !transportActive) {
+            transportActive = true
+            refreshGuincho(GuinchoRouteReason.INITIAL)
+        } else if (!inTransport && transportActive) {
+            transportActive = false; guinchoGeneration++; guinchoJob?.cancel(); guinchoJob = null; deviation.reset()
+            _state.value = _state.value.copy(guinchoRoute = GuinchoRouteState(), guinchoPolyline = null)
+        }
+        if (inTransport) {
+            _state.value = _state.value.copy(clientLocation = AppointmentClientLocation(trip.destination.latitude, trip.destination.longitude))
+            return
+        }
         if (_state.value.clientLocation == null) applyClientLocation(AppointmentClientLocation(
             trip.pickup.latitude, trip.pickup.longitude, _state.value.dispatch!!.serverNowEpochMillis))
     }
@@ -359,14 +463,16 @@ class AppointmentTrackingViewModel(
                 terminal = !_state.value.isGuincho
                 latest = null
                 routeJob?.cancel()
-                _state.value = _state.value.copy(route = null, clientLocation = null)
+                guinchoGeneration++; guinchoJob?.cancel(); guinchoJob = null; transportActive = false
+                _state.value = _state.value.copy(route = null, clientLocation = null, guinchoRoute = GuinchoRouteState(), guinchoPolyline = null)
                 updateData(TrackingDataState.Ended)
             }
             AppointmentLocationEvent.SessionExpired -> {
                 terminal = true
                 latest = null
                 routeJob?.cancel()
-                _state.value = _state.value.copy(route = null, clientLocation = null)
+                guinchoGeneration++; guinchoJob?.cancel(); guinchoJob = null; transportActive = false
+                _state.value = _state.value.copy(route = null, clientLocation = null, guinchoRoute = GuinchoRouteState(), guinchoPolyline = null)
                 updateData(TrackingDataState.SessionExpired)
             }
             AppointmentLocationEvent.Offline -> updateData(TrackingDataState.Offline(latest))
@@ -377,14 +483,26 @@ class AppointmentTrackingViewModel(
     private fun accept(location: AppointmentProviderLocation) {
         if (!location.isValid) return
         val accepted = acceptedRevision
-        if (accepted != null && location.revision <= accepted) return
+        if (accepted != null && location.revision < accepted) return
+        if (location.revision == accepted) {
+            // An authoritative snapshot after reconnection restores live/stale state even
+            // when the truck hasn't moved. Do not recenter or request the same route again.
+            publishFreshness(location)
+            if (_state.value.isPitTec) refreshRoute(location.version)
+            if (transportActive && _state.value.guinchoRoute.snapshot == null) refreshGuincho(GuinchoRouteReason.RETRY)
+            return
+        }
         acceptedRevision = location.revision
         latest = location
         publishFreshness(location)
-        if (_state.value.followProvider && (!_state.value.isPitTec || accepted == null)) {
+        if (!transportActive && _state.value.followProvider && (!_state.value.isPitTec || accepted == null)) {
             moveCameraTo(location, _state.value.clientLocation)
         }
         if (_state.value.isPitTec) refreshRoute(location.version)
+        if (transportActive) {
+            if (_state.value.guinchoRoute.snapshot == null) refreshGuincho(GuinchoRouteReason.RETRY)
+            else viewModelScope.launch { checkGuinchoDeviation(location) }
+        }
     }
 
     /**
@@ -393,11 +511,18 @@ class AppointmentTrackingViewModel(
      * failed refresh never clears a previously valid route — see pittec-routing-ui.md `Fallback`.
      */
     private fun refreshRoute(providerLocationRevision: Long) {
-        if (providerLocationRevision <= lastRoutedRevision || routeJob?.isActive == true) return
-        lastRoutedRevision = providerLocationRevision
+        val now = System.currentTimeMillis()
+        val current = _state.value.route
+        if (routeJob?.isActive == true || now - lastRouteAttemptMillis < 15_000 ||
+            providerLocationRevision <= lastRoutedRevision && current != null &&
+            current.geometry?.durationSeconds != null && now - current.generatedAtEpochMillis < 60_000) return
+        lastRouteAttemptMillis = now
         routeJob = viewModelScope.launch {
             when (val result = routeRepository.refresh(appointmentId, providerLocationRevision)) {
-                is RouteResult.Success -> _state.value = _state.value.copy(route = result.snapshot)
+                is RouteResult.Success -> {
+                    lastRoutedRevision = result.snapshot.providerLocationRevision
+                    _state.value = _state.value.copy(route = result.snapshot)
+                }
                 is RouteResult.Failure -> Unit
             }
         }
@@ -406,7 +531,9 @@ class AppointmentTrackingViewModel(
     private fun publishFreshness(location: AppointmentProviderLocation) {
         val age = System.currentTimeMillis() - location.publishedAtEpochMillis
         updateData(
-            if (age in 0..STALE_AFTER_MS) TrackingDataState.Live(location)
+            // Phones can be a few seconds behind the server clock. A just-published
+            // position must not flash the stale icon until the phone's clock catches up.
+            if (age in -CLOCK_SKEW_TOLERANCE_MS..STALE_AFTER_MS) TrackingDataState.Live(location)
             else TrackingDataState.Stale(location)
         )
     }
@@ -432,6 +559,7 @@ class AppointmentTrackingViewModel(
     companion object {
         private const val TAG = "AppointmentTracking"
         private const val STALE_AFTER_MS = 30_000L
+        private const val CLOCK_SKEW_TOLERANCE_MS = 5_000L
         private const val CLIENT_ONLY_ZOOM = 15.0
         private const val OWN_LOCATION_ATTEMPTS = 3
         private const val OWN_LOCATION_TIMEOUT_MS = 20_000L
@@ -445,13 +573,14 @@ class AppointmentTrackingViewModel(
             routeRepository: PitTecRouteRepository,
             deviceLocationRepository: DeviceLocationRepository,
             isClient: Boolean,
+            guinchoRoutes: GuinchoRouteRepository,
         ) =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
                     AppointmentTrackingViewModel(
                         appointmentId, repository, dispatchRepository, routeRepository,
-                        deviceLocationRepository, isClient,
+                        deviceLocationRepository, isClient, guinchoRoutes,
                     ) as T
             }
     }

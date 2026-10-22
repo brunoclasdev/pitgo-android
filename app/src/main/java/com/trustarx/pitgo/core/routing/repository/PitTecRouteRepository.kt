@@ -12,6 +12,8 @@ import io.github.jan.supabase.functions.functions
 import io.ktor.client.call.body
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -37,10 +39,18 @@ class PitTecRouteRepository(private val client: SupabaseClient) {
         }
         val (result, owner) = deferred
         if (!owner) return result.await()
-        val outcome = call(appointmentId, providerLocationRevision)
-        result.complete(outcome)
-        mutex.withLock { if (inFlight[appointmentId] === result) inFlight.remove(appointmentId) }
-        return outcome
+        try {
+            val outcome = call(appointmentId, providerLocationRevision)
+            result.complete(outcome)
+            return outcome
+        } catch (cancel: CancellationException) {
+            result.cancel(cancel)
+            throw cancel
+        } finally {
+            withContext(NonCancellable) {
+                mutex.withLock { if (inFlight[appointmentId] === result) inFlight.remove(appointmentId) }
+            }
+        }
     }
 
     private suspend fun call(appointmentId: String, providerLocationRevision: Long): RouteResult = try {

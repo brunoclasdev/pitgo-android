@@ -35,6 +35,7 @@ import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.Point
 
 class ProviderMapStyleController : MapLibreStyleController {
+    private val journeyLayer = com.trustarx.pitgo.core.map.ui.JourneyRouteMapLayer("ProviderMapStyleController-route")
     override val clickableLayerIds = arrayOf(
         CLUSTER_LAYER,
         GROUP_LAYER,
@@ -47,6 +48,7 @@ class ProviderMapStyleController : MapLibreStyleController {
     )
 
     override fun install(context: Context, style: Style) {
+        journeyLayer.install(style)
         removeRuntimeArtifacts(style)
         context.getDrawable(R.drawable.ic_map_provider_address)?.let {
             style.addImage(IMAGE_PROVIDER, it)
@@ -147,6 +149,7 @@ class ProviderMapStyleController : MapLibreStyleController {
     }
 
     override fun update(style: Style, model: MapRenderModel) {
+        journeyLayer.update(style, model.route)
         val source = style.getSourceAs<GeoJsonSource>(SOURCE_ID) ?: return
         val features = model.markers
             .asSequence()

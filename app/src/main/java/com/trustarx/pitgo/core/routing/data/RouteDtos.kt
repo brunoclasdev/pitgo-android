@@ -38,14 +38,12 @@ internal data class RouteSuccessDto(
 internal data class RouteGeometryDto(
     val type: String,
     val coordinates: List<List<Double>>,
+    @SerialName("duration_seconds") val durationSeconds: Int? = null,
 ) {
-    fun toDomain() = RouteGeometry(
-        coordinates.mapNotNull { pair ->
-            val longitude = pair.getOrNull(0) ?: return@mapNotNull null
-            val latitude = pair.getOrNull(1) ?: return@mapNotNull null
-            RoutePoint(longitude, latitude)
-        },
-    )
+    fun toDomain(): RouteGeometry {
+        require(type == "LineString" && coordinates.all { it.size == 2 })
+        return RouteGeometry(coordinates.map { RoutePoint(it[0], it[1]) }, durationSeconds)
+    }
 }
 
 @Serializable

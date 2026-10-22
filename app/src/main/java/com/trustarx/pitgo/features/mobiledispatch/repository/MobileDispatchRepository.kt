@@ -191,8 +191,13 @@ class MobileDispatchRepository(private val client: SupabaseClient) {
         val dto = withTimeout(RPC_TIMEOUT_MILLIS) {
             client.postgrest.rpc(function, params).decodeAs<MobileDispatchEnvelopeDto>()
         }
-        if (dto.outcome == "NONE" || dto.outcome == "DECLINED") MobileDispatchResult.None
+        val result = if (dto.outcome == "NONE" || dto.outcome == "DECLINED") MobileDispatchResult.None
         else dto.domainOrNull()?.let(MobileDispatchResult::Success) ?: contractFailure()
+        if (com.trustarx.pitgo.BuildConfig.DEBUG) {
+            val snapshot = (result as? MobileDispatchResult.Success)?.snapshot
+            android.util.Log.d("PitGoDispatch", "rpc=$function outcome=${dto.outcome} kind=${snapshot?.dispatchKind} appointment=${snapshot?.appointment?.id} status=${snapshot?.appointment?.status} revision=${snapshot?.appointment?.revision}")
+        }
+        result
     } catch (_: TimeoutCancellationException) {
         MobileDispatchResult.Failure(MobileDispatchFailure.TIMEOUT)
     } catch (cancel: CancellationException) { throw cancel }

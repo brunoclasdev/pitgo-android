@@ -47,6 +47,7 @@ interface MapLibreStyleController {
     fun update(style: Style, model: MapRenderModel)
 
     fun selection(features: List<org.maplibre.geojson.Feature>): MapFeatureSelection
+    fun isRouteRendered(map: MapLibreMap, route: com.trustarx.pitgo.core.map.model.MapRoutePolyline, width: Int, height: Int): Boolean = false
 }
 
 @Composable
@@ -63,6 +64,7 @@ fun MapLibreMapHost(
     onSurfaceState: (MapSurfaceState) -> Unit,
     modifier: Modifier = Modifier,
     onUserGesture: () -> Unit = {},
+    onRouteRendered: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -78,7 +80,7 @@ fun MapLibreMapHost(
     }
     var boundView by remember { mutableStateOf<MapView?>(null) }
 
-    holder.updateCallbacks(onViewportIdle, onFeatureClick, onSurfaceState, onUserGesture)
+    holder.updateCallbacks(onViewportIdle, onFeatureClick, onSurfaceState, onUserGesture, onRouteRendered)
     holder.update(
         model = renderModel,
         viewport = viewport,
@@ -164,6 +166,8 @@ private class MapLibreHostHolder(
     private var onFeatureClick = onFeatureClick
     private var onSurfaceState = onSurfaceState
     private var onUserGesture: () -> Unit = {}
+    private var onRouteRendered: () -> Unit = {}
+    private var renderedRouteId: String? = null
     private var gestureCamera = false
     private val cameraMoveStartedListener = MapLibreMap.OnCameraMoveStartedListener { reason ->
         if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
@@ -234,6 +238,14 @@ private class MapLibreHostHolder(
     }
     private val renderedListener = MapView.OnDidFinishRenderingMapListener { fully ->
         if (fully && online) publishResources(MapResourceState.Ready)
+        val route = latestModel.route
+        val current = map
+        val view = mapView
+        if (route != null && current != null && view != null && style != null && renderedRouteId != route.id &&
+            controller?.isRouteRendered(current, route, view.width, view.height) == true) {
+            renderedRouteId = route.id
+            onRouteRendered()
+        }
     }
 
     fun updateCallbacks(
@@ -241,11 +253,13 @@ private class MapLibreHostHolder(
         feature: (MapFeatureSelection) -> Unit,
         surface: (MapSurfaceState) -> Unit,
         gesture: () -> Unit,
+        routeRendered: () -> Unit,
     ) {
         onViewportIdle = viewport
         onFeatureClick = feature
         onSurfaceState = surface
         onUserGesture = gesture
+        onRouteRendered = routeRendered
     }
 
     fun bind(view: MapView) {
@@ -330,6 +344,7 @@ private class MapLibreHostHolder(
     }
 
     private fun loadStyle(currentMap: MapLibreMap, revision: Long) {
+        renderedRouteId = null
         appliedStyleRevision = revision
         style = null
         publishStyle(MapStyleState.Loading(revision))

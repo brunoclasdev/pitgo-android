@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.trustarx.pitgo.core.routing.ui.*
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.design.theme.PitGoSize
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
@@ -62,13 +63,15 @@ internal fun ProviderAppointmentMap(mapState: ProviderMapState, onFollowChanged:
         Text(stringResource(R.string.tracking_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
+    val journey = rememberJourneyRoute(mapState.providerLocation, mapState.clientLocation)
     Column(verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
+        JourneyRouteSummary(journey)
         Box(Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 320.dp)) {
             MapLibreMapHost(
                 configuration = PitGoManagedMapStyle.configuration,
-                renderModel = MapRenderModel(mapState.markers),
+                renderModel = MapRenderModel(mapState.markers, journey.polyline),
                 viewport = mapState.viewport,
-                cameraCommand = mapState.cameraCommand,
+                cameraCommand = rememberJourneyCamera(mapState.cameraCommand, journey.polyline, mapState.followEnabled),
                 styleReloadRevision = 0,
                 online = true,
                 styleController = remember { ParticipantMapStyleController() },
@@ -76,6 +79,7 @@ internal fun ProviderAppointmentMap(mapState: ProviderMapState, onFollowChanged:
                 onFeatureClick = {},
                 onSurfaceState = {},
                 modifier = Modifier.fillMaxSize(),
+                onUserGesture = { onFollowChanged(false) },
             )
         }
         if (mapState.providerLocation == null || mapState.clientLocation == null) {

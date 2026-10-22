@@ -40,7 +40,9 @@ class ProviderLocationRepository(private val client: SupabaseClient) {
       catch (error: PostgrestRestException) {
           if (error.statusCode == 401 || error.statusCode == 403 || error.code == "42501") {
               PublishLocationResult.SessionExpired
-          } else if (error.code == "22023") PublishLocationResult.Ineligible
+          // A fix can age out in transit during a slow connection. Retry with the next
+          // fresh fix instead of treating input validation as provider ineligibility.
+          } else if (error.code == "22023") PublishLocationResult.Failed
           else PublishLocationResult.Failed
       } catch (_: Throwable) { PublishLocationResult.Failed }
 

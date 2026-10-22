@@ -1,23 +1,27 @@
 package com.trustarx.pitgo.core.location.data
 
 import android.annotation.SuppressLint
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.location.LocationRequest
 import android.os.Build
 import android.os.Bundle
 import android.os.Looper
+import android.os.SystemClock
+import androidx.core.content.ContextCompat
 import com.trustarx.pitgo.core.location.model.DeviceLocationFix
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.first
 
 /** Platform location source that does not require Google Play Services. */
 class AndroidLocationDataSource(context: Context) {
-    private val manager = context.applicationContext
+    private val appContext = context.applicationContext
+    private val manager = appContext
         .getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
     fun areLocationServicesEnabled(): Boolean =
@@ -28,54 +32,65 @@ class AndroidLocationDataSource(context: Context) {
                 manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
         }
 
-    @SuppressLint("MissingPermission")
-    suspend fun currentPreciseLocation(): DeviceLocationFix? =
-        try {
-            // Android can immediately replay an old PASSIVE/GPS fix when a listener is
-            // registered. Do not treat that replay as the current position; wait for a
-            // recent, sufficiently accurate fix instead.
-            preciseUpdates(CURRENT_FIX_INTERVAL_MILLIS)
-                .filter { it.isHighQuality(System.currentTimeMillis()) }
-                .first()
-        } catch (_: IllegalStateException) {
-            // Location services can be switched off between the preflight check and the
-            // registration call. Treat that as an unavailable fix instead of crashing the app.
-            null
-        } catch (_: NoSuchElementException) {
-            null
-        } catch (_: SecurityException) {
-            null
-        }
+    fun hasPrecisePermission(): Boolean = ContextCompat.checkSelfPermission(
+        appContext, Manifest.permission.ACCESS_FINE_LOCATION,
+    ) == PackageManager.PERMISSION_GRANTED
 
     @SuppressLint("MissingPermission")
-    suspend fun lastKnownLocation(): DeviceLocationFix? = enabledProviders()
+    suspend fun lastKnownLocation(): DeviceLocationFix? = availableProviders()
         .mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+        .map { it.toFix() }
         .maxWithOrNull(
-            compareBy<Location> { it.time }
-                .thenByDescending { it.accuracy },
+            compareBy<DeviceLocationFix> { it.isHighQuality(System.currentTimeMillis()) }
+                .thenBy { it.capturedAtEpochMillis }
+                .thenByDescending { it.accuracyMeters },
         )
-        ?.toFix()
 
     @SuppressLint("MissingPermission")
-    fun preciseUpdates(intervalMillis: Long = 10_000L): Flow<DeviceLocationFix> = callbackFlow {
+    fun preciseUpdates(intervalMillis: Long = 2_000L): Flow<DeviceLocationFix> = callbackFlow {
+        if (!hasPrecisePermission()) {
+            close(SecurityException("Precise location permission required"))
+            return@callbackFlow
+        }
+        if (!areLocationServicesEnabled()) {
+            close(IllegalStateException("Location services disabled"))
+            return@callbackFlow
+        }
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
                 trySend(location.toFix())
             }
 
+            override fun onProviderEnabled(provider: String) = Unit
+            override fun onProviderDisabled(provider: String) = Unit
+
             @Deprecated("Deprecated by the Android platform")
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
         }
         var registered = false
-        enabledProviders().forEach { provider ->
+        // Android's fused provider already combines GPS and network. Older devices need
+        // both explicitly; PASSIVE adds duplicate, often older fixes without acquiring GPS.
+        val providers = availableProviders().let {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && FUSED_PROVIDER in it) {
+                listOf(FUSED_PROVIDER)
+            } else it.filter { provider -> provider != FUSED_PROVIDER }
+        }
+        providers.forEach { provider ->
             runCatching {
-                manager.requestLocationUpdates(
-                    provider,
-                    intervalMillis,
-                    0f,
-                    listener,
-                    Looper.getMainLooper(),
-                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    manager.requestLocationUpdates(
+                        provider,
+                        LocationRequest.Builder(intervalMillis)
+                            .setQuality(LocationRequest.QUALITY_HIGH_ACCURACY)
+                            .setMinUpdateIntervalMillis(intervalMillis)
+                            .setMaxUpdateDelayMillis(0)
+                            .build(),
+                        ContextCompat.getMainExecutor(appContext),
+                        listener,
+                    )
+                } else {
+                    manager.requestLocationUpdates(provider, intervalMillis, 0f, listener, Looper.getMainLooper())
+                }
                 registered = true
             }
         }
@@ -85,26 +100,30 @@ class AndroidLocationDataSource(context: Context) {
         awaitClose { manager.removeUpdates(listener) }
     }
 
-    private fun enabledProviders(): List<String> {
+    private fun availableProviders(): List<String> {
         val preferred = listOf(
             FUSED_PROVIDER,
             LocationManager.GPS_PROVIDER,
             LocationManager.NETWORK_PROVIDER,
-            LocationManager.PASSIVE_PROVIDER,
         )
-        val available = manager.getProviders(true).toSet()
-        return (preferred + available).distinct().filter(available::contains)
+        // Register even when an individual provider is disabled so switching GPS back on
+        // resumes updates without requiring the user to reopen the screen.
+        val available = manager.getProviders(false).toSet()
+        return preferred.filter(available::contains)
     }
 
     private fun Location.toFix() = DeviceLocationFix(
         latitude = latitude,
         longitude = longitude,
         accuracyMeters = accuracy,
-        capturedAtEpochMillis = time,
+        // The monotonic timestamp preserves the fix's real age across wall-clock changes.
+        capturedAtEpochMillis = if (elapsedRealtimeNanos > 0) {
+            System.currentTimeMillis() -
+                ((SystemClock.elapsedRealtimeNanos() - elapsedRealtimeNanos).coerceAtLeast(0) / 1_000_000)
+        } else time,
     )
 
     private companion object {
         const val FUSED_PROVIDER = "fused"
-        const val CURRENT_FIX_INTERVAL_MILLIS = 1_000L
     }
 }

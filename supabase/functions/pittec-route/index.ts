@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 // See contracts/pittec-routing-ui.md. This function never accepts coordinates from the request
 // body — it reads both exact participant positions itself, server-side, using the caller's own
@@ -12,7 +12,8 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const unavailable = (status: number, code: string, retryable: boolean) =>
   json(status, { status: "UNAVAILABLE", code, retryable });
 
-// Per-instance only: a cold isolate or a different instance under load can still race a second
+// Per authenticated caller and instance: never share a participant's response with another user.
+// A cold isolate or a different instance under load can still race a second
 // upstream call for the same appointment. That is safe — `upsert_pittec_route_snapshot` rejects
 // an older `provider_location_revision` at the database level — this just avoids paying for two
 // upstream calls in the common case of two near-simultaneous requests on the same warm instance.
@@ -55,20 +56,21 @@ Deno.serve(async (request) => {
   const { data: userData, error: userError } = await userClient.auth.getUser();
   if (userError || !userData.user) return json(401, { status: "UNAVAILABLE", code: "AUTH_REQUIRED", retryable: false });
 
-  const existing = inFlight.get(appointmentId);
+  const flightKey = `${userData.user.id}:${appointmentId}`;
+  const existing = inFlight.get(flightKey);
   if (existing) return (await existing).clone();
 
   const work = handle(userClient, supabaseUrl, serviceKey, routingBaseUrl, routingApiKey, appointmentId, requestedRevision);
-  inFlight.set(appointmentId, work);
+  inFlight.set(flightKey, work);
   try {
-    return await work;
+    return (await work).clone();
   } finally {
-    inFlight.delete(appointmentId);
+    inFlight.delete(flightKey);
   }
 });
 
 async function handle(
-  userClient: ReturnType<typeof createClient>,
+  userClient: SupabaseClient,
   supabaseUrl: string,
   serviceKey: string,
   routingBaseUrl: string,
@@ -108,7 +110,7 @@ async function handle(
     Date.now() - Date.parse(currentSnapshot.generated_at) < MIN_REFRESH_INTERVAL_MS;
   const coversRequested = currentSnapshot &&
     Number(currentSnapshot.provider_location_revision) >= providerRevision;
-  if (currentSnapshot && (freshEnough || coversRequested)) {
+  if (currentSnapshot && currentSnapshot.geometry?.duration_seconds != null && (freshEnough || coversRequested)) {
     return json(200, {
       status: "ROUTE",
       appointment_id: appointmentId,
@@ -153,6 +155,8 @@ async function handle(
   const body = await upstream.json().catch(() => null);
   const route = body?.routes?.[0];
   const distanceMeters = Math.round(Number(route?.distance));
+  const durationSeconds = typeof route?.duration === "number" && Number.isFinite(route.duration) && route.duration >= 0 && route.duration <= 604_800
+    ? Math.ceil(route.duration) : null;
   const geometry = route?.geometry;
   const validGeometry = geometry?.type === "LineString" &&
     Array.isArray(geometry.coordinates) &&
@@ -164,7 +168,7 @@ async function handle(
       pair[0] >= -180 && pair[0] <= 180 && pair[1] >= -90 && pair[1] <= 90
     );
   if (body?.code !== "Ok" || !validGeometry || !Number.isFinite(distanceMeters) ||
-    distanceMeters < 0 || distanceMeters > MAX_DISTANCE_METERS
+    distanceMeters < 0 || distanceMeters > MAX_DISTANCE_METERS || durationSeconds === null
   ) {
     console.log(JSON.stringify({
       fn: "pittec-route", appointmentId, outcome: "ROUTER_INVALID_RESPONSE",
@@ -176,7 +180,7 @@ async function handle(
   const { data: upserted, error: upsertError } = await admin.rpc("upsert_pittec_route_snapshot", {
     p_appointment_id: appointmentId,
     p_provider_location_revision: providerRevision,
-    p_geometry: { type: "LineString", coordinates: geometry.coordinates },
+    p_geometry: { type: "LineString", coordinates: geometry.coordinates, duration_seconds: durationSeconds },
     p_distance_meters: distanceMeters,
     p_provider: "osrm",
   });

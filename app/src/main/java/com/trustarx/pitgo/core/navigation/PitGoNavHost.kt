@@ -123,6 +123,14 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
         factory = SessionViewModel.factory(container.sessionRepository),
     )
     val sessionState by sessionViewModel.state.collectAsStateWithLifecycle()
+    val inspectionSync: com.trustarx.pitgo.features.guincho.viewmodel.GuinchoInspectionSyncViewModel = viewModel(
+        factory = com.trustarx.pitgo.features.guincho.viewmodel.GuinchoInspectionSyncViewModel.factory(
+            container.guinchoInspectionRepository, container.sessionRepository, container.connectivityObserver))
+    LifecycleStartEffect(inspectionSync) { inspectionSync.onVisible(); onStopOrDispose { inspectionSync.onHidden() } }
+    val inspectionAlertViewModel: com.trustarx.pitgo.features.guincho.viewmodel.GuinchoInspectionAlertViewModel = viewModel(
+        factory = com.trustarx.pitgo.features.guincho.viewmodel.GuinchoInspectionAlertViewModel.factory(container.inspectionAlerts, container.sessionRepository, container.connectivityObserver))
+    val inspectionAlerts by inspectionAlertViewModel.state.collectAsStateWithLifecycle()
+    LifecycleStartEffect(inspectionAlertViewModel) { inspectionAlertViewModel.onVisible(); onStopOrDispose { inspectionAlertViewModel.onHidden() } }
     val dispatchResumeViewModel: DispatchResumeViewModel = viewModel(
         factory = DispatchResumeViewModel.factory(
             container.sessionRepository, container.mobileDispatchRepository,
@@ -356,8 +364,12 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
     // cold start naturally starts from null, so the "resume on session start" behavior is kept.
     // See contracts/appointment-map-and-navigation.md.
     var lastAutoNavigated by remember { mutableStateOf<Pair<String, Long>?>(null) }
+    LaunchedEffect(sessionState) {
+        if (sessionState !is AppSessionState.Authenticated) lastAutoNavigated = null
+    }
     LaunchedEffect(dispatchResumeState, sessionState, currentRoute) {
         val active = dispatchResumeState as? DispatchResumeState.Active ?: return@LaunchedEffect
+        if (active.ownerId != (sessionState as? AppSessionState.Authenticated)?.userId) return@LaunchedEffect
         val related = currentRoute in setOf(
             PitGoRoutes.MobileDispatchNew, PitGoRoutes.MobileDispatch,
             PitGoRoutes.ProviderRequest, PitGoRoutes.AppointmentTracking, PitGoRoutes.GuinchoInspection, PitGoRoutes.GuinchoMap, PitGoRoutes.Payment,
@@ -420,6 +432,43 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
         }
     }
 
+    val inspectionClient = sessionState as? AppSessionState.Authenticated.Client
+    val viewingInspection = currentBackStackEntry?.arguments?.getString(PitGoRoutes.AppointmentIdArg)
+        ?.takeIf { currentRoute == PitGoRoutes.GuinchoInspection }
+    LaunchedEffect(inspectionAlerts.destination) {
+        inspectionAlerts.destination?.let { (id, pending) ->
+            val target = if (pending) PitGoRoutes.guinchoInspection(id) else PitGoRoutes.appointmentTracking(id)
+            if (!(pending && viewingInspection == id)) navController.navigate(target) { launchSingleTop = true }
+            inspectionAlertViewModel.consumed()
+        }
+    }
+    var dismissedInspectionOwner by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var dismissedInspectionAlerts by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(emptyList<String>()) }
+    LaunchedEffect(sessionState) {
+        if (sessionState is AppSessionState.Authenticated ||
+            (sessionState as? AppSessionState.Unauthenticated)?.reason == com.trustarx.pitgo.core.auth.model.UnauthenticatedReason.SIGNED_OUT) {
+            if (dismissedInspectionOwner != inspectionClient?.userId) {
+                dismissedInspectionOwner = inspectionClient?.userId
+                dismissedInspectionAlerts = emptyList()
+            }
+        }
+    }
+    if (inspectionClient != null && inspectionClient.userId == inspectionAlerts.owner) {
+        val pending = inspectionAlerts.alerts.firstOrNull {
+            it.appointmentId != viewingInspection &&
+                (dismissedInspectionOwner != inspectionClient.userId || it.id !in dismissedInspectionAlerts)
+        }
+        if (pending != null) com.trustarx.pitgo.features.guincho.ui.GuinchoInspectionAlert(
+            opening = inspectionAlerts.opening,
+            error = inspectionAlerts.openError,
+            onOpen = { inspectionAlertViewModel.open(pending.id) },
+            onDismiss = {
+                inspectionAlertViewModel.dismiss()
+                dismissedInspectionOwner = inspectionClient.userId
+                dismissedInspectionAlerts = dismissedInspectionAlerts + pending.id
+            },
+        )
+    }
     Column(Modifier.fillMaxSize()) {
     NavHost(navController = navController, startDestination = PitGoRoutes.SessionGate, modifier = Modifier.weight(1f)) {
         composable(PitGoRoutes.SessionGate) {
@@ -878,11 +927,13 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
             if (sessionState is AppSessionState.Authenticated && appointmentId.isNotBlank()) {
                 val isClientSession = sessionState is AppSessionState.Authenticated.Client
                 val trackingViewModel: AppointmentTrackingViewModel = viewModel(
+                    key = "tracking:${(sessionState as AppSessionState.Authenticated).userId}:$appointmentId",
                     factory = AppointmentTrackingViewModel.factory(
                         appointmentId, container.appointmentTrackingRepository,
                         container.mobileDispatchRepository, container.pitTecRouteRepository,
                         container.deviceLocationRepository,
                         isClient = isClientSession,
+                        guinchoRoutes = container.guinchoRouteRepository,
                     ),
                 )
                 AppointmentTrackingRoute(
@@ -912,18 +963,22 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
         )) { entry ->
             val authenticated = sessionState as? AppSessionState.Authenticated
             val appointmentId = entry.arguments?.getString(PitGoRoutes.AppointmentIdArg).orEmpty()
-            if (authenticated != null && appointmentId.isNotBlank()) {
+            if (authenticated != null) entry.savedStateHandle["inspectionAccount"] = authenticated.userId
+            val inspectionAccount = authenticated?.userId ?: entry.savedStateHandle.get<String>("inspectionAccount")
+            if (inspectionAccount != null && appointmentId.isNotBlank()) {
                 val inspectionViewModel: com.trustarx.pitgo.features.guincho.viewmodel.GuinchoInspectionViewModel = viewModel(
+                    key = "inspection:$inspectionAccount:$appointmentId",
                     factory = androidx.lifecycle.viewmodel.viewModelFactory {
                         initializer {
                             com.trustarx.pitgo.features.guincho.viewmodel.GuinchoInspectionViewModel(
-                                appointmentId, authenticated.userId, container.guinchoInspectionRepository,
+                                appointmentId, inspectionAccount, container.guinchoInspectionRepository,
                                 this.createSavedStateHandle(), entry.arguments?.getBoolean(PitGoRoutes.AppointmentHistoryArg) == true,
                             )
                         }
                     },
                 )
                 com.trustarx.pitgo.features.guincho.ui.GuinchoInspectionRoute(inspectionViewModel,
+                    sessionVerified = authenticated?.userId == inspectionAccount,
                     onBack = { navController.popBackStack() }, onSessionExpired = sessionViewModel::refresh,
                     onApprovalConfirmed = {
                         val previous = navController.previousBackStackEntry
@@ -945,18 +1000,43 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
         composable(PitGoRoutes.GuinchoMap) {
             val guinchoSession = sessionState as? AppSessionState.Authenticated.Client
             if (guinchoSession != null) {
-                val guinchoViewModel: com.trustarx.pitgo.features.guincho.viewmodel.GuinchoMapViewModel = viewModel(
-                    factory = com.trustarx.pitgo.features.guincho.viewmodel.GuinchoMapViewModel.factory(
-                        guinchoSession.userId, container.guinchoRepository, container.vehicleRepository,
-                        container.deviceLocationRepository, container.guinchoAddressRepository, container.connectivityObserver),
-                )
-                com.trustarx.pitgo.features.guincho.ui.GuinchoMapRoute(
-                    guinchoViewModel, onBack = { navController.popBackStack() },
-                    onContract = { snapshot -> snapshot.appointment?.let { appointment ->
-                        navController.navigate(PitGoRoutes.appointmentTracking(appointment.id)) { launchSingleTop=true }
-                    } }, contractingEnabled = true, onSessionExpired = sessionViewModel::refresh,
-                    onGarage = { navController.navigate(PitGoRoutes.Garage) },
-                )
+                val active = (dispatchResumeState as? DispatchResumeState.Active)?.takeIf {
+                    it.ownerId == guinchoSession.userId && it.snapshot.dispatchKind == MobileDispatchKind.GUINCHO_DIRECT
+                }?.snapshot
+                val appointment = active?.appointment
+                if (appointment != null) {
+                    LaunchedEffect(appointment.id, appointment.status, active.paymentStatus) {
+                        val destination = if (appointment.status == MobileAppointmentStatus.AWAITING_PAYMENT &&
+                            active.paymentStatus != com.trustarx.pitgo.features.payment.model.PaymentStatus.APPROVED) {
+                            PitGoRoutes.payment(active.serviceId, "GUINCHO_DIRECT", active.searchId,
+                                appointment.id, appointment.quoteVersion, appointment.quotedPrice.toPlainString())
+                        } else PitGoRoutes.appointmentTracking(appointment.id)
+                        navController.navigate(destination) {
+                            popUpTo(PitGoRoutes.GuinchoMap) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                } else if (dispatchResumeState is DispatchResumeState.Loading) {
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        androidx.compose.foundation.layout.Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                            androidx.compose.material3.CircularProgressIndicator()
+                            androidx.compose.material3.Text(stringResource(R.string.guincho_restoring_request))
+                        }
+                    }
+                } else {
+                    val guinchoViewModel: com.trustarx.pitgo.features.guincho.viewmodel.GuinchoMapViewModel = viewModel(
+                        factory = com.trustarx.pitgo.features.guincho.viewmodel.GuinchoMapViewModel.factory(
+                            guinchoSession.userId, container.guinchoRepository, container.vehicleRepository,
+                            container.deviceLocationRepository, container.guinchoAddressRepository, container.connectivityObserver),
+                    )
+                    com.trustarx.pitgo.features.guincho.ui.GuinchoMapRoute(
+                        guinchoViewModel, onBack = { navController.popBackStack() },
+                        onContract = { snapshot -> snapshot.appointment?.let { appointment ->
+                            navController.navigate(PitGoRoutes.appointmentTracking(appointment.id)) { launchSingleTop=true }
+                        } }, contractingEnabled = true, onSessionExpired = sessionViewModel::refresh,
+                        onGarage = { navController.navigate(PitGoRoutes.Garage) },
+                    )
+                }
             }
         }
         composable(PitGoRoutes.GuinchoHistory) {

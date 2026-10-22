@@ -17,13 +17,14 @@ internal data class GuinchoInspectionDocumentDto(
     @SerialName("is_provider") val isProvider: Boolean,
     val closed: Boolean,
     @SerialName("required_photos") val requiredPhotos: List<GuinchoInspectionPhoto> = emptyList(),
+    @SerialName("named_photos") val namedPhotos: List<GuinchoInspectionPhoto> = emptyList(),
     @SerialName("pending_photos") val pending: List<GuinchoInspectionPhoto> = emptyList(),
 ) {
     fun domain(): GuinchoInspectionDocument {
         require(revision > 0 && appointmentId.isNotBlank())
         return GuinchoInspectionDocument(appointmentId, revision, summary.validate(), version,
             listOf("brand", "model", "plate", "color").mapNotNull { vehicle?.get(it)?.jsonPrimitive?.contentOrNull }.joinToString(" · "),
-            isProvider, closed, pending.map { it.validate() }, requiredPhotos.map { it.validate() })
+            isProvider, closed, pending.map { it.validate() }, requiredPhotos.map { it.validate() }, namedPhotos.map { it.validate() })
     }
 }
 

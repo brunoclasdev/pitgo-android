@@ -10,6 +10,8 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
+import android.location.Location
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -18,6 +20,7 @@ import com.trustarx.pitgo.PitGoApplication
 import com.trustarx.pitgo.R
 import com.trustarx.pitgo.core.account.model.ProviderLocationMode
 import com.trustarx.pitgo.core.auth.model.AppSessionState
+import com.trustarx.pitgo.core.location.model.DeviceLocationFix
 import com.trustarx.pitgo.features.providerdashboard.model.ProviderDashboardUpdateResult
 import com.trustarx.pitgo.features.providertracking.model.ProviderLocationUpdate
 import com.trustarx.pitgo.features.providertracking.model.ProviderTrackingState
@@ -36,6 +39,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 
@@ -44,8 +48,9 @@ class ProviderLocationTrackingService : Service() {
     private var trackingJob: Job? = null
     private var trackerId: String? = null
     private var watchdogJob: Job? = null
-    private var lastPublishedAt: Long? = null
-    private var lastPreciseFixAt: Long? = null
+    @Volatile private var lastPublishedAt: Long? = null
+    @Volatile private var lastPreciseFixAt: Long? = null
+    @Volatile private var lastTarget = ProviderTrackingTarget.DISCOVERY
     private var incomingRequestJob: Job? = null
     private var lastNotifiedOffer: Pair<String, Long>? = null
     private val container get() = (application as PitGoApplication).container
@@ -81,15 +86,31 @@ class ProviderLocationTrackingService : Service() {
             trackerId = lease.trackerId
             var sequence = lease.sequence
             container.providerTrackingStateRepository.update(ProviderTrackingState.Starting)
-            val acquisitionStartedAt = System.currentTimeMillis()
+            val acquisitionStartedAt = SystemClock.elapsedRealtime()
+            var publishedFix: DeviceLocationFix? = null
+            var lastPublishAttemptAt: Long? = null
+            var lastSuccessfulPublishAt: Long? = null
             watchdogJob?.cancel()
             watchdogJob = scope.launch {
                 while (true) {
-                    delay(10_000)
-                    val lastFix = lastPreciseFixAt
-                    if (System.currentTimeMillis() - (lastFix ?: acquisitionStartedAt) > 30_000L) {
-                        degradeAndStop(TrackingStopReason.NO_PRECISE_FIX)
+                    delay(2_000)
+                    if (!container.deviceLocationRepository.hasPrecisePermission()) {
+                        degradeAndStop(TrackingStopReason.PERMISSION_REVOKED)
                         return@launch
+                    }
+                    val lastFix = lastPreciseFixAt
+                    val reason = when {
+                        !container.deviceLocationRepository.areLocationServicesEnabled() -> TrackingStopReason.LOCATION_DISABLED
+                        SystemClock.elapsedRealtime() - (lastFix ?: acquisitionStartedAt) > DeviceLocationFix.MAX_FIX_AGE_MILLIS ->
+                            TrackingStopReason.NO_PRECISE_FIX
+                        else -> null
+                    }
+                    if (reason != null) {
+                        // A tunnel or disabled GPS must not permanently switch the driver off.
+                        // The server already excludes stale positions; acquisition keeps running.
+                        container.providerTrackingStateRepository.update(
+                            ProviderTrackingState.Degraded(lastTarget, reason, lastPublishedAt),
+                        )
                     }
                 }
             }
@@ -99,8 +120,12 @@ class ProviderLocationTrackingService : Service() {
                 incomingRequestJob = launch { runIncomingRequestAlerts(session.account.providerId) }
             }
             try {
-                container.deviceLocationRepository.preciseUpdates().conflate().collect { fix ->
-                    lastPreciseFixAt = System.currentTimeMillis()
+                container.deviceLocationRepository.preciseUpdates()
+                    .onEach { fix ->
+                        lastPreciseFixAt = SystemClock.elapsedRealtime() -
+                            (System.currentTimeMillis() - fix.capturedAtEpochMillis).coerceAtLeast(0)
+                    }
+                    .conflate().collect { fix ->
                     val current = container.sessionRepository.state.value
                         as? AppSessionState.Authenticated.ProviderReady
                     if (current?.userId != session.userId || current.account.locationMode !in TRACKABLE_MODES ||
@@ -108,6 +133,23 @@ class ProviderLocationTrackingService : Service() {
                         degradeAndStop(TrackingStopReason.SESSION_EXPIRED)
                         return@collect
                     }
+                    if (!container.deviceLocationRepository.hasPrecisePermission()) {
+                        degradeAndStop(TrackingStopReason.PERMISSION_REVOKED)
+                        return@collect
+                    }
+                    if (!container.deviceLocationRepository.areLocationServicesEnabled() ||
+                        !fix.isHighQuality(System.currentTimeMillis())) return@collect
+                    val now = SystemClock.elapsedRealtime()
+                    val lastAttempt = lastPublishAttemptAt
+                    if (lastAttempt != null && now - lastAttempt < MOVING_INTERVAL_MILLIS) return@collect
+                    val previous = publishedFix
+                    val lastSuccess = lastSuccessfulPublishAt
+                    if (previous != null && lastSuccess != null &&
+                        container.providerTrackingStateRepository.state.value is ProviderTrackingState.Publishing &&
+                        now - lastSuccess < STATIONARY_HEARTBEAT_MILLIS && !hasMeaningfulChange(previous, fix)) {
+                        return@collect
+                    }
+                    lastPublishAttemptAt = now
                     sequence += 1
                     when (val result = container.providerLocationRepository.publish(
                         ProviderLocationUpdate(lease.trackerId, sequence, fix),
@@ -115,6 +157,9 @@ class ProviderLocationTrackingService : Service() {
                         is PublishLocationResult.Published -> {
                             container.providerTrackingPreferences.updateSequence(session.userId, lease.trackerId, sequence)
                             lastPublishedAt = System.currentTimeMillis()
+                            lastTarget = result.target
+                            publishedFix = fix
+                            lastSuccessfulPublishAt = SystemClock.elapsedRealtime()
                             container.providerTrackingStateRepository.update(
                                 ProviderTrackingState.Publishing(
                                     result.target,
@@ -124,7 +169,7 @@ class ProviderLocationTrackingService : Service() {
                         }
                         PublishLocationResult.Offline -> container.providerTrackingStateRepository.update(
                             ProviderTrackingState.Degraded(
-                                ProviderTrackingTarget.DISCOVERY,
+                                lastTarget,
                                 TrackingStopReason.OFFLINE,
                                 lastPublishedAt,
                             ),
@@ -134,7 +179,7 @@ class ProviderLocationTrackingService : Service() {
                         PublishLocationResult.Ineligible -> degradeAndStop(TrackingStopReason.INELIGIBLE)
                         PublishLocationResult.Failed -> container.providerTrackingStateRepository.update(
                             ProviderTrackingState.Degraded(
-                                ProviderTrackingTarget.DISCOVERY,
+                                lastTarget,
                                 TrackingStopReason.UNKNOWN,
                                 lastPublishedAt,
                             ),
@@ -146,6 +191,14 @@ class ProviderLocationTrackingService : Service() {
             catch (_: SecurityException) { degradeAndStop(TrackingStopReason.PERMISSION_REVOKED) }
             catch (_: Throwable) { degradeAndStop(TrackingStopReason.UNKNOWN) }
         }
+    }
+
+    private fun hasMeaningfulChange(previous: DeviceLocationFix, current: DeviceLocationFix): Boolean {
+        if (current.accuracyMeters < previous.accuracyMeters * 0.75f) return true
+        val distance = FloatArray(1)
+        Location.distanceBetween(previous.latitude, previous.longitude, current.latitude, current.longitude, distance)
+        val movementThreshold = (minOf(previous.accuracyMeters, current.accuracyMeters) / 2f).coerceIn(5f, 15f)
+        return distance[0] >= movementThreshold
     }
 
     /**
@@ -340,6 +393,8 @@ class ProviderLocationTrackingService : Service() {
         const val EXTRA_UPDATE_AVAILABILITY = "update_availability"
         private const val CHANNEL_ID = "provider_location_tracking"
         private const val NOTIFICATION_ID = 7001
+        private const val MOVING_INTERVAL_MILLIS = 2_000L
+        private const val STATIONARY_HEARTBEAT_MILLIS = 10_000L
 
         /** Both modalities publish exact movement into an accepted appointment the same way. */
         private val TRACKABLE_MODES = setOf(ProviderLocationMode.MOBILE, ProviderLocationMode.PITTEC)

@@ -50,8 +50,11 @@ data class GuinchoMapState(
     val online: Boolean = true,
     val checkout: com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchSnapshot? = null,
 ) {
-    val fullDestinationAddress: String get() = listOf(destinationAddress.trim(), destinationNumber.trim())
-        .filter { it.isNotEmpty() }.joinToString(", ")
+    val fullDestinationAddress: String get() {
+        val address = destinationAddress.split(',', limit = 2)
+        return listOf(address.first().trim(), destinationNumber.trim(), address.getOrNull(1).orEmpty().trim())
+            .filter { it.isNotEmpty() }.joinToString(", ")
+    }
     val canConfirmDestination: Boolean get() = destination != null && !searchingAddress &&
         destinationAddress.isNotBlank() && destinationNumber.isNotBlank() && fullDestinationAddress.length <= 500
     val markers get() = providers.map { MapMarkerSpec(it.id, it.coordinate, MapMarkerKind.MOBILE_PROVIDER,
@@ -214,9 +217,8 @@ class GuinchoMapViewModel(
             suggestion !in mutable.value.addressSuggestions) return
         cancelAddressSearch()
         destinationMapGesture = false
-        val viewport = MapViewport(suggestion.coordinate,16.0)
         mutable.update { it.copy(destination=suggestion.coordinate,destinationAddress=suggestion.label,
-            viewport=viewport,camera=MapViewportCommand(viewport,System.nanoTime()),addressSuggestions=emptyList(),
+            addressSuggestions=emptyList(),
             searchingAddress=false,addressSearchCompleted=false,addressSearchFailure=false,failure=null) }
     }
     fun number(value: String) {
@@ -227,8 +229,11 @@ class GuinchoMapViewModel(
     fun confirmPoint() {
         val current=mutable.value
         if(current.operation!=GuinchoMapOperation.IDLE || current.stage !in setOf(GuinchoMapStage.PICKUP,GuinchoMapStage.DESTINATION)) return
-        if(!current.viewport.center.isValid || current.viewport.zoom<12.0 ||
-            (current.stage==GuinchoMapStage.DESTINATION && (!current.canConfirmDestination || destinationMapGesture))) {
+        val invalidPickup = current.stage==GuinchoMapStage.PICKUP &&
+            (!current.viewport.center.isValid || current.viewport.zoom<12.0)
+        val invalidDestination = current.stage==GuinchoMapStage.DESTINATION &&
+            (!current.canConfirmDestination || current.destination?.isValid != true || destinationMapGesture)
+        if(invalidPickup || invalidDestination) {
             mutable.update { it.copy(failure=GuinchoFailure.INVALID_INPUT) }; return
         }
         if(current.stage==GuinchoMapStage.PICKUP) {
@@ -236,7 +241,9 @@ class GuinchoMapViewModel(
             locationJob=viewModelScope.launch { applyPickup(current.viewport.center) }
         } else {
             cancelAddressSearch()
-            mutable.update { it.copy(stage=GuinchoMapStage.CONFIRM,addressSuggestions=emptyList()) }
+            val viewport = MapViewport(requireNotNull(current.destination),16.0)
+            mutable.update { it.copy(stage=GuinchoMapStage.CONFIRM,addressSuggestions=emptyList(),
+                viewport=viewport,camera=MapViewportCommand(viewport,System.nanoTime())) }
         }
     }
     fun editTrip() {
@@ -246,9 +253,7 @@ class GuinchoMapViewModel(
         cancelAddressSearch()
         destinationMapGesture = false
         mutable.update {
-            val viewport = it.destination?.let { point -> MapViewport(point,16.0) } ?: it.viewport
             it.copy(stage=GuinchoMapStage.DESTINATION,operation=GuinchoMapOperation.IDLE,
-                viewport=viewport,camera=MapViewportCommand(viewport,System.nanoTime()),
                 providers=emptyList(),selected=null,quote=null,failure=null,
                 searchingAddress=false,addressSuggestions=emptyList(),addressSearchCompleted=false,addressSearchFailure=false)
         }

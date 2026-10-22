@@ -1,6 +1,9 @@
 package com.trustarx.pitgo.core.app
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import io.github.jan.supabase.auth.auth
 import com.trustarx.pitgo.core.account.repository.AccountRepository
 import com.trustarx.pitgo.core.account.repository.AccountContextRepository
@@ -38,6 +41,7 @@ import com.trustarx.pitgo.features.paymentmethods.repository.SavedCardRepository
 class PitGoAppContainer(context: Context) {
     private val supabase = SupabaseClientProvider.client
 
+    val inspectionAlerts: com.trustarx.pitgo.features.guincho.repository.GuinchoInspectionAlertRepository by lazy { com.trustarx.pitgo.features.guincho.repository.GuinchoInspectionAlertRepository(supabase) { sessionRepository } }
     val connectivityObserver = ConnectivityObserver(context)
     val authDataSource = SupabaseAuthDataSource(supabase)
     val accountRepository = AccountRepository(supabase)
@@ -59,6 +63,7 @@ class PitGoAppContainer(context: Context) {
     val guinchoAddressRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoAddressRepository(context, supabase)
     val guinchoInspectionFiles = com.trustarx.pitgo.features.guincho.data.GuinchoInspectionCaptureFiles(context)
     val guinchoInspectionRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoInspectionRepository(supabase, guinchoInspectionFiles)
+    val guinchoRouteRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoRouteRepository(supabase, guinchoInspectionFiles)
     val guinchoRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoRepository(supabase)
     val providerDashboardRepository = ProviderDashboardRepository(supabase)
     val mobileDispatchRepository = MobileDispatchRepository(supabase)
@@ -70,16 +75,20 @@ class PitGoAppContainer(context: Context) {
         else com.trustarx.pitgo.features.payment.repository.IntegratedPaymentGateway(PaymentRepository(supabase))
     val savedCardRepository = SavedCardRepository(supabase)
     val clientAddressRepository = ClientAddressRepository(supabase)
-    val deviceLocationRepository = DeviceLocationRepository(AndroidLocationDataSource(context))
+    val deviceLocationRepository = DeviceLocationRepository(
+        AndroidLocationDataSource(context), CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    )
     val onboardingRepository = VehicleOnboardingRepository(context)
     val appearancePreferences = AppearancePreferences(context)
-    val sessionRepository = SessionRepository(
+    val sessionRepository: SessionRepository = SessionRepository(
         authDataSource,
         accountContextRepository,
         beforeInitialize = {
             supabase.auth.awaitInitialization()
             com.trustarx.pitgo.core.environment.EnvironmentStateRepository(context).validate {
                 guinchoInspectionFiles.clear()
+                guinchoInspectionRepository.pending.hide()
+                guinchoInspectionFiles.clearReadCache()
                 supabase.auth.sessionManager.deleteSession()
                 context.stopService(android.content.Intent(context, com.trustarx.pitgo.features.providertracking.service.ProviderLocationTrackingService::class.java))
                 providerTrackingPreferences.clear()
@@ -91,6 +100,8 @@ class PitGoAppContainer(context: Context) {
         },
         beforeSignOut = { provider ->
             guinchoInspectionFiles.clear()
+            guinchoInspectionRepository.pending.hide()
+            guinchoInspectionFiles.clearReadCache()
             if (provider != null) {
                 providerDashboardRepository.update(
                     provider,
