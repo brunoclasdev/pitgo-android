@@ -149,8 +149,9 @@ internal data class PitTecOfferDto(
 internal data class PitTecProviderDto(
     @SerialName("provider_id") val providerId: String,
     @SerialName("display_name") val displayName: String,
+    @SerialName("rating_summary") val ratingSummary: com.trustarx.pitgo.features.rating.model.ProviderRatingSummary? = null,
 ) {
-    fun toDomain() = PitTecProvider(providerId, displayName)
+    fun toDomain() = PitTecProvider(providerId, displayName, ratingSummary?.validate())
 }
 
 @Serializable

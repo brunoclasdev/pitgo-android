@@ -15,6 +15,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
@@ -44,7 +45,7 @@ fun GuinchoProviderHomeRoute(home: GuinchoProviderHomeViewModel, dashboard: Prov
     val state by home.state.collectAsStateWithLifecycle()
     val account by dashboard.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var profileVisible by remember { mutableStateOf(false) }
+    var profileVisible by rememberSaveable { mutableStateOf(false) }
     var enableAvailability by remember { mutableStateOf(false) }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         dashboard.enableTrackedAvailability(ProviderLocationMode.MOBILE)

@@ -22,6 +22,7 @@ data class GuinchoProvider(
     val name: String,
     val coordinate: MapCoordinate,
     val distanceMeters: Double,
+    val ratingSummary: com.trustarx.pitgo.features.rating.model.ProviderRatingSummary? = null,
 )
 data class GuinchoQuote(
     val id: String,

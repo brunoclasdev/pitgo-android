@@ -56,6 +56,7 @@ fun ProviderDashboardRoute(
     onLogout: () -> Unit,
     onOpenGuinchoHistory: () -> Unit,
     onOpenIncomingRequest: (String) -> Unit = {},
+    ratingsContent: @Composable () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -93,6 +94,7 @@ fun ProviderDashboardRoute(
     }
     ProviderDashboardScreen(
         state, onLogout,
+        ratingsContent = ratingsContent,
         onOpenGuinchoHistory = onOpenGuinchoHistory,
         onAvailabilityChanged = { available ->
             val content = state as? ProviderDashboardUiState.Content
@@ -151,6 +153,7 @@ private fun ProviderDashboardScreen(
     onOpenNotificationSettings: () -> Unit,
     showBatteryOptimizationBanner: Boolean,
     onRequestBatteryExemption: () -> Unit,
+    ratingsContent: @Composable () -> Unit,
 ) {
     Scaffold(contentWindowInsets = WindowInsets.safeDrawing) { padding ->
         Column(
@@ -198,6 +201,7 @@ private fun ProviderDashboardScreen(
                     ) {
                         Text(state.provider.name, style = MaterialTheme.typography.titleLarge)
                         Text(state.provider.email, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        ratingsContent()
                         Text(
                             stringResource(
                                 R.string.provider_dashboard_mode,

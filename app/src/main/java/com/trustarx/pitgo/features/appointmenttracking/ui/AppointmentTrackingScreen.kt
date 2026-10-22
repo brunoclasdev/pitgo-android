@@ -81,6 +81,7 @@ fun AppointmentTrackingRoute(
     onBack: () -> Unit,
     onFinished: () -> Unit,
     onSessionExpired: () -> Unit,
+    onRate: (String) -> Unit = { onFinished() },
     historical: Boolean = false,
     onOpenInspection: (String) -> Unit = {},
     onNeedsPayment: (com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchSnapshot) -> Unit = {},
@@ -120,6 +121,7 @@ fun AppointmentTrackingRoute(
     )
     var openingInspection by remember(viewModel) { mutableStateOf(false) }
     var wasDisputed by remember(viewModel) { mutableStateOf(false) }
+    var completionHandled by remember(viewModel) { mutableStateOf(false) }
     LaunchedEffect(state.dispatch?.appointment?.status, historical, isClient) {
         val snapshot = state.dispatch
         if (!historical && isClient && state.isGuincho &&
@@ -129,8 +131,12 @@ fun AppointmentTrackingRoute(
         if (state.data is TrackingDataState.SessionExpired) onSessionExpired()
         val status = state.dispatch?.appointment?.status
         if (status == MobileAppointmentStatus.DISPUTED) wasDisputed = true
-        if (!historical && (status == MobileAppointmentStatus.COMPLETED ||
-                (wasDisputed && status == MobileAppointmentStatus.CANCELLED))) onFinished()
+        if (!historical && !completionHandled && (status == MobileAppointmentStatus.COMPLETED ||
+                (wasDisputed && status == MobileAppointmentStatus.CANCELLED))) {
+            completionHandled = true
+            val ratingAppointment = viewModel.completedRatingAppointmentId()
+            if (ratingAppointment != null) onRate(ratingAppointment) else onFinished()
+        }
     }
     LaunchedEffect(state.dispatch?.appointment?.arrivedAt, state.arriving, openingInspection) {
         if (openingInspection && state.dispatch?.appointment?.arrivedAt != null && state.dispatch?.guinchoInspection?.required == true) {

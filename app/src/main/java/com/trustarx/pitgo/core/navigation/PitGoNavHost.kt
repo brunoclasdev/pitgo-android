@@ -252,6 +252,9 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
         PitGoRoutes.ProviderSignUp,
         PitGoRoutes.ProviderRegistration,
         PitGoRoutes.ProviderDashboard,
+        PitGoRoutes.ProviderRatings,
+        PitGoRoutes.ServiceRating,
+        PitGoRoutes.GuinchoHistory,
         PitGoRoutes.ProviderMigration,
         PitGoRoutes.ProviderTracking,
         PitGoRoutes.AppointmentTracking,
@@ -308,6 +311,7 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
                 val providerOnly = currentRoute in setOf(
                     PitGoRoutes.ProviderRegistration,
                     PitGoRoutes.ProviderDashboard,
+                    PitGoRoutes.ProviderRatings,
                     PitGoRoutes.ProviderRequest,
                 )
                 if (publicRoute || providerOnly || currentRoute == PitGoRoutes.SessionGate) {
@@ -331,6 +335,8 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
             is AppSessionState.Authenticated.ProviderReady -> {
                 if (currentRoute !in setOf(
                         PitGoRoutes.ProviderDashboard,
+                        PitGoRoutes.ProviderRatings,
+                        PitGoRoutes.ServiceRating,
                         PitGoRoutes.GuinchoHistory,
                         PitGoRoutes.ProviderTracking,
                         PitGoRoutes.AppointmentTracking,
@@ -874,6 +880,10 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
                         },
                     )
                 } else if (account.locationMode == ProviderLocationMode.MOBILE) {
+                    val ratingsViewModel: com.trustarx.pitgo.features.rating.viewmodel.ProviderRatingsViewModel = viewModel(
+                        key = "provider-ratings-summary:${account.providerId}",
+                        factory = com.trustarx.pitgo.features.rating.viewmodel.ProviderRatingsViewModel.factory(account.providerId, container.serviceRatingRepository),
+                    )
                     val homeViewModel: GuinchoProviderHomeViewModel = viewModel(factory = GuinchoProviderHomeViewModel.factory(container.deviceLocationRepository))
                     GuinchoProviderHomeRoute(homeViewModel, dashboardViewModel,
                         onHistory = { navController.navigate(PitGoRoutes.GuinchoHistory) { launchSingleTop = true } },
@@ -888,7 +898,12 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
                             }
                         }) {
                         ProviderDashboardRoute(dashboardViewModel, sessionViewModel::logout,
-                            onOpenGuinchoHistory = { navController.navigate(PitGoRoutes.GuinchoHistory) { launchSingleTop = true } })
+                            onOpenGuinchoHistory = { navController.navigate(PitGoRoutes.GuinchoHistory) { launchSingleTop = true } },
+                            ratingsContent = {
+                                com.trustarx.pitgo.features.rating.ui.ProviderRatingProfileSection(ratingsViewModel,
+                                    onOpenComments = { navController.navigate(PitGoRoutes.ProviderRatings) { launchSingleTop = true } },
+                                    onSessionExpired = sessionViewModel::refresh)
+                            })
                     }
                 } else {
                     ProviderDashboardRoute(
@@ -953,6 +968,12 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
                         navController.navigate(PitGoRoutes.payment(snapshot.serviceId,"GUINCHO_DIRECT",snapshot.searchId,
                             appointment.id,appointment.quoteVersion,appointment.quotedPrice.toPlainString())) { launchSingleTop = true }
                     } },
+                    onRate = { id ->
+                        navController.navigate(PitGoRoutes.serviceRating(id)) {
+                            popUpTo(PitGoRoutes.Home) { inclusive = false }
+                            launchSingleTop = true
+                        }
+                    },
                 )
             }
         }
@@ -1042,11 +1063,37 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
                 }
             }
         }
+        composable(PitGoRoutes.ProviderRatings) {
+            val account = (sessionState as? AppSessionState.Authenticated.ProviderReady)?.account
+            if (account != null) {
+                val ratingsViewModel: com.trustarx.pitgo.features.rating.viewmodel.ProviderRatingsViewModel = viewModel(
+                    key = "provider-ratings:${account.providerId}",
+                    factory = com.trustarx.pitgo.features.rating.viewmodel.ProviderRatingsViewModel.factory(account.providerId, container.serviceRatingRepository),
+                )
+                com.trustarx.pitgo.features.rating.ui.ProviderRatingsRoute(ratingsViewModel,
+                    onBack = { navController.popBackStack() }, onSessionExpired = sessionViewModel::refresh)
+            }
+        }
+        composable(PitGoRoutes.ServiceRating, arguments = listOf(
+            navArgument(PitGoRoutes.AppointmentIdArg) { type = NavType.StringType },
+        )) { entry ->
+            val id = entry.arguments?.getString(PitGoRoutes.AppointmentIdArg).orEmpty()
+            if (sessionState is AppSessionState.Authenticated && id.isNotBlank()) {
+                val ratingViewModel: com.trustarx.pitgo.features.rating.viewmodel.ServiceRatingViewModel = viewModel(
+                    key = "rating:${(sessionState as AppSessionState.Authenticated).userId}:$id",
+                    factory = com.trustarx.pitgo.features.rating.viewmodel.ServiceRatingViewModel.factory(id, container.serviceRatingRepository),
+                )
+                com.trustarx.pitgo.features.rating.ui.ServiceRatingRoute(ratingViewModel,
+                    onClose = { navController.popBackStack() }, onSessionExpired = sessionViewModel::refresh)
+            }
+        }
         composable(PitGoRoutes.GuinchoHistory) {
             val historyViewModel: com.trustarx.pitgo.features.guincho.viewmodel.GuinchoHistoryViewModel = viewModel(
                 factory=com.trustarx.pitgo.features.guincho.viewmodel.GuinchoHistoryViewModel.factory(container.guinchoRepository))
             com.trustarx.pitgo.features.guincho.ui.GuinchoHistoryScreen(historyViewModel,
-                onBack={ navController.popBackStack() },onOpen={ navController.navigate(PitGoRoutes.appointmentTracking(it, historical = true)) })
+                onBack={ navController.popBackStack() },
+                onOpen={ navController.navigate(PitGoRoutes.appointmentTracking(it, historical = true)) },
+                onRate={ navController.navigate(PitGoRoutes.serviceRating(it)) { launchSingleTop = true } })
         }
 
         composable(

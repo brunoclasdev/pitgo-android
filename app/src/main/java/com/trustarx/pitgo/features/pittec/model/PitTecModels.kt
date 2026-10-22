@@ -105,6 +105,7 @@ data class PitTecOffer(
 data class PitTecProvider(
     val providerId: String,
     val displayName: String,
+    val ratingSummary: com.trustarx.pitgo.features.rating.model.ProviderRatingSummary? = null,
 ) {
     fun isValid() = providerId.isUuid() && displayName.isNotBlank()
 }

@@ -174,6 +174,7 @@ private fun QuoteCard(
             modifier = Modifier.semantics { heading(); liveRegion = LiveRegionMode.Polite },
         )
         Text(stringResource(R.string.pittec_quote_provider, providerName))
+        com.trustarx.pitgo.features.rating.ui.ProviderRatingSummaryText(snapshot.provider?.ratingSummary)
         Text(formatter.format(quote.amount), style = MaterialTheme.typography.headlineSmall)
         Text(stringResource(R.string.pittec_quote_deadline, phase.remainingSeconds))
         phase.failure?.let { Text(quoteFailureTitle(it), color = MaterialTheme.colorScheme.error) }

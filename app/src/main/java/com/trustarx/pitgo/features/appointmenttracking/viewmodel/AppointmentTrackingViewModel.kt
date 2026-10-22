@@ -80,6 +80,17 @@ class AppointmentTrackingViewModel(
     private var navigationGeneration = 0L
     private var navigationVisible = false
 
+    fun completedRatingAppointmentId(): String? {
+        val snapshot = _state.value.dispatch ?: return null
+        if (!isClient || snapshot.dispatchKind !in setOf(
+                com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchKind.GUINCHO_DIRECT,
+                com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchKind.PITTEC_AUTO_SEQUENTIAL,
+            ) || snapshot.ratingState?.canRate == false) return null
+        return snapshot.appointment?.takeIf {
+            it.status == com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus.COMPLETED
+        }?.id
+    }
+
     fun onVisible(historical: Boolean = false) {
         navigationVisible = true
         _state.value = _state.value.copy(viewer = when {

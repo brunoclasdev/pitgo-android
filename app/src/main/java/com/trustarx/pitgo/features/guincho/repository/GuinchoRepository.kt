@@ -21,7 +21,7 @@ class GuinchoRepository(private val client: SupabaseClient) {
         }).decodeAs<com.trustarx.pitgo.features.mobiledispatch.data.MobileDispatchEnvelopeDto>().domainOrNull())
     }
     suspend fun history(before: String? = null,beforeId: String? = null): GuinchoResult<List<com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchSnapshot>> = call {
-        client.postgrest.rpc("list_my_guincho_appointments",buildJsonObject {
+        client.postgrest.rpc("list_my_service_appointments",buildJsonObject {
             put("p_limit",20); before?.let { put("p_before",it) }; beforeId?.let { put("p_before_id",it) }
         }).decodeList<com.trustarx.pitgo.features.mobiledispatch.data.MobileDispatchSnapshotDto>().map { requireNotNull(it.toDomainOrNull()) }
     }

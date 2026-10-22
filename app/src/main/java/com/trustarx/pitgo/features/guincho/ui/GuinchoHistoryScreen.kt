@@ -15,7 +15,7 @@ import com.trustarx.pitgo.features.guincho.viewmodel.GuinchoHistoryViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GuinchoHistoryScreen(viewModel: GuinchoHistoryViewModel,onBack: () -> Unit,onOpen: (String) -> Unit) {
+fun GuinchoHistoryScreen(viewModel: GuinchoHistoryViewModel,onBack: () -> Unit,onOpen: (String) -> Unit,onRate: (String) -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { viewModel.load() }
     Scaffold(topBar={ TopAppBar(title={ Text(stringResource(R.string.guincho_history)) },
@@ -28,9 +28,12 @@ fun GuinchoHistoryScreen(viewModel: GuinchoHistoryViewModel,onBack: () -> Unit,o
             }
             if(state.rows.isEmpty() && !state.loading && !state.failed) item { Text(stringResource(R.string.guincho_history_empty)) }
             items(state.rows,key={ it.searchId }) { row ->
-                Card(onClick={ row.appointment?.id?.let(onOpen) },modifier=Modifier.fillMaxWidth()) {
+                val rating = row.ratingState
+                val canOpenRating = rating?.canRate == true || rating?.submitted == true
+                Card(onClick={ row.appointment?.id?.let(if (canOpenRating) onRate else onOpen) },modifier=Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                         Text(row.providerName.orEmpty(),style=MaterialTheme.typography.titleMedium)
+                        Text(row.serviceName,style=MaterialTheme.typography.bodyMedium)
                         row.guinchoTrip?.let { Text(it.pickupAddress+" → "+it.destinationAddress) }
                         Text(stringResource(when {
                             row.guinchoDispute?.status==com.trustarx.pitgo.features.guincho.model.GuinchoDisputeStatus.OPEN -> R.string.guincho_disputed
@@ -38,6 +41,13 @@ fun GuinchoHistoryScreen(viewModel: GuinchoHistoryViewModel,onBack: () -> Unit,o
                             row.appointment?.status==com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus.CANCELLED -> R.string.guincho_cancelled
                             else -> R.string.guincho_in_progress
                         }))
+                        if (canOpenRating) {
+                            TextButton(onClick={ row.appointment?.id?.let(onRate) }) {
+                                Text(stringResource(if (rating?.submitted == true) R.string.rating_view else R.string.rating_action))
+                            }
+                        } else if (row.appointment?.status == com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus.COMPLETED) {
+                            Text(stringResource(R.string.rating_pending))
+                        }
                     }
                 }
             }

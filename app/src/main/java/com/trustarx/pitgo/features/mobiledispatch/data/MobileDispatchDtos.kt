@@ -40,6 +40,7 @@ internal data class MobileDispatchEnvelopeDto(
     val inspection: com.trustarx.pitgo.features.guincho.model.GuinchoInspectionSummary? = null,
     val provider: MobileProviderSummaryDto? = null,
     @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("rating_state") val ratingState: com.trustarx.pitgo.features.rating.model.ServiceRatingState? = null,
 ) {
     fun domainOrNull(): MobileDispatchSnapshot? = (snapshot ?: MobileDispatchSnapshotDto(
         searchId = searchId,
@@ -58,7 +59,7 @@ internal data class MobileDispatchEnvelopeDto(
         trackingAuthorized = trackingAuthorized,
         trip = trip, dispute = dispute, provider = provider,
         inspection = inspection,
-        createdAt = createdAt,
+        createdAt = createdAt, ratingState = ratingState,
     )).toDomainOrNull()
 }
 
@@ -83,6 +84,7 @@ internal data class MobileDispatchSnapshotDto(
     val inspection: com.trustarx.pitgo.features.guincho.model.GuinchoInspectionSummary? = null,
     val provider: MobileProviderSummaryDto? = null,
     @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("rating_state") val ratingState: com.trustarx.pitgo.features.rating.model.ServiceRatingState? = null,
 ) {
     fun toDomainOrNull(): MobileDispatchSnapshot? = runCatching {
         MobileDispatchSnapshot(
@@ -108,6 +110,7 @@ internal data class MobileDispatchSnapshotDto(
             providerName = provider?.displayName,
             createdAt = createdAt,
             guinchoInspection = inspection?.validate(),
+            ratingState = ratingState?.also { require(!(it.canRate && it.submitted)) },
         ).takeIf(MobileDispatchSnapshot::isValid)
     }.getOrNull()
 

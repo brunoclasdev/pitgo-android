@@ -24,8 +24,9 @@ internal data class GuinchoProviderDto(
     val latitude: Double,
     val longitude: Double,
     @SerialName("distance_meters") val distanceMeters: Double,
+    @SerialName("rating_summary") val ratingSummary: com.trustarx.pitgo.features.rating.model.ProviderRatingSummary? = null,
 ) {
-    fun domain() = GuinchoProvider(id, offerId, name, MapCoordinate(latitude, longitude), distanceMeters).also {
+    fun domain() = GuinchoProvider(id, offerId, name, MapCoordinate(latitude, longitude), distanceMeters, ratingSummary?.validate()).also {
         java.util.UUID.fromString(id)
         java.util.UUID.fromString(offerId)
         require(name.isNotBlank() && it.coordinate.isValid && distanceMeters.isFinite() && distanceMeters >= 0)

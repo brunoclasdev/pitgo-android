@@ -168,6 +168,7 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
                     GuinchoMapStage.DISCOVERY -> {
                         state.selected?.let { provider ->
                             Text(provider.name,style=MaterialTheme.typography.titleMedium)
+                            com.trustarx.pitgo.features.rating.ui.ProviderRatingSummaryText(provider.ratingSummary)
                             state.quote?.let { quote -> Text(money.format(quote.total),style=MaterialTheme.typography.titleLarge) }
                             Button(onClick=viewModel::contract,enabled=contractingEnabled && state.quote!=null && state.operation==GuinchoMapOperation.IDLE && state.checkout==null,
                                 modifier=Modifier.fillMaxWidth()) { Text(stringResource(R.string.guincho_contract)) }
