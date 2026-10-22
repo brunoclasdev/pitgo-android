@@ -1,6 +1,7 @@
 package com.trustarx.pitgo.features.guincho.repository
 
 import android.content.Context
+import android.location.Address
 import android.location.Geocoder
 import android.os.Build
 import com.trustarx.pitgo.R
@@ -19,6 +20,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
+import java.text.Normalizer
 import kotlin.coroutines.resume
 
 class GuinchoAddressRepository(context: Context, private val client: SupabaseClient) {
@@ -27,17 +29,61 @@ class GuinchoAddressRepository(context: Context, private val client: SupabaseCli
     suspend fun suggestions(query: String, proximity: MapCoordinate): GuinchoResult<List<GuinchoAddressSuggestion>> =
         search(query, proximity, reverse = false)
 
+    suspend fun resolveDestination(address: String, number: String, proximity: MapCoordinate): GuinchoResult<List<GuinchoAddressSuggestion>> {
+        val result = search(address, proximity, reverse = false, number = number)
+        if (result is GuinchoResult.Success && result.value.isNotEmpty() ||
+            result is GuinchoResult.Failure && result.reason == GuinchoFailure.SESSION_EXPIRED) return result
+        val platformAddress = addressWithNumber(address, number)
+        return if (platformAddress != null) GuinchoResult.Success(listOf(platformAddress)) else result
+    }
+
+    private suspend fun addressWithNumber(query: String, number: String): GuinchoAddressSuggestion? = try {
+        withTimeoutOrNull(5_000L) {
+            val expectedNumber = normalizedNumber(number)
+            if (expectedNumber.isEmpty()) return@withTimeoutOrNull null
+            if (!Geocoder.isPresent()) return@withTimeoutOrNull null
+            val geocoder = Geocoder(application, Locale.forLanguageTag("pt-BR"))
+            val results: List<Address> = if (Build.VERSION.SDK_INT >= 33) {
+                suspendCancellableCoroutine { continuation ->
+                    geocoder.getFromLocationName(query, 5, object : Geocoder.GeocodeListener {
+                        override fun onGeocode(addresses: MutableList<Address>) {
+                            if (continuation.isActive) continuation.resume(addresses)
+                        }
+                        override fun onError(errorMessage: String?) {
+                            if (continuation.isActive) continuation.resume(emptyList())
+                        }
+                    })
+                }
+            } else withContext(Dispatchers.IO) {
+                @Suppress("DEPRECATION")
+                geocoder.getFromLocationName(query, 5).orEmpty()
+            }
+            results.firstOrNull {
+                it.hasLatitude() && it.hasLongitude() && !it.thoroughfare.isNullOrBlank() &&
+                    normalizedNumber(it.subThoroughfare.orEmpty()) == expectedNumber &&
+                    MapCoordinate(it.latitude,it.longitude).isValid
+            }?.let {
+                GuinchoAddressSuggestion("android-address",query,MapCoordinate(it.latitude,it.longitude))
+            }
+        }
+    } catch (cancel: CancellationException) { throw cancel }
+      catch (_: Exception) { null }
+
+    private fun normalizedNumber(value: String): String = Normalizer.normalize(value,Normalizer.Form.NFKC)
+        .filter(Char::isLetterOrDigit).lowercase(Locale.forLanguageTag("pt-BR"))
+
     suspend fun destinationAddress(coordinate: MapCoordinate): String {
         val result = search("", coordinate, reverse = true)
         if (result is GuinchoResult.Success) result.value.firstOrNull()?.let { return it.label }
         return addressAtCoordinate(coordinate, R.string.guincho_destination_coordinates)
     }
 
-    private suspend fun search(query: String, coordinate: MapCoordinate, reverse: Boolean): GuinchoResult<List<GuinchoAddressSuggestion>> = try {
+    private suspend fun search(query: String, coordinate: MapCoordinate, reverse: Boolean, number: String? = null): GuinchoResult<List<GuinchoAddressSuggestion>> = try {
         val response = withTimeoutOrNull(10_000L) {
             client.functions.invoke("guincho-address-search", body = buildJsonObject {
                 put("query", query); put("latitude", coordinate.latitude); put("longitude", coordinate.longitude)
                 put("reverse", reverse)
+                number?.let { put("number", it) }
             }).body<AddressSuggestionsDto>()
         }
         if (response == null) GuinchoResult.Failure(GuinchoFailure.TIMEOUT)

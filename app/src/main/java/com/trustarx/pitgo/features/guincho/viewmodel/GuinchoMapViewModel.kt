@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 enum class GuinchoMapStage { PICKUP, DESTINATION, CONFIRM, DISCOVERY }
-enum class GuinchoMapOperation { IDLE, LOCATING, SAVING, DISCOVERING, QUOTING, RESERVING }
+enum class GuinchoMapOperation { IDLE, LOCATING, RESOLVING_ADDRESS, SAVING, DISCOVERING, QUOTING, RESERVING }
 data class GuinchoMapState(
     val stage: GuinchoMapStage = GuinchoMapStage.PICKUP,
     val operation: GuinchoMapOperation = GuinchoMapOperation.IDLE,
@@ -38,6 +38,7 @@ data class GuinchoMapState(
     val searchingAddress: Boolean = false,
     val addressSearchFailure: Boolean = false,
     val addressSearchCompleted: Boolean = false,
+    val destinationNumberNotFound: Boolean = false,
     val viewport: MapViewport = MapViewport(MapCoordinate(-14.235, -51.9253), 4.0),
     val camera: MapViewportCommand? = null,
     val providers: List<GuinchoProvider> = emptyList(),
@@ -78,6 +79,7 @@ class GuinchoMapViewModel(
     private var addressJob: Job? = null
     private var addressRevision = 0L
     private var destinationMapGesture = false
+    private var selectedDestinationSuggestion: GuinchoAddressSuggestion? = null
     fun startDiscoveryUpdates() {
         if (discoveryJob?.isActive == true) return
         discoveryJob = viewModelScope.launch {
@@ -172,17 +174,23 @@ class GuinchoMapViewModel(
     fun mapGesture() {
         if (mutable.value.stage != GuinchoMapStage.DESTINATION) return
         destinationMapGesture = true
+        selectedDestinationSuggestion = null
         cancelAddressSearch()
         mutable.update { it.copy(destination=null,addressSuggestions=emptyList(),searchingAddress=false,
-            addressSearchFailure=false,addressSearchCompleted=false) }
+            addressSearchFailure=false,addressSearchCompleted=false,destinationNumberNotFound=false) }
     }
-    private fun cancelAddressSearch() { addressRevision++; addressJob?.cancel(); addressJob=null }
+    private fun cancelAddressSearch() {
+        addressRevision++; addressJob?.cancel(); addressJob=null
+        if (mutable.value.operation == GuinchoMapOperation.RESOLVING_ADDRESS)
+            mutable.update { it.copy(operation=GuinchoMapOperation.IDLE) }
+    }
     private fun resolveDestinationPoint(coordinate: MapCoordinate) {
         if (!coordinate.isValid) return
         cancelAddressSearch()
+        selectedDestinationSuggestion = null
         val revision = addressRevision
         mutable.update { it.copy(destination=null,destinationAddress="",searchingAddress=true,
-            addressSuggestions=emptyList(),addressSearchFailure=false,addressSearchCompleted=false) }
+            addressSuggestions=emptyList(),addressSearchFailure=false,addressSearchCompleted=false,destinationNumberNotFound=false) }
         addressJob = viewModelScope.launch {
             val label = addresses.destinationAddress(coordinate)
             if (revision == addressRevision && mutable.value.stage == GuinchoMapStage.DESTINATION)
@@ -194,10 +202,12 @@ class GuinchoMapViewModel(
         if (mutable.value.stage != GuinchoMapStage.DESTINATION) return
         cancelAddressSearch()
         destinationMapGesture = false
+        selectedDestinationSuggestion = null
         val query = value.take(200)
         val revision = addressRevision
         mutable.update { it.copy(destinationAddress=query,destination=null,addressSuggestions=emptyList(),
-            searchingAddress=query.trim().length>=3,addressSearchCompleted=false,addressSearchFailure=false,failure=null) }
+            searchingAddress=query.trim().length>=3,addressSearchCompleted=false,addressSearchFailure=false,
+            destinationNumberNotFound=false,failure=null) }
         if (query.trim().length < 3) return
         addressJob = viewModelScope.launch {
             delay(350L)
@@ -217,13 +227,16 @@ class GuinchoMapViewModel(
             suggestion !in mutable.value.addressSuggestions) return
         cancelAddressSearch()
         destinationMapGesture = false
+        selectedDestinationSuggestion = suggestion
         mutable.update { it.copy(destination=suggestion.coordinate,destinationAddress=suggestion.label,
             addressSuggestions=emptyList(),
-            searchingAddress=false,addressSearchCompleted=false,addressSearchFailure=false,failure=null) }
+            searchingAddress=false,addressSearchCompleted=false,addressSearchFailure=false,destinationNumberNotFound=false,failure=null) }
     }
     fun number(value: String) {
-        if (mutable.value.stage == GuinchoMapStage.DESTINATION)
-            mutable.update { it.copy(destinationNumber=value.filterNot(Char::isISOControl).take(20),failure=null) }
+        if (mutable.value.stage != GuinchoMapStage.DESTINATION) return
+        if (mutable.value.operation == GuinchoMapOperation.RESOLVING_ADDRESS) cancelAddressSearch()
+        mutable.update { it.copy(destinationNumber=value.filterNot(Char::isISOControl).take(20),
+            destinationNumberNotFound=false,addressSearchFailure=false,failure=null) }
     }
     fun vehicle(id: String) { if(mutable.value.stage!=GuinchoMapStage.DISCOVERY) mutable.update { it.copy(vehicleId=id) } }
     fun confirmPoint() {
@@ -241,10 +254,38 @@ class GuinchoMapViewModel(
             locationJob=viewModelScope.launch { applyPickup(current.viewport.center) }
         } else {
             cancelAddressSearch()
-            val viewport = MapViewport(requireNotNull(current.destination),16.0)
-            mutable.update { it.copy(stage=GuinchoMapStage.CONFIRM,addressSuggestions=emptyList(),
-                viewport=viewport,camera=MapViewportCommand(viewport,System.nanoTime())) }
+            val suggestion = selectedDestinationSuggestion
+            // A manually chosen point (or an address explicitly without a number) is
+            // already positioned by the customer. Street suggestions need a full lookup.
+            if (suggestion == null || current.destinationNumber.trim().equals("s/n",ignoreCase=true)) {
+                confirmDestination(requireNotNull(current.destination))
+                return
+            }
+            val revision = addressRevision
+            mutable.update { it.copy(operation=GuinchoMapOperation.RESOLVING_ADDRESS,
+                destinationNumberNotFound=false,addressSearchFailure=false,failure=null) }
+            addressJob = viewModelScope.launch {
+                val result = addresses.resolveDestination(current.fullDestinationAddress,
+                    current.destinationNumber.trim(),suggestion.coordinate)
+                if (revision != addressRevision || mutable.value.stage != GuinchoMapStage.DESTINATION) return@launch
+                when (result) {
+                    is GuinchoResult.Success -> {
+                        val resolved = result.value.firstOrNull()
+                        if (resolved != null) confirmDestination(resolved.coordinate)
+                        else mutable.update { it.copy(operation=GuinchoMapOperation.IDLE,destinationNumberNotFound=true) }
+                    }
+                    is GuinchoResult.Failure -> mutable.update { it.copy(operation=GuinchoMapOperation.IDLE,
+                        addressSearchFailure=true,
+                        failure=if(result.reason==GuinchoFailure.SESSION_EXPIRED) result.reason else null) }
+                }
+            }
         }
+    }
+    private fun confirmDestination(coordinate: MapCoordinate) {
+        val viewport = MapViewport(coordinate,16.0)
+        mutable.update { it.copy(stage=GuinchoMapStage.CONFIRM,operation=GuinchoMapOperation.IDLE,
+            destination=coordinate,addressSuggestions=emptyList(),destinationNumberNotFound=false,
+            viewport=viewport,camera=MapViewportCommand(viewport,System.nanoTime())) }
     }
     fun editTrip() {
         if(mutable.value.operation==GuinchoMapOperation.RESERVING) return
@@ -255,7 +296,8 @@ class GuinchoMapViewModel(
         mutable.update {
             it.copy(stage=GuinchoMapStage.DESTINATION,operation=GuinchoMapOperation.IDLE,
                 providers=emptyList(),selected=null,quote=null,failure=null,
-                searchingAddress=false,addressSuggestions=emptyList(),addressSearchCompleted=false,addressSearchFailure=false)
+                searchingAddress=false,addressSuggestions=emptyList(),addressSearchCompleted=false,addressSearchFailure=false,
+                destinationNumberNotFound=false)
         }
     }
     fun confirmTrip() {

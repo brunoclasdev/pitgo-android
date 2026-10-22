@@ -750,6 +750,7 @@
     <string name="guincho_destination_address">Endereço do destino</string>
     <string name="guincho_destination_number">Número do imóvel</string>
     <string name="guincho_destination_number_hint">Ex.: 123, 123A ou s/n</string>
+    <string name="guincho_destination_number_not_found">Não encontramos esse número na rua selecionada. Confira o endereço e o número ou ajuste o ponto no mapa.</string>
     <string name="guincho_address_searching">Buscando endereço…</string>
     <string name="guincho_address_search_failure">Não foi possível buscar o endereço. Tente digitar novamente ou escolha o destino no mapa.</string>
     <string name="guincho_address_no_results">Nenhum endereço encontrado. Inclua a cidade ou escolha o destino no mapa.</string>

@@ -5,6 +5,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 });
 const coordinate = (value: unknown, maximum: number): value is number =>
   typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= maximum;
+const normalizedNumber = (value: string) => value.normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '').toLocaleLowerCase('pt-BR');
 
 Deno.serve(async req => {
   if (req.method !== 'POST') return json(405, { code: 'METHOD_NOT_ALLOWED' });
@@ -18,13 +19,18 @@ Deno.serve(async req => {
     if (body.length > 2048) return json(413, { code: 'INVALID_INPUT' });
     const input = JSON.parse(body);
     if (!input || typeof input !== 'object' || Array.isArray(input) ||
-      Object.keys(input).some(name => !['query', 'latitude', 'longitude', 'reverse'].includes(name)) ||
+      Object.keys(input).some(name => !['query', 'latitude', 'longitude', 'reverse', 'number'].includes(name)) ||
       (input.reverse !== undefined && typeof input.reverse !== 'boolean') ||
       !coordinate(input.latitude, 90) || !coordinate(input.longitude, 180)) {
       return json(400, { code: 'INVALID_INPUT' });
     }
     const query = typeof input.query === 'string' ? input.query.trim() : '';
-    if (!input.reverse && (query.length < 3 || query.length > 200 || /[;\u0000-\u001f]/.test(query))) {
+    const resolving = input.number !== undefined;
+    if (resolving && (input.reverse || typeof input.number !== 'string' || !input.number.trim() ||
+      input.number.length > 20 || /[;\u0000-\u001f]/.test(input.number) || !normalizedNumber(input.number))) {
+      return json(400, { code: 'INVALID_INPUT' });
+    }
+    if (!input.reverse && (query.length < 3 || query.length > (resolving ? 500 : 200) || /[;\u0000-\u001f]/.test(query))) {
       return json(400, { code: 'INVALID_INPUT' });
     }
     const caller = createClient(url, anon, {
@@ -44,7 +50,11 @@ Deno.serve(async req => {
     endpoint.searchParams.set('country', 'br');
     endpoint.searchParams.set('language', 'pt');
     endpoint.searchParams.set('limit', input.reverse ? '1' : '5');
-    endpoint.searchParams.set('autocomplete', input.reverse ? 'false' : 'true');
+    endpoint.searchParams.set('autocomplete', input.reverse || resolving ? 'false' : 'true');
+    if (resolving) {
+      endpoint.searchParams.set('types', 'address');
+      endpoint.searchParams.set('fuzzyMatch', 'false');
+    }
     if (!input.reverse) endpoint.searchParams.set('proximity', `${input.longitude},${input.latitude}`);
     const upstream = await fetch(endpoint, { signal: AbortSignal.timeout(8000) });
     if (!upstream.ok) return json(503, { code: 'SEARCH_UNAVAILABLE' });
@@ -52,6 +62,9 @@ Deno.serve(async req => {
     const seen = new Set<string>();
     const suggestions = [];
     for (const feature of Array.isArray(result.features) ? result.features : []) {
+      // A street centroid must never stand in for the requested house number.
+      if (resolving && (typeof feature.address !== 'string' ||
+        normalizedNumber(feature.address) !== normalizedNumber(input.number))) continue;
       const point = feature.center ?? (feature.geometry?.type === 'Point' ? feature.geometry.coordinates : null);
       const label = typeof feature.place_name === 'string' ? feature.place_name.trim().slice(0, 500) : '';
       if (!label || !coordinate(point?.[0], 180) || !coordinate(point?.[1], 90)) continue;

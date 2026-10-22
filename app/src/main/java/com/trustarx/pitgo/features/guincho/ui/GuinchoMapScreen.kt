@@ -68,7 +68,9 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
     val journey = if (state.stage == GuinchoMapStage.DISCOVERY && state.selected != null) pickupJourney else tripJourney
     val journeyMarkers = state.markers + listOfNotNull(
         state.pickup?.let { MapMarkerSpec("pickup", it, MapMarkerKind.CLIENT_LOCATION, accessibilityLabel = state.pickupAddress) },
-        state.destination?.let { MapMarkerSpec("destination", it, MapMarkerKind.CLIENT_LOCATION, accessibilityLabel = state.fullDestinationAddress) },
+        state.destination?.takeIf { addressConfirmed }?.let {
+            MapMarkerSpec("destination", it, MapMarkerKind.CLIENT_LOCATION, accessibilityLabel = state.fullDestinationAddress)
+        },
     )
     val money=remember { NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")) }
     Scaffold(topBar={ TopAppBar(title={ Text(stringResource(R.string.guincho_title)) },
@@ -143,6 +145,8 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
                             keyboardActions=KeyboardActions(onDone={ keyboard?.hide() }))
                         if (state.destination!=null && state.destinationNumber.isNotBlank())
                             Text(stringResource(R.string.guincho_destination_label,state.fullDestinationAddress))
+                        if (state.destinationNumberNotFound)
+                            Text(stringResource(R.string.guincho_destination_number_not_found),color=MaterialTheme.colorScheme.error)
                         Button(onClick={ keyboard?.hide(); viewModel.confirmPoint() },enabled=state.operation==GuinchoMapOperation.IDLE &&
                             state.canConfirmDestination,
                             modifier=Modifier.fillMaxWidth()) { Text(stringResource(R.string.guincho_confirm_point)) }
