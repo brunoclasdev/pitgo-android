@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.text.format.DateFormat
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -30,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.trustarx.pitgo.R
+import com.trustarx.pitgo.BuildConfig
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 import com.trustarx.pitgo.features.guincho.model.*
 import com.trustarx.pitgo.features.guincho.viewmodel.*
@@ -111,7 +113,13 @@ fun GuinchoInspectionRoute(viewModel: GuinchoInspectionViewModel, onBack: () -> 
     LaunchedEffect(state.cameraUri, state.cameraLaunched, sessionVerified) {
         if (sessionVerified && state.cameraUri != null && !state.cameraLaunched) {
             viewModel.cameraLaunched()
-            try { camera.launch(Uri.parse(state.cameraUri)) } catch (_: Exception) { viewModel.cameraResult(false) }
+            try {
+                camera.launch(Uri.parse(state.cameraUri))
+                if (BuildConfig.DEBUG) Log.d("GuinchoInspection", "stage=camera_launch")
+            } catch (error: Exception) {
+                if (BuildConfig.DEBUG) Log.w("GuinchoInspection", "stage=camera_launch_failed type=${error.javaClass.simpleName}")
+                viewModel.cameraResult(false)
+            }
         }
     }
     LaunchedEffect(state.error, sessionVerified) {
@@ -280,6 +288,7 @@ fun GuinchoInspectionRoute(viewModel: GuinchoInspectionViewModel, onBack: () -> 
     }
 }
 @Composable private fun pendingStatus(stage: InspectionCaptureStage) = stringResource(when (stage) {
+    InspectionCaptureStage.AWAITING_CAMERA -> R.string.inspection_opening_camera
     InspectionCaptureStage.RAW_CAPTURED, InspectionCaptureStage.PREPARING -> R.string.inspection_preparing
     InspectionCaptureStage.RETRY_WAIT, InspectionCaptureStage.NEEDS_RECAPTURE, InspectionCaptureStage.BLOCKED_CONTEXT -> R.string.inspection_failed
     InspectionCaptureStage.SAVED -> R.string.inspection_saved

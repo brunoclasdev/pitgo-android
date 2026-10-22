@@ -846,6 +846,7 @@
     <string name="inspection_required">Obrigatória</string>
     <string name="inspection_optional">Opcional</string>
     <string name="inspection_preparing">Preparando</string>
+    <string name="inspection_opening_camera">Abrindo câmera…</string>
     <string name="inspection_failed">Falha — ação necessária</string>
     <string name="inspection_error_space">Espaço insuficiente. Libere espaço para continuar; suas fotos pendentes foram preservadas.</string>
     <string name="inspection_error_interrupted">Captura interrompida. Tente recuperar a imagem ou descarte para fotografar novamente.</string>

@@ -91,8 +91,12 @@ class GuinchoInspectionViewModel(
                 val items = all.filter { it.accountId == account && it.appointmentId == appointmentId }
                 val justSaved = items.any { it.captureId in pendingIds && it.stage == InspectionCaptureStage.SAVED }
                 pendingIds = items.filter { it.pending }.map { it.captureId }.toSet()
-                val active = items.firstOrNull { it.captureId == saved.get<String>("captureId") && it.stage == InspectionCaptureStage.AWAITING_CAMERA }
                 val recoverable = withContext(Dispatchers.IO) { items.filter { it.retryable && repository.files.hasRecoverableSource(it) }.map { it.captureId }.toSet() }
+                // Creating the journal emits before capture() stores its ID. Re-read
+                // after IO so an older emission cannot clear a newer camera request.
+                val active = saved.get<String>("captureId")?.let(repository.pending::find)?.takeIf {
+                    it.accountId == account && it.appointmentId == appointmentId && it.stage == InspectionCaptureStage.AWAITING_CAMERA
+                }
                 _state.update { it.copy(pending = items, captureId = active?.captureId, cameraUri = active?.let(repository.files::uri),
                     recoverableCaptures = recoverable, cameraLaunched = active != null && (!allowCameraLaunch || (saved["cameraLaunched"] ?: false))) }
                 if (justSaved) viewModelScope.launch { refresh(true) }
@@ -153,7 +157,10 @@ class GuinchoInspectionViewModel(
                     try {
                         repository.pending.put(item.copy(stage = InspectionCaptureStage.NEEDS_RECAPTURE, failure = InspectionFailure.INTERRUPTED), repository.files.generation)
                     } catch (error: InspectionException) { _state.update { it.copy(error = error.failure) } }
-                    saved.remove<String>("captureId")
+                    if (saved.get<String>("captureId") == item.captureId) {
+                        saved.remove<String>("captureId")
+                        saved.remove<Boolean>("cameraLaunched")
+                    }
                 }
             }
             while (isActive) { refresh(); delay(2_000) }
