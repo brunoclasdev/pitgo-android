@@ -78,7 +78,9 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
         Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 MapLibreMapHost(PitGoManagedMapStyle.configuration,MapRenderModel(journeyMarkers, journey.polyline),state.viewport,
-                    rememberJourneyCamera(state.camera, journey.polyline, addressConfirmed) ?: state.camera,0,state.online,controller,viewModel::viewport,viewModel::select,viewModel::surface,
+                    rememberJourneyCamera(state.camera, journey.polyline,
+                        state.stage == GuinchoMapStage.DISCOVERY && state.selected != null) ?: state.camera,
+                    0,state.online,controller,viewModel::viewport,viewModel::select,viewModel::surface,
                     Modifier.fillMaxSize(),onUserGesture={ keyboard?.hide(); viewModel.mapGesture() })
                 TextButton(onClick={
                     if(ContextCompat.checkSelfPermission(context,Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED)

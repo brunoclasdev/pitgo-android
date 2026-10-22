@@ -980,7 +980,10 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
                 com.trustarx.pitgo.features.guincho.ui.GuinchoInspectionRoute(inspectionViewModel,
                     sessionVerified = authenticated?.userId == inspectionAccount,
                     onBack = { navController.popBackStack() }, onSessionExpired = sessionViewModel::refresh,
-                    onApprovalConfirmed = {
+                    onApprovalConfirmed = { approvedVersionId ->
+                        approvedVersionId?.let { versionId ->
+                            inspectionAlertViewModel.approvalConfirmed(inspectionAccount, appointmentId, versionId)
+                        }
                         val previous = navController.previousBackStackEntry
                         if (previous?.destination?.route == PitGoRoutes.AppointmentTracking &&
                             previous.arguments?.getString(PitGoRoutes.AppointmentIdArg) == appointmentId) {

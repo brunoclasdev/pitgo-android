@@ -99,7 +99,7 @@ fun PitTecMockTrackingContent(
                 MapMarkerSpec(
                     id = "pittec-mock-provider",
                     coordinate = appointment.providerLocation.coordinate,
-                    kind = if (isStale) MapMarkerKind.STALE else MapMarkerKind.PITTEC_LIVE,
+                    kind = MapMarkerKind.PITTEC_LIVE,
                     accessibilityLabel = stringResource(R.string.pittec_mock_ride_data_provider, appointment.provider.displayName),
                 ),
             )

@@ -15,12 +15,14 @@ import androidx.compose.ui.unit.dp
 import com.trustarx.pitgo.core.routing.ui.*
 import com.trustarx.pitgo.core.routing.model.JourneyRoute
 import com.trustarx.pitgo.R
+import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 import com.trustarx.pitgo.core.map.config.PitGoManagedMapStyle
 import com.trustarx.pitgo.core.map.model.*
 import com.trustarx.pitgo.core.map.ui.MapLibreMapHost
 import com.trustarx.pitgo.core.map.ui.ParticipantMapStyleController
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentTrackingUiState
 import com.trustarx.pitgo.features.appointmenttracking.model.TrackingDataState
+import com.trustarx.pitgo.features.appointmenttracking.ui.TrackingStatus
 import com.trustarx.pitgo.features.appointmenttracking.viewmodel.AppointmentTrackingViewModel
 import com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus
 import com.trustarx.pitgo.features.payment.model.PaymentStatus
@@ -31,7 +33,8 @@ import java.util.Locale
 @Composable
 fun GuinchoTrackingContent(state: AppointmentTrackingUiState,viewModel: AppointmentTrackingViewModel,
     isClient: Boolean,onBack: () -> Unit,onReturnHome: () -> Unit = onBack,
-    onOpenInspection: (String) -> Unit = {}, onArrive: () -> Unit = viewModel::arrive) {
+    onOpenInspection: (String) -> Unit = {}, onArrive: () -> Unit = viewModel::arrive,
+    onOpenExternalNavigation: () -> Unit = {}) {
     val snapshot=state.dispatch ?: return
     val appointment=snapshot.appointment ?: return
     val trip=snapshot.guinchoTrip
@@ -48,6 +51,11 @@ fun GuinchoTrackingContent(state: AppointmentTrackingUiState,viewModel: Appointm
                     Text(stringResource(if(appointment.status==MobileAppointmentStatus.CANCELLED)
                         R.string.guincho_cancelled else R.string.pittec_awaiting_payment))
                     if(appointment.status!=MobileAppointmentStatus.CANCELLED) Text(stringResource(R.string.guincho_details_after_payment))
+                }
+                if (state.navigationLeg != null) {
+                    OutlinedButton(onClick = onOpenExternalNavigation) {
+                        Text(stringResource(R.string.external_navigation_open))
+                    }
                 }
                 TextButton(onClick=if(appointment.status==MobileAppointmentStatus.CANCELLED) onReturnHome else onBack) { Text(stringResource(R.string.guincho_home)) }
             }
@@ -85,9 +93,10 @@ fun GuinchoTrackingContent(state: AppointmentTrackingUiState,viewModel: Appointm
     val markers=buildList {
         add(MapMarkerSpec("pickup",trip.pickup,MapMarkerKind.CLIENT_LOCATION,accessibilityLabel=trip.pickupAddress))
         add(MapMarkerSpec("destination",trip.destination,MapMarkerKind.CLIENT_LOCATION,accessibilityLabel=trip.destinationAddress))
-        if(snapshot.trackingAuthorized) state.visibleLocation?.let { add(MapMarkerSpec("tow",it.coordinate,
-            if(state.data is com.trustarx.pitgo.features.appointmenttracking.model.TrackingDataState.Live) MapMarkerKind.LIVE else MapMarkerKind.STALE,
-            accessibilityLabel=snapshot.providerName.orEmpty())) }
+        if(snapshot.trackingAuthorized) state.visibleLocation?.takeIf { it.isValid }?.let { add(MapMarkerSpec("tow",it.coordinate,
+            MapMarkerKind.LIVE,
+            accessibilityLabel = if (state.data is TrackingDataState.Live) snapshot.providerName.orEmpty()
+                else stringResource(R.string.tracking_last_known_provider))) }
     }
     Scaffold(topBar={ TopAppBar(title={ Text(stringResource(R.string.guincho_title)) },
         navigationIcon={ TextButton(onClick=onBack) { Text(stringResource(R.string.guincho_back)) } }) }) { padding ->
@@ -111,10 +120,21 @@ fun GuinchoTrackingContent(state: AppointmentTrackingUiState,viewModel: Appointm
                         (state.cameraCommand ?: MapViewportCommand(viewport, 0)).let { it.copy(revision = it.revision + recenterRevision) },
                         line, state.followProvider),
                     state.styleReloadRevision,state.data !is com.trustarx.pitgo.features.appointmenttracking.model.TrackingDataState.Offline,controller,viewModel::onViewportIdle,{},viewModel::updateSurfaceState,Modifier.fillMaxSize(), onUserGesture = { viewModel.setFollowProvider(false) }, onRouteRendered = viewModel::guinchoRouteFrame)
-                if (line != null) {
-                    Surface(Modifier.align(Alignment.BottomEnd).padding(12.dp), shape = MaterialTheme.shapes.large, tonalElevation = 6.dp) {
-                        TextButton(onClick = { recenterRevision++; viewModel.setFollowProvider(true) }) {
-                            Text(stringResource(R.string.guincho_show_route))
+                Column(
+                    Modifier.align(Alignment.BottomEnd).padding(PitGoSpacing.Medium).widthIn(max = 280.dp),
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
+                ) {
+                    if (state.navigationLeg != null) {
+                        FilledTonalButton(onClick = onOpenExternalNavigation) {
+                            Text(stringResource(R.string.external_navigation_open))
+                        }
+                    }
+                    if (line != null) {
+                        Surface(shape = MaterialTheme.shapes.large, tonalElevation = 6.dp) {
+                            TextButton(onClick = { recenterRevision++; viewModel.setFollowProvider(true) }) {
+                                Text(stringResource(R.string.guincho_show_route))
+                            }
                         }
                     }
                 }
@@ -129,6 +149,9 @@ fun GuinchoTrackingContent(state: AppointmentTrackingUiState,viewModel: Appointm
             }
             Column(Modifier.fillMaxWidth().heightIn(max=330.dp).verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                if (trackable && state.data !is TrackingDataState.Live && state.data != TrackingDataState.Loading) {
+                    TrackingStatus(state.data)
+                }
                 Text(snapshot.providerName.orEmpty(),style=MaterialTheme.typography.titleMedium)
                 Text(stringResource(if(isClient) R.string.pittec_customer_total_value else R.string.pittec_provider_total_value,
                     money.format(appointment.quotedPrice)))

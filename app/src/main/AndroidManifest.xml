@@ -15,6 +15,11 @@
          it died within minutes without it). See ProviderDashboardScreen's battery banner. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <queries>
+        <package android:name="com.waze" />
+        <package android:name="com.google.android.apps.maps" />
+    </queries>
+
     <application
         android:name=".PitGoApplication"
         android:allowBackup="true"

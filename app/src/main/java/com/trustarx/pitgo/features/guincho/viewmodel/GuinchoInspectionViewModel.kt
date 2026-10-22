@@ -32,6 +32,7 @@ data class GuinchoInspectionUiState(
     val loaded: Set<String> = emptySet(),
     val failed: Set<String> = emptySet(),
     val thumbnailFailed: Set<String> = emptySet(),
+    val loadingPhotos: Int = 0,
     val pending: List<InspectionPendingCapture> = emptyList(),
     val cameraUri: String? = null,
     val cameraLaunched: Boolean = false,
@@ -47,12 +48,16 @@ data class GuinchoInspectionUiState(
     val canApprove get() = !busy && document?.summary?.actions?.contains("APPROVE") == true &&
         selectedVersion == document.summary.versionId && !hasMorePhotos && photos.size == document.summary.photoCount &&
         photos.isNotEmpty() && photos.all { it.id in loaded && it.id !in failed }
-    val canCapture get() = !historical && !busy && cameraUri == null && document?.isProvider == true && document.summary.actions.contains("CAPTURE")
+    val hasPendingPhoto get() = document?.pending?.isNotEmpty() == true ||
+        pending.any { it.pending && it.versionId == document?.version?.id }
+    val canCapture get() = canEditPhotos && cameraUri == null && !hasPendingPhoto && loadingPhotos == 0
     val canEditPhotos get() = !historical && !busy && document?.isProvider == true && document.summary.actions.contains("CAPTURE")
     val canSubmit get() = canEditPhotos && document?.summary?.readyPoints == 4 && document.pending.isEmpty() && pending.none { it.pending && it.versionId == document.version?.id }
     fun canRetrySave(item: InspectionPendingCapture) = canEditPhotos && item.versionId == document?.version?.id &&
         item.retryable && item.captureId in recoverableCaptures
-    fun canRecapture(item: InspectionPendingCapture) = canEditPhotos && item.versionId == document?.version?.id &&
+    fun canRecapture(item: InspectionPendingCapture) = canEditPhotos && cameraUri == null && loadingPhotos == 0 &&
+        pending.none { it.pending && it.versionId == document?.version?.id && it.captureId != item.captureId } &&
+        document?.pending?.none { it.id != item.photo?.id } == true && item.versionId == document.version?.id &&
         item.stage == InspectionCaptureStage.NEEDS_RECAPTURE && item.captureId !in recoverableCaptures
 }
 
@@ -65,7 +70,7 @@ class GuinchoInspectionViewModel(
 ) : ViewModel() {
     private val _state = MutableStateFlow(GuinchoInspectionUiState(historical = historical))
     val state = _state.asStateFlow()
-    private val approvalEvents = Channel<Unit>(Channel.BUFFERED)
+    private val approvalEvents = Channel<String>(Channel.BUFFERED)
     val approvalConfirmed = approvalEvents.receiveAsFlow()
     private var poll: Job? = null
     private var preload: Job? = null
@@ -91,13 +96,17 @@ class GuinchoInspectionViewModel(
                 val items = all.filter { it.accountId == account && it.appointmentId == appointmentId }
                 val justSaved = items.any { it.captureId in pendingIds && it.stage == InspectionCaptureStage.SAVED }
                 pendingIds = items.filter { it.pending }.map { it.captureId }.toSet()
+                _state.update { it.copy(pending = repository.pending.captures.value.filter { capture ->
+                    capture.accountId == account && capture.appointmentId == appointmentId
+                }) }
                 val recoverable = withContext(Dispatchers.IO) { items.filter { it.retryable && repository.files.hasRecoverableSource(it) }.map { it.captureId }.toSet() }
                 // Creating the journal emits before capture() stores its ID. Re-read
                 // after IO so an older emission cannot clear a newer camera request.
                 val active = saved.get<String>("captureId")?.let(repository.pending::find)?.takeIf {
                     it.accountId == account && it.appointmentId == appointmentId && it.stage == InspectionCaptureStage.AWAITING_CAMERA
                 }
-                _state.update { it.copy(pending = items, captureId = active?.captureId, cameraUri = active?.let(repository.files::uri),
+                val currentItems = repository.pending.captures.value.filter { it.accountId == account && it.appointmentId == appointmentId }
+                _state.update { it.copy(pending = currentItems, captureId = active?.captureId, cameraUri = active?.let(repository.files::uri),
                     recoverableCaptures = recoverable, cameraLaunched = active != null && (!allowCameraLaunch || (saved["cameraLaunched"] ?: false))) }
                 if (justSaved) viewModelScope.launch { refresh(true) }
             }
@@ -233,8 +242,9 @@ class GuinchoInspectionViewModel(
         }
     }
     fun capture(slot: InspectionSlot, replacing: String? = null) {
-        if (!_state.value.canCapture || _state.value.pending.any { it.pending && it.versionId == _state.value.document?.version?.id && it.slot == slot && slot.key != "DETAIL" }) return
+        if (!_state.value.canCapture || hasUnfinishedCapture()) return
         action(InspectionOperation.CAPTURING) {
+            if (hasUnfinishedCapture()) return@action
             allowCameraLaunch = true
             val doc = requireNotNull(_state.value.document)
             val item = repository.pending.create(account, appointmentId, requireNotNull(doc.version).id, slot,
@@ -243,6 +253,11 @@ class GuinchoInspectionViewModel(
             _state.update { it.copy(captureId = item.captureId, cameraUri = repository.files.uri(item), cameraLaunched = false) }
         }
     }
+    private fun hasUnfinishedCapture(excludingId: String? = null): Boolean =
+        repository.pending.captures.value.any {
+            it.accountId == account && it.appointmentId == appointmentId &&
+                it.versionId == _state.value.document?.version?.id && it.pending && it.captureId != excludingId
+        }
     fun cameraLaunched() { saved["cameraLaunched"] = true; _state.update { it.copy(cameraLaunched = true) } }
     fun cameraResult(success: Boolean) {
         if (BuildConfig.DEBUG) Log.d("GuinchoInspection", "stage=camera_result accepted=$success pending_capture=${saved.get<String>("captureId") != null}")
@@ -285,8 +300,9 @@ class GuinchoInspectionViewModel(
     }
     fun recapturePending(id: String) {
         val item = _state.value.pending.firstOrNull { it.captureId == id } ?: return
-        if (!_state.value.canRecapture(item)) return
+        if (!_state.value.canRecapture(item) || hasUnfinishedCapture(excludingId = id)) return
         action(InspectionOperation.CAPTURING) {
+            if (hasUnfinishedCapture(excludingId = id)) return@action
             repository.retryCapture(id, discard = true)
             repository.syncPending(account)
             if (repository.pending.find(id)?.stage != InspectionCaptureStage.DISCARDED) throw InspectionException(InspectionFailure.CONFLICT)
@@ -330,7 +346,7 @@ class GuinchoInspectionViewModel(
             if (approve && (result.version?.id != doc.version?.id || result.version?.state != InspectionVersionState.APPROVED)) throw InspectionException(InspectionFailure.CONFLICT)
             saved.remove<String>("decisionOperation")
             _state.update { it.copy(document = result, reason = "") }
-            if (approve) approvalEvents.send(Unit) else refresh(true)
+            if (approve) approvalEvents.send(requireNotNull(result.version).id) else refresh(true)
         }
     }
     fun beginCorrection() = action(InspectionOperation.SAVING) { repository.beginCorrection(requireNotNull(_state.value.document)); refresh(true) }
@@ -369,7 +385,11 @@ class GuinchoInspectionViewModel(
         measurement[key] = SystemClock.elapsedRealtimeNanos()
         if (imageJobs[key]?.isActive == true || (!retry && (if (thumbnail) photo.id in _state.value.thumbnails else photo.id in _state.value.loaded))) return
         if (!thumbnail) preload?.cancel()
-        imageJobs[key] = viewModelScope.launch { fetch(photo, thumbnail, retry) }
+        _state.update { it.copy(loadingPhotos = it.loadingPhotos + 1) }
+        imageJobs[key] = viewModelScope.launch {
+            try { fetch(photo, thumbnail, retry) }
+            finally { _state.update { it.copy(loadingPhotos = it.loadingPhotos - 1) } }
+        }
     }
     private suspend fun fetch(photo: GuinchoInspectionPhoto, thumbnail: Boolean, retry: Boolean = false) {
         val version = _state.value.selectedVersion

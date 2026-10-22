@@ -47,7 +47,13 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.lifecycle.compose.LifecycleStartEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import com.trustarx.pitgo.core.navigation.ExternalNavigationLauncher
+import com.trustarx.pitgo.core.navigation.ExternalNavigationLaunchResult
+import com.trustarx.pitgo.features.appointmenttracking.model.ExternalNavigationState
 import com.trustarx.pitgo.core.routing.ui.*
 import com.trustarx.pitgo.core.routing.model.JourneyRoute
 import com.trustarx.pitgo.R
@@ -80,10 +86,38 @@ fun AppointmentTrackingRoute(
     onNeedsPayment: (com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchSnapshot) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    LifecycleStartEffect(viewModel) {
-        viewModel.onVisible()
+    LifecycleStartEffect(viewModel, historical) {
+        viewModel.onVisible(historical)
         onStopOrDispose { viewModel.onHidden() }
     }
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val openNavigation: () -> Unit = {
+        val options = viewModel.state.value.navigationCoordinate?.let {
+            ExternalNavigationLauncher.options(context, it)
+        }.orEmpty()
+        viewModel.openExternalNavigation(options)
+    }
+    LaunchedEffect(viewModel, context, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            viewModel.state.collect { latest ->
+                val ready = latest.externalNavigation as? ExternalNavigationState.ReadyToLaunch
+                val request = ready?.let { viewModel.consumeExternalNavigation(it.request.id) }
+                if (request != null && ExternalNavigationLauncher.open(context, request.navigator, request.target.coordinate) ==
+                    ExternalNavigationLaunchResult.UNAVAILABLE
+                ) {
+                    viewModel.externalNavigationLaunchFailed(request.id,
+                        ExternalNavigationLauncher.options(context, request.target.coordinate))
+                }
+            }
+        }
+    }
+    ExternalNavigationChooser(
+        state.externalNavigation,
+        onChoose = viewModel::chooseExternalNavigator,
+        onRetry = openNavigation,
+        onDismiss = viewModel::dismissExternalNavigation,
+    )
     var openingInspection by remember(viewModel) { mutableStateOf(false) }
     var wasDisputed by remember(viewModel) { mutableStateOf(false) }
     LaunchedEffect(state.dispatch?.appointment?.status, historical, isClient) {
@@ -107,7 +141,8 @@ fun AppointmentTrackingRoute(
     if(state.isGuincho) {
         com.trustarx.pitgo.features.guincho.ui.GuinchoTrackingContent(state,viewModel,isClient,onBack,
             onReturnHome = if(historical) onBack else onFinished,
-            onOpenInspection = onOpenInspection, onArrive = { openingInspection = true; viewModel.arrive() })
+            onOpenInspection = onOpenInspection, onArrive = { openingInspection = true; viewModel.arrive() },
+            onOpenExternalNavigation = openNavigation)
         return
     }
     AppointmentTrackingScreen(
@@ -125,6 +160,7 @@ fun AppointmentTrackingRoute(
         onArrive = viewModel::arrive,
         onComplete = viewModel::complete,
         onAcknowledgeStart = viewModel::acknowledgeStart,
+        onOpenExternalNavigation = openNavigation,
     )
 }
 
@@ -145,6 +181,7 @@ private fun AppointmentTrackingScreen(
     onArrive: () -> Unit,
     onComplete: () -> Unit,
     onAcknowledgeStart: () -> Unit,
+    onOpenExternalNavigation: () -> Unit,
 ) {
     val reference = state.route?.let { snapshot ->
         snapshot.geometry?.let { geometry ->
@@ -202,6 +239,15 @@ private fun AppointmentTrackingScreen(
                 TrackingEmptyState(state.data, Modifier.fillMaxSize())
             }
 
+            if (state.navigationLeg != null) {
+                androidx.compose.material3.FilledTonalButton(
+                    onClick = onOpenExternalNavigation,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(PitGoSpacing.Medium),
+                ) {
+                    Text(stringResource(R.string.external_navigation_open))
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .align(if (state.isPitTec) Alignment.BottomCenter else Alignment.TopCenter)
@@ -214,6 +260,11 @@ private fun AppointmentTrackingScreen(
                 verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
             ) {
                 TrackingStatus(state.data)
+                if (state.isPitTec && state.dispatch?.trackingAuthorized == true &&
+                    state.clientLocation == null && state.data != TrackingDataState.Loading
+                ) {
+                    Text(stringResource(R.string.pittec_client_location_unavailable))
+                }
                 state.clientLocation?.let { client ->
                     val capturedAt = client.capturedAtEpochMillis
                     if (capturedAt == null || System.currentTimeMillis() - capturedAt > 30_000) {
@@ -375,7 +426,7 @@ private fun PitTecProviderActions(
 }
 
 @Composable
-private fun TrackingStatus(data: TrackingDataState) {
+internal fun TrackingStatus(data: TrackingDataState) {
     val location = when (data) {
         is TrackingDataState.Live -> data.location
         is TrackingDataState.Stale -> data.location
@@ -392,8 +443,12 @@ private fun TrackingStatus(data: TrackingDataState) {
             R.string.tracking_stale_with_time,
             location?.localizedPublishedTime().orEmpty(),
         )
-        is TrackingDataState.Offline -> stringResource(R.string.tracking_offline)
-        is TrackingDataState.Failure -> stringResource(R.string.tracking_degraded)
+        is TrackingDataState.Offline -> stringResource(
+            if (location == null) R.string.tracking_offline_empty else R.string.tracking_offline,
+        )
+        is TrackingDataState.Failure -> stringResource(
+            if (location == null) R.string.tracking_degraded else R.string.tracking_degraded_last_known,
+        )
         TrackingDataState.SessionExpired -> stringResource(R.string.tracking_session_expired)
         TrackingDataState.Ended -> stringResource(R.string.tracking_ended)
         TrackingDataState.Empty -> stringResource(R.string.tracking_empty)
@@ -422,7 +477,9 @@ private fun TrackingEmptyState(data: TrackingDataState, modifier: Modifier = Mod
                     TrackingDataState.Empty -> stringResource(R.string.tracking_empty)
                     TrackingDataState.Ended -> stringResource(R.string.tracking_ended)
                     TrackingDataState.SessionExpired -> stringResource(R.string.tracking_session_expired)
-                    is TrackingDataState.Offline -> stringResource(R.string.tracking_offline)
+                    is TrackingDataState.Offline -> stringResource(
+                        if (data.lastLocation == null) R.string.tracking_offline_empty else R.string.tracking_offline,
+                    )
                     else -> stringResource(R.string.tracking_degraded)
                 },
                 modifier = Modifier.padding(PitGoSpacing.Large),

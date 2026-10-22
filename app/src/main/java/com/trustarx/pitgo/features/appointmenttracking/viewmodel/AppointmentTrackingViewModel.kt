@@ -12,11 +12,21 @@ import com.trustarx.pitgo.core.map.model.MapViewport
 import com.trustarx.pitgo.core.map.model.MapViewportCommand
 import com.trustarx.pitgo.core.map.model.framingViewport
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentClientLocation
+import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentClientLocationResult
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentLocationEvent
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentProviderLocation
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentTrackingUiState
 import com.trustarx.pitgo.features.appointmenttracking.model.LocationRevision
 import com.trustarx.pitgo.features.appointmenttracking.model.TrackingDataState
+import com.trustarx.pitgo.features.appointmenttracking.model.TrackingViewer
+import com.trustarx.pitgo.features.appointmenttracking.model.ExternalNavigationFailure
+import com.trustarx.pitgo.features.appointmenttracking.model.ExternalNavigationRequest
+import com.trustarx.pitgo.features.appointmenttracking.model.ExternalNavigationState
+import com.trustarx.pitgo.features.appointmenttracking.model.ExternalNavigationTarget
+import com.trustarx.pitgo.core.navigation.ExternalNavigationOption
+import com.trustarx.pitgo.core.navigation.ExternalNavigator
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchFailure
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchSnapshot
 import com.trustarx.pitgo.features.appointmenttracking.repository.AppointmentTrackingRepository
 import com.trustarx.pitgo.core.routing.model.RouteResult
 import com.trustarx.pitgo.core.routing.repository.PitTecRouteRepository
@@ -30,6 +40,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
 import com.trustarx.pitgo.features.guincho.model.*
 import com.trustarx.pitgo.features.guincho.repository.GuinchoRouteRepository
@@ -65,8 +76,17 @@ class AppointmentTrackingViewModel(
     private var guinchoGeneration = 0L
     private var routeMeasurement: Long? = null
     private var routeAccessDenied = false
+    private var navigationJob: Job? = null
+    private var navigationGeneration = 0L
+    private var navigationVisible = false
 
-    fun onVisible() {
+    fun onVisible(historical: Boolean = false) {
+        navigationVisible = true
+        _state.value = _state.value.copy(viewer = when {
+            historical -> TrackingViewer.HISTORICAL
+            isClient -> TrackingViewer.CLIENT
+            else -> TrackingViewer.PROVIDER
+        })
         if (observeJob != null) return
         terminal = false
         observeJob = viewModelScope.launch {
@@ -76,8 +96,7 @@ class AppointmentTrackingViewModel(
             val direct=dispatchRepository.appointmentSnapshot(appointmentId)
             when (val dispatch = if(direct is MobileDispatchResult.Success) direct else dispatchRepository.restoreAnyDispatchKind()) {
                 is MobileDispatchResult.Success -> if(dispatch.snapshot.appointment?.id==appointmentId) {
-                    _state.value = _state.value.copy(dispatch = dispatch.snapshot)
-                    applyGuinchoPickup()
+                    applyDispatchSnapshot(dispatch.snapshot)
                 }
                 else -> Unit
             }
@@ -95,12 +114,8 @@ class AppointmentTrackingViewModel(
                     val result = if (_state.value.isPitTec || _state.value.isGuincho) dispatchRepository.appointmentSnapshot(appointmentId)
                         else dispatchRepository.restoreAnyDispatchKind()
                     if (result is MobileDispatchResult.Success && result.snapshot.appointment?.id == appointmentId) {
-                        val current = _state.value.dispatch
-                        if (current == null || result.snapshot.revision >= current.revision) {
-                            _state.value = _state.value.copy(dispatch = result.snapshot)
-                            applyGuinchoPickup()
-                        }
-                        if (result.snapshot.appointment.status in setOf(
+                        val applied = applyDispatchSnapshot(result.snapshot)
+                        if (applied && result.snapshot.appointment.status in setOf(
                             com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus.CANCELLED,
                             com.trustarx.pitgo.features.mobiledispatch.model.MobileAppointmentStatus.COMPLETED,
                         )) {
@@ -147,6 +162,8 @@ class AppointmentTrackingViewModel(
     }
 
     fun onHidden() {
+        navigationVisible = false
+        dismissExternalNavigation()
         observeJob?.cancel()
         observeJob = null
         routeJob?.cancel()
@@ -159,6 +176,157 @@ class AppointmentTrackingViewModel(
         deviceLocationRepository.endVisibleUse(ClientLocationPurpose.APPOINTMENT_TRACKING)
         _state.value = AppointmentTrackingUiState()
         cameraRevision = 0L
+    }
+
+    fun openExternalNavigation(options: List<ExternalNavigationOption>) {
+        if (!navigationVisible || _state.value.navigationLeg == null) return
+        dismissExternalNavigation()
+        _state.value = _state.value.copy(externalNavigation =
+            if (_state.value.navigationCoordinate == null) {
+                ExternalNavigationState.Failure(ExternalNavigationFailure.DESTINATION_UNAVAILABLE, emptyList())
+            } else ExternalNavigationState.Choosing(options)
+        )
+    }
+
+    fun dismissExternalNavigation() {
+        navigationGeneration++
+        navigationJob?.cancel()
+        navigationJob = null
+        _state.value = _state.value.copy(externalNavigation = ExternalNavigationState.Closed)
+    }
+
+    fun chooseExternalNavigator(navigator: ExternalNavigator) {
+        val options = when (val selection = _state.value.externalNavigation) {
+            is ExternalNavigationState.Choosing -> selection.options
+            is ExternalNavigationState.Failure -> selection.options
+            else -> return
+        }
+        if (!navigationVisible || _state.value.navigationLeg == null) {
+            navigationFailure(ExternalNavigationFailure.CONTEXT_CHANGED, options)
+            return
+        }
+        if (options.none { it.navigator == navigator && it.available }) {
+            navigationFailure(ExternalNavigationFailure.APP_UNAVAILABLE, options)
+            return
+        }
+        val generation = ++navigationGeneration
+        _state.value = _state.value.copy(externalNavigation = ExternalNavigationState.Preparing(options))
+        navigationJob = viewModelScope.launch {
+            try {
+                val target = withTimeoutOrNull(NAVIGATION_PREPARATION_TIMEOUT_MS) {
+                    refreshNavigationTarget(generation, options)
+                }
+                if (!isPreparingNavigation(generation)) return@launch
+                if (target == null) {
+                    navigationFailure(ExternalNavigationFailure.CONTEXT_REFRESH_FAILED, options)
+                } else {
+                    _state.value = _state.value.copy(externalNavigation = ExternalNavigationState.ReadyToLaunch(
+                        ExternalNavigationRequest(generation, navigator, target),
+                    ))
+                }
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                if (isPreparingNavigation(generation)) {
+                    navigationFailure(ExternalNavigationFailure.CONTEXT_REFRESH_FAILED, options)
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshNavigationTarget(
+        generation: Long,
+        options: List<ExternalNavigationOption>,
+    ): ExternalNavigationTarget? {
+        val result = dispatchRepository.appointmentSnapshot(appointmentId)
+        if (!isPreparingNavigation(generation)) return null
+        if (result is MobileDispatchResult.Failure && result.reason == MobileDispatchFailure.SESSION_EXPIRED) {
+            handle(AppointmentLocationEvent.SessionExpired)
+            _state.value = _state.value.copy(externalNavigation = ExternalNavigationState.Closed)
+            return null
+        }
+        if (result !is MobileDispatchResult.Success) {
+            navigationFailure(ExternalNavigationFailure.CONTEXT_REFRESH_FAILED, options)
+            return null
+        }
+        if (!applyDispatchSnapshot(result.snapshot) || _state.value.navigationLeg == null) {
+            navigationFailure(ExternalNavigationFailure.CONTEXT_CHANGED, options)
+            return null
+        }
+        if (_state.value.isPitTec) {
+            val location = repository.refreshClientLocation(appointmentId)
+            if (!isPreparingNavigation(generation)) return null
+            when (location) {
+                is AppointmentClientLocationResult.Found -> {
+                    _state.value = _state.value.copy(clientLocation = location.location)
+                }
+                AppointmentClientLocationResult.Unavailable -> {
+                    _state.value = _state.value.copy(clientLocation = null)
+                    navigationFailure(ExternalNavigationFailure.DESTINATION_UNAVAILABLE, options)
+                    return null
+                }
+                is AppointmentClientLocationResult.Failure -> {
+                    if (location.reason == MobileDispatchFailure.SESSION_EXPIRED) {
+                        handle(AppointmentLocationEvent.SessionExpired)
+                        _state.value = _state.value.copy(externalNavigation = ExternalNavigationState.Closed)
+                    } else navigationFailure(ExternalNavigationFailure.CONTEXT_REFRESH_FAILED, options)
+                    return null
+                }
+            }
+            if (_state.value.navigationLeg == null) {
+                navigationFailure(ExternalNavigationFailure.CONTEXT_CHANGED, options)
+                return null
+            }
+        }
+        val target = currentNavigationTarget()
+        if (target == null) navigationFailure(ExternalNavigationFailure.DESTINATION_UNAVAILABLE, options)
+        return target
+    }
+
+    fun consumeExternalNavigation(requestId: Long): ExternalNavigationRequest? {
+        val ready = _state.value.externalNavigation as? ExternalNavigationState.ReadyToLaunch ?: return null
+        if (ready.request.id != requestId || requestId != navigationGeneration || !navigationVisible) return null
+        val target = currentNavigationTarget()
+        if (target == null) {
+            navigationFailure(ExternalNavigationFailure.CONTEXT_CHANGED, emptyList())
+            return null
+        }
+        // Consume before startActivity: returning to this screen must never replay a launch.
+        _state.value = _state.value.copy(externalNavigation = ExternalNavigationState.Closed)
+        return ready.request.copy(target = target)
+    }
+
+    fun externalNavigationLaunchFailed(requestId: Long, options: List<ExternalNavigationOption>) {
+        if (navigationVisible && requestId == navigationGeneration) {
+            navigationFailure(ExternalNavigationFailure.APP_UNAVAILABLE, options)
+        }
+    }
+
+    private fun currentNavigationTarget(): ExternalNavigationTarget? {
+        val current = _state.value
+        val snapshot = current.dispatch ?: return null
+        val appointment = snapshot.appointment?.takeIf { it.id == appointmentId } ?: return null
+        val leg = current.navigationLeg ?: return null
+        val coordinate = current.navigationCoordinate ?: return null
+        return ExternalNavigationTarget(appointmentId, snapshot.revision, appointment.revision, leg, coordinate)
+    }
+
+    private fun isPreparingNavigation(generation: Long): Boolean =
+        navigationVisible && generation == navigationGeneration &&
+            _state.value.externalNavigation is ExternalNavigationState.Preparing
+
+    private fun navigationFailure(reason: ExternalNavigationFailure, options: List<ExternalNavigationOption>) {
+        _state.value = _state.value.copy(externalNavigation = ExternalNavigationState.Failure(reason, options))
+    }
+
+    private fun applyDispatchSnapshot(snapshot: MobileDispatchSnapshot): Boolean {
+        val appointment = snapshot.appointment?.takeIf { it.id == appointmentId } ?: return false
+        val current = _state.value.dispatch
+        if (current != null && (snapshot.revision < current.revision ||
+                appointment.revision < (current.appointment?.revision ?: 0L))) return false
+        _state.value = _state.value.copy(dispatch = snapshot)
+        applyGuinchoPickup()
+        return true
     }
 
     /** Provider-only "Cheguei" — mirrors the ACCEPTED "Iniciar atendimento" RPC for Mobile. */
@@ -558,6 +726,7 @@ class AppointmentTrackingViewModel(
 
     companion object {
         private const val TAG = "AppointmentTracking"
+        private const val NAVIGATION_PREPARATION_TIMEOUT_MS = 4_000L
         private const val STALE_AFTER_MS = 30_000L
         private const val CLOCK_SKEW_TOLERANCE_MS = 5_000L
         private const val CLIENT_ONLY_ZOOM = 15.0

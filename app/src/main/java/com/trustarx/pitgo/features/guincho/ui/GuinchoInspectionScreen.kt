@@ -94,7 +94,7 @@ private tailrec fun Context.activity(): Activity? = when (this) { is Activity ->
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GuinchoInspectionRoute(viewModel: GuinchoInspectionViewModel, onBack: () -> Unit, onSessionExpired: () -> Unit, onApprovalConfirmed: () -> Unit, sessionVerified: Boolean = true) {
+fun GuinchoInspectionRoute(viewModel: GuinchoInspectionViewModel, onBack: () -> Unit, onSessionExpired: () -> Unit, onApprovalConfirmed: (String?) -> Unit, sessionVerified: Boolean = true) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LifecycleStartEffect(viewModel, sessionVerified) {
         if (sessionVerified) viewModel.onVisible()
@@ -131,10 +131,10 @@ fun GuinchoInspectionRoute(viewModel: GuinchoInspectionViewModel, onBack: () -> 
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
-    LaunchedEffect(viewModel) { viewModel.approvalConfirmed.collect { onApprovalConfirmed() } }
+    LaunchedEffect(viewModel) { viewModel.approvalConfirmed.collect { versionId -> onApprovalConfirmed(versionId) } }
     LaunchedEffect(state.submissionNavigation) {
         state.submissionNavigation?.let { operation ->
-            onApprovalConfirmed()
+            onApprovalConfirmed(null)
             viewModel.submissionNavigationConsumed(operation)
         }
     }
@@ -152,6 +152,9 @@ fun GuinchoInspectionRoute(viewModel: GuinchoInspectionViewModel, onBack: () -> 
             item {
                 doc?.let { Text(it.vehicle, style = MaterialTheme.typography.titleMedium); Text(stringResource(inspectionStateLabel(it.summary.state))); it.summary.correctionReason?.let { reason -> Text(reason) } }
                 if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (state.hasPendingPhoto && state.canEditPhotos) {
+                    Text(stringResource(R.string.inspection_wait_photo), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                }
                 state.error?.let { Text(stringResource(failureLabel(it)), color = MaterialTheme.colorScheme.error); TextButton(onClick = viewModel::retry) { Text(stringResource(R.string.inspection_retry)) } }
                 if (doc == null) Text(stringResource(R.string.inspection_loading))
             }
@@ -189,10 +192,11 @@ fun GuinchoInspectionRoute(viewModel: GuinchoInspectionViewModel, onBack: () -> 
                                     else if (photo != null) {
                                         viewModel.imageResult(photo.id, success)
                                         if (success) scope.launch { withFrameNanos { }; viewModel.imageFrame(photo.id, true) }
-                                    } }, Modifier.weight(1f), loading = photo != null && preview == null && photo.id !in state.thumbnails && photo.id !in state.thumbnailFailed) {
+                                    } }, Modifier.weight(1f), loading = photo != null && preview == null && photo.id !in state.thumbnails && photo.id !in state.thumbnailFailed,
+                                clickEnabled = preview != null || photo != null || state.canCapture) {
                                 if (pending != null) PendingActions(pending, viewModel, state.canEditPhotos, state.canRetrySave(pending), state.canRecapture(pending))
                                 else {
-                                    if (state.canCapture) TextButton(onClick = { viewModel.capture(slot, photo?.id) }) { Text(stringResource(if (photo == null) R.string.inspection_take_photo else R.string.inspection_retake)) }
+                                    if (state.canEditPhotos) TextButton(onClick = { viewModel.capture(slot, photo?.id) }, enabled = state.canCapture) { Text(stringResource(if (photo == null) R.string.inspection_take_photo else R.string.inspection_retake)) }
                                     if (photo != null && !slot.required && state.canEditPhotos) TextButton(onClick = { viewModel.unselect(photo) }) { Text(stringResource(R.string.inspection_remove)) }
                                     if (photo?.id in state.thumbnailFailed) TextButton(onClick = { photo?.let { viewModel.loadPhoto(it, true) } }) { Text(stringResource(R.string.inspection_retry)) }
                                 }
@@ -233,9 +237,9 @@ fun GuinchoInspectionRoute(viewModel: GuinchoInspectionViewModel, onBack: () -> 
                                 if (success) scope.launch { withFrameNanos { }; viewModel.imageFrame(photo.id, true) }
                             }, Modifier.weight(1f), loading = photo.id !in state.thumbnails && photo.id !in state.thumbnailFailed) {
                             if (photo.id in state.thumbnailFailed) TextButton(onClick = { viewModel.loadPhoto(photo, true) }) { Text(stringResource(R.string.inspection_retry)) }
-                            if (state.canCapture) {
-                                TextButton(onClick = { viewModel.capture(photo.slot, photo.id) }) { Text(stringResource(R.string.inspection_retake)) }
-                                TextButton(onClick = { viewModel.unselect(photo) }) { Text(stringResource(R.string.inspection_remove)) }
+                            if (state.canEditPhotos) {
+                                TextButton(onClick = { viewModel.capture(photo.slot, photo.id) }, enabled = state.canCapture) { Text(stringResource(R.string.inspection_retake)) }
+                                TextButton(onClick = { viewModel.unselect(photo) }, enabled = state.canCapture) { Text(stringResource(R.string.inspection_remove)) }
                             }
                         }
                     }
@@ -306,9 +310,9 @@ fun GuinchoInspectionRoute(viewModel: GuinchoInspectionViewModel, onBack: () -> 
     }
 }
 @Composable private fun PhotoTile(label: String, hint: String, file: File?, status: String, failed: Boolean, onClick: () -> Unit,
-    onImageResult: (Boolean) -> Unit, modifier: Modifier = Modifier, loading: Boolean = false, actions: @Composable ColumnScope.() -> Unit = {}) {
+    onImageResult: (Boolean) -> Unit, modifier: Modifier = Modifier, loading: Boolean = false, clickEnabled: Boolean = true, actions: @Composable ColumnScope.() -> Unit = {}) {
     OutlinedCard(modifier) {
-        Box(Modifier.fillMaxWidth().aspectRatio(4f / 3f).clickable(onClickLabel = stringResource(R.string.inspection_open_photo), onClick = onClick), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxWidth().aspectRatio(4f / 3f).clickable(enabled = clickEnabled, onClickLabel = stringResource(R.string.inspection_open_photo), onClick = onClick), contentAlignment = Alignment.Center) {
             if (file != null) AsyncImage(ImageRequest.Builder(LocalContext.current).data(file).memoryCacheKey("guincho-inspection:${file.path}").build(), "$label — $status",
                 contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(), onSuccess = { onImageResult(true) }, onError = { onImageResult(false) })
             else if (loading) CircularProgressIndicator(Modifier.size(28.dp))

@@ -21,6 +21,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.math.asin
+import kotlin.math.cos
+import kotlin.math.sin
 
 enum class GuinchoMapStage { PICKUP, DESTINATION, CONFIRM, DISCOVERY }
 enum class GuinchoMapOperation { IDLE, LOCATING, RESOLVING_ADDRESS, SAVING, DISCOVERING, QUOTING, RESERVING }
@@ -282,10 +285,36 @@ class GuinchoMapViewModel(
         }
     }
     private fun confirmDestination(coordinate: MapCoordinate) {
-        val viewport = MapViewport(coordinate,16.0)
+        val pickup = mutable.value.pickup ?: return
+        val camera = MapViewportCommand(
+            viewport = framingViewport(pickup, coordinate),
+            revision = System.nanoTime(),
+            fitCoordinates = listOf(pickup, coordinate),
+        )
         mutable.update { it.copy(stage=GuinchoMapStage.CONFIRM,operation=GuinchoMapOperation.IDLE,
             destination=coordinate,addressSuggestions=emptyList(),destinationNumberNotFound=false,
-            viewport=viewport,camera=MapViewportCommand(viewport,System.nanoTime())) }
+            viewport=camera.viewport,camera=camera) }
+    }
+
+    /** Fit the full 30 km radius around the pickup when opening provider discovery. */
+    private fun discoveryOverview(center: MapCoordinate): MapViewportCommand {
+        val angularRadius = 30_000.0 / 6_371_000.0
+        val latitudeOffset = Math.toDegrees(angularRadius)
+        val latitude = Math.toRadians(center.latitude)
+        val reachesPole = center.latitude + latitudeOffset >= 90.0 || center.latitude - latitudeOffset <= -90.0
+        val longitudeOffset = if (reachesPole) 180.0 else
+            Math.toDegrees(asin((sin(angularRadius) / cos(latitude)).coerceIn(-1.0, 1.0)))
+        fun longitude(value: Double) = ((value + 540.0) % 360.0) - 180.0
+        return MapViewportCommand(
+            viewport = MapViewport(center, 9.0),
+            revision = System.nanoTime(),
+            fitCoordinates = listOf(
+                MapCoordinate((center.latitude + latitudeOffset).coerceAtMost(90.0), center.longitude),
+                MapCoordinate((center.latitude - latitudeOffset).coerceAtLeast(-90.0), center.longitude),
+                MapCoordinate(center.latitude, longitude(center.longitude + longitudeOffset)),
+                MapCoordinate(center.latitude, longitude(center.longitude - longitudeOffset)),
+            ),
+        )
     }
     fun editTrip() {
         if(mutable.value.operation==GuinchoMapOperation.RESERVING) return
@@ -314,8 +343,9 @@ class GuinchoMapViewModel(
             when(val saved=repository.saveTrip(input,current.draft)) {
                 is GuinchoResult.Failure -> failed(saved.reason)
                 is GuinchoResult.Success -> {
+                    val camera = discoveryOverview(input.pickup)
                     mutable.update { it.copy(draft=saved.value,stage=GuinchoMapStage.DISCOVERY,
-                        viewport=MapViewport(input.pickup,12.0),camera=MapViewportCommand(MapViewport(input.pickup,12.0),System.nanoTime())) }
+                        viewport=camera.viewport,camera=camera) }
                     discover(saved.value)
                 }
             }

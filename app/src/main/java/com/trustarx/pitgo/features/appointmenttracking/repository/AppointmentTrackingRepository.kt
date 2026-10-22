@@ -2,6 +2,8 @@ package com.trustarx.pitgo.features.appointmenttracking.repository
 
 import com.trustarx.pitgo.core.common.time.parseSupabaseInstant
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentClientLocation
+import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentClientLocationResult
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchFailure
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentLocationEvent
 import com.trustarx.pitgo.features.appointmenttracking.model.AppointmentProviderLocation
 import com.trustarx.pitgo.features.appointmenttracking.model.TerminalAppointmentStatus
@@ -165,18 +167,37 @@ class AppointmentTrackingRepository(private val client: SupabaseClient) {
         }
     }
 
-    private suspend fun fetchClientLocation(appointmentId: String): AppointmentClientLocation? {
-        val dto = try {
-            client.postgrest.rpc(
+    suspend fun refreshClientLocation(appointmentId: String): AppointmentClientLocationResult {
+        if (!isUuid(appointmentId)) return AppointmentClientLocationResult.Unavailable
+        return try {
+            val dto = client.postgrest.rpc(
                 "get_appointment_client_location",
                 buildJsonObject { put("p_appointment_id", appointmentId) },
             ).decodeAs<ClientLocationSnapshotDto>()
+            if (dto.outcome == "NOT_FOUND") return AppointmentClientLocationResult.Unavailable
+            val point = dto.location
+            if (dto.outcome != "FOUND" || point == null) {
+                return AppointmentClientLocationResult.Failure(MobileDispatchFailure.CONTRACT)
+            }
+            val location = AppointmentClientLocation(point.latitude, point.longitude,
+                point.capturedAt?.let { parseSupabaseInstant(it).toEpochMilli() })
+            if (location.isValid) AppointmentClientLocationResult.Found(location)
+            else AppointmentClientLocationResult.Unavailable
         } catch (cancel: CancellationException) { throw cancel }
-        catch (_: Exception) { return null }
-        if (dto.outcome != "FOUND" || dto.location == null) return null
-        val location = AppointmentClientLocation(dto.location.latitude, dto.location.longitude, dto.location.capturedAt?.let { parseSupabaseInstant(it).toEpochMilli() })
-        return location.takeIf(AppointmentClientLocation::isValid)
+        catch (_: HttpRequestTimeoutException) { AppointmentClientLocationResult.Failure(MobileDispatchFailure.TIMEOUT) }
+        catch (_: HttpRequestException) { AppointmentClientLocationResult.Failure(MobileDispatchFailure.OFFLINE) }
+        catch (error: PostgrestRestException) {
+            AppointmentClientLocationResult.Failure(when {
+                error.statusCode == 401 -> MobileDispatchFailure.SESSION_EXPIRED
+                error.statusCode == 403 || error.code == "42501" -> MobileDispatchFailure.SERVICE_UNAVAILABLE
+                error.statusCode >= 500 -> MobileDispatchFailure.SERVICE_UNAVAILABLE
+                else -> MobileDispatchFailure.CONTRACT
+            })
+        } catch (_: Exception) { AppointmentClientLocationResult.Failure(MobileDispatchFailure.UNKNOWN) }
     }
+
+    private suspend fun fetchClientLocation(appointmentId: String): AppointmentClientLocation? =
+        (refreshClientLocation(appointmentId) as? AppointmentClientLocationResult.Found)?.location
 
     private fun parseEnded(payload: JsonObject): AppointmentLocationEvent.Ended? {
         val status = sequenceOf(payload, payload["payload"] as? JsonObject)
