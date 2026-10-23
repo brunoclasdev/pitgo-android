@@ -75,8 +75,9 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
     val money=remember { NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")) }
     Scaffold(topBar={ TopAppBar(title={ Text(stringResource(R.string.guincho_title)) },
         navigationIcon={ TextButton(onClick=onBack) { Text(stringResource(R.string.guincho_back)) } }) }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding).imePadding()) {
+            val cardHeight = maxHeight * 0.45f
+            Box(Modifier.fillMaxSize()) {
                 MapLibreMapHost(PitGoManagedMapStyle.configuration,MapRenderModel(journeyMarkers, journey.polyline),state.viewport,
                     rememberJourneyCamera(state.camera, journey.polyline,
                         state.stage == GuinchoMapStage.DISCOVERY && state.selected != null) ?: state.camera,
@@ -88,9 +89,8 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
                     else permission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION))
                 },modifier=Modifier.align(Alignment.TopEnd)) { Text(stringResource(R.string.guincho_my_location)) }
             }
-            // Separate measured region keeps the mini card outside the map, including large fonts.
-            Column(Modifier.fillMaxWidth().heightIn(max=280.dp).verticalScroll(rememberScrollState()).padding(16.dp),
-                verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            com.trustarx.pitgo.core.ui.AddressEntryMapCard(
+                Modifier.align(Alignment.BottomCenter).padding(12.dp).heightIn(max = cardHeight)) {
                 if(state.operation!=GuinchoMapOperation.IDLE) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (state.pickup != null && state.destination != null && addressConfirmed) {
                     Text(stringResource(R.string.journey_transport))
@@ -101,6 +101,7 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
                     JourneyRouteSummary(pickupJourney, stale = !state.online)
                 }
                 if(state.failure!=null) Text(stringResource(when(state.failure) {
+                    com.trustarx.pitgo.features.guincho.model.GuinchoFailure.PRICING_UNAVAILABLE -> R.string.service_pricing_unavailable
                     com.trustarx.pitgo.features.guincho.model.GuinchoFailure.ROUTE_UNAVAILABLE -> R.string.guincho_route_failure
                     com.trustarx.pitgo.features.guincho.model.GuinchoFailure.QUOTE_EXPIRED,
                     com.trustarx.pitgo.features.guincho.model.GuinchoFailure.QUOTE_CONFLICT -> R.string.guincho_quote_changed
@@ -169,7 +170,10 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
                         state.selected?.let { provider ->
                             Text(provider.name,style=MaterialTheme.typography.titleMedium)
                             com.trustarx.pitgo.features.rating.ui.ProviderRatingSummaryText(provider.ratingSummary)
-                            state.quote?.let { quote -> Text(money.format(quote.total),style=MaterialTheme.typography.titleLarge) }
+                            state.quote?.let { quote ->
+                                Text(money.format(quote.total),style=MaterialTheme.typography.titleLarge)
+                                quote.durationMinutes?.let { Text(stringResource(R.string.service_duration_minutes, it)) }
+                            }
                             Button(onClick=viewModel::contract,enabled=contractingEnabled && state.quote!=null && state.operation==GuinchoMapOperation.IDLE && state.checkout==null,
                                 modifier=Modifier.fillMaxWidth()) { Text(stringResource(R.string.guincho_contract)) }
                         } ?: Text(stringResource(if(state.providers.isEmpty() && state.operation==GuinchoMapOperation.IDLE)

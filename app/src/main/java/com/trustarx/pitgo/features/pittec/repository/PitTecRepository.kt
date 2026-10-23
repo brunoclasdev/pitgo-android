@@ -180,6 +180,7 @@ class PitTecRepository(private val client: SupabaseClient) {
         is HttpRequestTimeoutException -> PitTecFailure.TIMEOUT
         is HttpRequestException -> PitTecFailure.OFFLINE
         is PostgrestRestException -> when {
+            error.error.contains("PITTEC_PRICING_UNAVAILABLE") -> PitTecFailure.PRICING_UNAVAILABLE
             error.statusCode == 401 || error.statusCode == 403 || error.code == "42501" ->
                 PitTecFailure.SESSION_EXPIRED
             error.code in setOf("PGRST202", "PGRST203", "42883", "42P01", "42703") ->

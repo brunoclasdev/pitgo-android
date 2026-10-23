@@ -54,7 +54,8 @@ Deno.serve(async (request) => {
   const coordinates = match.geometry?.type === "Point" ? match.geometry.coordinates : match.center;
   const geocodedLongitude = Number(coordinates?.[0]);
   const geocodedLatitude = Number(coordinates?.[1]);
-  if (!Number.isFinite(geocodedLatitude) || !Number.isFinite(geocodedLongitude)) {
+  if (!Number.isFinite(geocodedLatitude) || !Number.isFinite(geocodedLongitude) ||
+    Math.abs(geocodedLatitude) > 90 || Math.abs(geocodedLongitude) > 180) {
     return json(503, { code: "GEOCODER_UNAVAILABLE" });
   }
   const distance = 0;

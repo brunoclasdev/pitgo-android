@@ -367,18 +367,12 @@ private fun RegistrationForm(
                 )
             }
         }
+        if (content.draft.providerKind == com.trustarx.pitgo.core.account.ProviderKind.STORE) {
+            item { FormWidth { com.trustarx.pitgo.features.store.ui.StoreRegistrationIntro() } }
+        }
         item { SectionTitle(R.string.provider_company_section) }
         item {
-            ProviderModeSection(
-                selected = content.draft.locationMode,
-                enabled = !submitting,
-                error = content.errors[ProviderField.LocationMode],
-                focusRequester = rememberFieldFocusRequester(
-                    focusRequesters,
-                    ProviderField.LocationMode,
-                ),
-                onSelected = onLocationModeSelected,
-            )
+            FormWidth { Text(content.draft.providerKind?.label ?: "Prestador", style = MaterialTheme.typography.titleMedium) }
         }
         item {
             FormTextField(content.draft.company.name, ProviderField.Name, R.string.provider_name_label,
@@ -463,22 +457,21 @@ private fun RegistrationForm(
                 )
             }
         }
-        item {
-            AddressVerificationSection(
-                content,
-                submitting || postalCodeLoading,
-                rememberFieldFocusRequester(
-                    focusRequesters,
-                    ProviderField.LocationVerification,
-                ),
-                onVerifyAddress,
-                onConfirmDivergence,
-            )
+        if (content.draft.providerKind == com.trustarx.pitgo.core.account.ProviderKind.GUINCHO) {
+            item { SectionTitle(R.string.provider_vehicle_section) }
+            item { FormTextField(content.draft.vehicle.plate, ProviderField.Plate, R.string.provider_vehicle_plate,
+                content, submitting, focusRequesters, onFieldChanged, KeyboardOptions(capitalization = KeyboardCapitalization.Characters)) }
+            item { FormTextField(content.draft.vehicle.make, ProviderField.Make, R.string.provider_vehicle_make,
+                content, submitting, focusRequesters, onFieldChanged, KeyboardOptions(capitalization = KeyboardCapitalization.Words)) }
+            item { FormTextField(content.draft.vehicle.model, ProviderField.VehicleModel, R.string.provider_vehicle_model,
+                content, submitting, focusRequesters, onFieldChanged, KeyboardOptions(capitalization = KeyboardCapitalization.Words)) }
+            item { FormTextField(content.draft.vehicle.color, ProviderField.Color, R.string.provider_vehicle_color,
+                content, submitting, focusRequesters, onFieldChanged, KeyboardOptions(capitalization = KeyboardCapitalization.Words)) }
         }
         content.implicitServiceIssue?.let { issue ->
             item { ErrorBanner(failureMessage(issue), onRetry = onRetryImplicitService) }
         }
-        if (content.draft.locationMode == ProviderLocationMode.FIXED) {
+        if (content.draft.locationMode == ProviderLocationMode.FIXED && content.draft.providerKind != com.trustarx.pitgo.core.account.ProviderKind.STORE) {
             item {
                 val offersError = content.errors[ProviderField.Offers]?.let {
                     fieldErrorMessage(it, ProviderField.Offers)
@@ -534,25 +527,14 @@ private fun RegistrationForm(
                 }
             }
         } else if (content.draft.locationMode == ProviderLocationMode.MOBILE) {
-            content.draft.offers.firstOrNull()?.let { offer ->
-                item {
-                    MobileOfferSection(
-                        offer = offer,
-                        errors = content.errors,
-                        enabled = !submitting,
-                        focusRequesters = focusRequesters,
-                        onFieldChanged = onOfferFieldChanged,
-                        onFreeChanged = onFreeChanged,
-                    )
-                }
-            }
+            item { FormWidth { Text(stringResource(R.string.provider_central_pricing_hint), color = MaterialTheme.colorScheme.onSurfaceVariant) } }
         } else if (content.draft.locationMode == ProviderLocationMode.PITTEC) {
             // Spec 016 US3: nenhum campo e nenhum título de seção de serviço para PitTec — só
             // uma frase curta explicando que o serviço é atribuído automaticamente sem preço.
             item {
                 FormWidth {
                     Text(
-                        stringResource(R.string.provider_offer_pittec_hint),
+                        stringResource(R.string.provider_central_pricing_hint),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -588,131 +570,6 @@ private fun RegistrationForm(
                     } else Text(stringResource(R.string.provider_submit))
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun ProviderModeSection(
-    selected: ProviderLocationMode?,
-    enabled: Boolean,
-    error: ProviderFieldError?,
-    focusRequester: FocusRequester,
-    onSelected: (ProviderLocationMode) -> Unit,
-) {
-    val errorMessage = error?.let { fieldErrorMessage(it, ProviderField.LocationMode) }
-    FormWidth {
-        Column(
-            modifier = Modifier.focusRequester(focusRequester).focusable()
-                .then(
-                    if (errorMessage != null) Modifier.semantics { error(errorMessage) }
-                    else Modifier,
-                ),
-            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
-        ) {
-            Text(
-                stringResource(R.string.provider_mode_label),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
-                OutlinedButton(
-                    onClick = { onSelected(ProviderLocationMode.FIXED) },
-                    enabled = enabled,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(stringResource(R.string.provider_mode_fixed)) }
-                OutlinedButton(
-                    onClick = { onSelected(ProviderLocationMode.MOBILE) },
-                    enabled = enabled,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(stringResource(R.string.provider_mode_mobile)) }
-                OutlinedButton(
-                    onClick = { onSelected(ProviderLocationMode.PITTEC) },
-                    enabled = enabled,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(stringResource(R.string.provider_mode_pittec)) }
-            }
-            if (selected != null) {
-                Text(
-                    when (selected) {
-                        ProviderLocationMode.FIXED -> stringResource(R.string.provider_mode_fixed_description)
-                        ProviderLocationMode.MOBILE -> stringResource(R.string.provider_mode_mobile_description)
-                        ProviderLocationMode.PITTEC -> stringResource(R.string.provider_mode_pittec_description)
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            errorMessage?.let {
-                Text(it, color = MaterialTheme.colorScheme.error)
-            }
-        }
-    }
-}
-
-@Composable
-private fun AddressVerificationSection(
-    content: ProviderEditingContent,
-    submitting: Boolean,
-    focusRequester: FocusRequester,
-    onVerifyAddress: () -> Unit,
-    onConfirmDivergence: () -> Unit,
-) {
-    val errorMessage = content.errors[ProviderField.LocationVerification]?.let {
-        fieldErrorMessage(it, ProviderField.LocationVerification)
-    }
-    FormWidth {
-        Column(
-            modifier = Modifier.focusRequester(focusRequester).focusable()
-                .then(
-                    if (errorMessage != null) Modifier.semantics { error(errorMessage) }
-                    else Modifier,
-                ),
-            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
-        ) {
-            Text(
-                stringResource(R.string.provider_location_verification_explanation),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            when (val verification = content.addressVerification) {
-                AddressVerificationState.Unverified,
-                AddressVerificationState.PermissionRequired,
-                -> OutlinedButton(
-                    onClick = onVerifyAddress,
-                    enabled = !submitting,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = PitGoSize.MinimumTouchTarget),
-                ) { Text(stringResource(R.string.provider_verify_address)) }
-                is AddressVerificationState.Failure -> {
-                    ErrorBanner(failureMessage(verification.reason))
-                    OutlinedButton(
-                        onClick = onVerifyAddress,
-                        enabled = !submitting,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = PitGoSize.MinimumTouchTarget),
-                    ) { Text(stringResource(R.string.provider_verify_address)) }
-                }
-                AddressVerificationState.Locating,
-                AddressVerificationState.Verifying,
-                -> Row(horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
-                    CircularProgressIndicator(Modifier.size(PitGoSize.FeatureIcon))
-                    Text(stringResource(R.string.provider_location_verifying))
-                }
-                is AddressVerificationState.Diverged -> {
-                    ErrorBanner(
-                        stringResource(
-                            R.string.provider_location_diverged,
-                            verification.distanceMeters,
-                        ),
-                    )
-                    Button(
-                        onClick = onConfirmDivergence,
-                        enabled = !submitting,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(stringResource(R.string.provider_location_confirm_divergence)) }
-                }
-                is AddressVerificationState.Verified -> Text(
-                    stringResource(R.string.provider_location_verified),
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }
 }
@@ -929,62 +786,6 @@ private fun StateDropdown(
  * pede preço e duração — sem categoria, serviço, descrição ou os controles de
  * adicionar/remover que só fazem sentido quando o prestador escolhe entre vários serviços.
  */
-@Composable
-private fun MobileOfferSection(
-    offer: OfferDraft,
-    errors: Map<ProviderField, ProviderFieldError>,
-    enabled: Boolean,
-    focusRequesters: MutableMap<ProviderField, FocusRequester>,
-    onFieldChanged: (Long, OfferField, String) -> Unit,
-    onFreeChanged: (Long, Boolean) -> Unit,
-) {
-    FormWidth {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = CardDefaults.outlinedCardBorder(),
-            elevation = CardDefaults.cardElevation(PitGoElevation.Card),
-        ) {
-            Column(
-                Modifier.padding(PitGoSpacing.Medium),
-                verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
-            ) {
-                Text(
-                    stringResource(R.string.provider_mode_mobile),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.semantics { heading() },
-                )
-                Text(
-                    stringResource(R.string.provider_offer_mobile_hint),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth().toggleable(
-                        value = offer.isFree,
-                        enabled = enabled,
-                        onValueChange = { onFreeChanged(offer.localId, it) },
-                    ).heightIn(min = PitGoSize.MinimumTouchTarget),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(checked = offer.isFree, onCheckedChange = null, enabled = enabled)
-                    Text(stringResource(R.string.provider_free_service_label))
-                }
-                OfferTextField(offer, OfferField.PRICE, R.string.provider_price_label, errors,
-                    enabled && !offer.isFree, focusRequesters, onFieldChanged,
-                    KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
-                    prefix = stringResource(R.string.provider_price_prefix))
-                OfferTextField(offer, OfferField.DURATION, R.string.provider_duration_label, errors,
-                    enabled, focusRequesters, onFieldChanged,
-                    KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next))
-                Text(
-                    stringResource(R.string.provider_duration_support),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
 @Composable
 private fun OfferCard(
     index: Int,
@@ -1378,6 +1179,7 @@ private fun fieldErrorMessage(
         }
         else -> stringResource(R.string.provider_required_error)
     }
+    ProviderFieldError.INVALID_PLATE -> stringResource(R.string.provider_vehicle_plate_invalid)
     ProviderFieldError.INVALID_EMAIL -> stringResource(R.string.provider_email_invalid_error)
     ProviderFieldError.INVALID_PHONE -> stringResource(R.string.provider_phone_invalid_error)
     ProviderFieldError.INVALID_CNPJ -> stringResource(R.string.provider_cnpj_invalid_error)
@@ -1399,7 +1201,9 @@ private fun fieldErrorMessage(
         R.string.provider_text_too_long_error,
         ProviderRegistrationValidation.maximumLength(field ?: ProviderField.Description) ?: 1,
     )
-    ProviderFieldError.UNAVAILABLE -> if (field == ProviderField.Cnpj) {
+    ProviderFieldError.UNAVAILABLE -> if (field == ProviderField.Plate) {
+        stringResource(R.string.provider_vehicle_plate_unavailable)
+    } else if (field == ProviderField.Cnpj) {
         stringResource(R.string.provider_cnpj_unavailable_error)
     } else {
         stringResource(R.string.provider_email_unavailable_error)
@@ -1418,7 +1222,11 @@ private fun failureMessage(failure: ProviderFailure): String = when (failure) {
     ProviderFailure.Unknown -> stringResource(R.string.provider_failure_unknown)
 }
 
-private fun formRowIndex(field: ProviderField, content: ProviderEditingContent): Int? = when (field) {
+private fun formRowIndex(field: ProviderField, content: ProviderEditingContent): Int? = (when (field) {
+    ProviderField.Plate -> 18
+    ProviderField.Make -> 19
+    ProviderField.VehicleModel -> 20
+    ProviderField.Color -> 21
     ProviderField.LocationMode -> 2
     ProviderField.Name -> 3
     ProviderField.Description -> 4
@@ -1443,4 +1251,4 @@ private fun formRowIndex(field: ProviderField, content: ProviderEditingContent):
         if (offerIndex < 0) null else 19 + catalogRowCount + emptyOffersRowCount + offerIndex
     }
     ProviderField.Latitude, ProviderField.Longitude -> 17
-}
+})?.plus(if (content.draft.providerKind == com.trustarx.pitgo.core.account.ProviderKind.STORE) 1 else 0)

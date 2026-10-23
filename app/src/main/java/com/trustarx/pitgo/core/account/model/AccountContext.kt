@@ -25,6 +25,7 @@ data class ProviderSnapshot(
     val active: Boolean,
     val available: Boolean,
     val pendingLocationMode: ProviderLocationMode? = null,
+    val providerKind: com.trustarx.pitgo.core.account.ProviderKind? = null,
 ) {
     fun isConsistent(): Boolean = userId.isNotBlank() && providerId.isNotBlank() &&
         name.isNotBlank() && email.equals(authEmail, ignoreCase = true) && phone.isNotBlank() &&
@@ -36,4 +37,5 @@ enum class ProviderLocationMode { FIXED, MOBILE, PITTEC }
 data class ProviderOnboardingSession(
     val userId: String,
     val authEmail: String,
+    val providerKind: com.trustarx.pitgo.core.account.ProviderKind? = null,
 )

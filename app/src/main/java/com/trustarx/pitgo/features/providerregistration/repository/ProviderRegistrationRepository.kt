@@ -88,15 +88,15 @@ class ProviderRegistrationRepository(private val client: SupabaseClient) {
         registration: ProviderRegistration,
     ): ProviderRegistrationResult = try {
         val params = ProviderRegistrationRpcParams(
-            provider = registration.company.toDto(registration.locationMode.name),
+            provider = registration.company.toDto(registration.locationMode.name, registration.providerKind?.name, registration.vehicle),
             address = registration.address.toDto(),
-            offers = registration.offers.map { it.toDto() },
+            offers = registration.offers.map { it.toDto(registration.providerKind != null) },
         )
         val rpcResult = client.postgrest.rpc(
-            CREATE_PROVIDER_REGISTRATION,
+            if (registration.providerKind == com.trustarx.pitgo.core.account.ProviderKind.STORE) "create_store_registration" else CREATE_PROVIDER_REGISTRATION,
             Json.encodeToJsonElement(params).jsonObject,
         ).decodeAs<ProviderRegistrationRpcResultDto>()
-        client.postgrest.rpc(
+        if (registration.providerKind != com.trustarx.pitgo.core.account.ProviderKind.STORE) client.postgrest.rpc(
             SET_PROVIDER_AVAILABILITY,
             buildJsonObject { put("p_available", true) },
         )
@@ -125,7 +125,7 @@ class ProviderRegistrationRepository(private val client: SupabaseClient) {
         }.decodeSingleOrNull<ProviderAddressDto>()
             ?: throw ProviderContractException
         val providerOffers = loadAllProviderOffers(providerId)
-        if (providerOffers.isEmpty()) throw ProviderContractException
+        if (providerOffers.isEmpty() && provider.providerKind != "STORE") throw ProviderContractException
         val services = loadAllServices(categoryId = null).associateBy(CatalogService::id)
         val categories = loadAllCategories().associateBy(ServiceCategory::id)
         val offers = providerOffers.map { offer ->
@@ -214,6 +214,7 @@ class ProviderRegistrationRepository(private val client: SupabaseClient) {
     private fun classifyRegistrationFailure(error: Throwable): ProviderRegistrationResult {
         if (error is PostgrestRestException && error.code == UNIQUE_VIOLATION) {
             return when {
+                error.error.contains("provider_vehicles_plate_key") -> ProviderRegistrationResult.DuplicatePlate
                 error.error.contains(PROVIDER_EMAIL_UNIQUE) -> ProviderRegistrationResult.EmailUnavailable
                 error.error.contains(PROVIDER_CNPJ_UNIQUE) -> ProviderRegistrationResult.CnpjUnavailable
                 error.error.contains(PROVIDER_SERVICE_UNIQUE) -> ProviderRegistrationResult.DuplicateService

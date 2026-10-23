@@ -36,6 +36,7 @@ internal data class ProviderDto(
     val email: String,
     val phone: String,
     val cnpj: String,
+    @SerialName("provider_kind") val providerKind: String? = null,
 )
 
 @Serializable
@@ -70,6 +71,8 @@ internal data class ProviderInputDto(
     val phone: String,
     val cnpj: String,
     @SerialName("location_mode") val locationMode: String,
+    @SerialName("provider_kind") val providerKind: String? = null,
+    val vehicle: com.trustarx.pitgo.features.providerregistration.model.ProviderVehicle? = null,
 )
 
 @Serializable
@@ -88,8 +91,8 @@ internal data class AddressInputDto(
 @Serializable
 internal data class ProviderOfferInputDto(
     @SerialName("service_id") val serviceId: String,
-    val price: String,
-    @SerialName("duration_minutes") val durationMinutes: Int,
+    val price: String? = null,
+    @SerialName("duration_minutes") val durationMinutes: Int? = null,
     val description: String? = null,
     @SerialName("is_free") val isFree: Boolean,
 )
@@ -116,13 +119,15 @@ internal fun CatalogServiceDto.toDomain() = CatalogService(
         ?: ServiceDispatchKind.BROWSE,
 )
 
-internal fun CompanyRegistration.toDto(locationMode: String) = ProviderInputDto(
+internal fun CompanyRegistration.toDto(locationMode: String, kind: String? = null, vehicle: com.trustarx.pitgo.features.providerregistration.model.ProviderVehicle? = null) = ProviderInputDto(
     name = name,
     description = description,
     email = email,
     phone = phone,
     cnpj = cnpj,
     locationMode = locationMode,
+    providerKind = kind,
+    vehicle = vehicle,
 )
 
 internal fun AddressRegistration.toDto() = AddressInputDto(
@@ -137,10 +142,10 @@ internal fun AddressRegistration.toDto() = AddressInputDto(
     verificationToken = verificationToken,
 )
 
-internal fun OfferRegistration.toDto() = ProviderOfferInputDto(
+internal fun OfferRegistration.toDto(centralPricing: Boolean = false) = ProviderOfferInputDto(
     serviceId = serviceId,
-    price = price.toPlainString(),
-    durationMinutes = durationMinutes,
+    price = if (centralPricing) null else price.toPlainString(),
+    durationMinutes = if (centralPricing) null else durationMinutes,
     description = description,
     isFree = isFree,
 )

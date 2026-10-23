@@ -49,6 +49,7 @@ import java.util.Locale
 class ProviderRegistrationViewModel(
     private val expectedUserId: String,
     private val initialEmail: String,
+    private val initialKind: com.trustarx.pitgo.core.account.ProviderKind? = null,
     private val repository: ProviderRegistrationRepository,
     private val addressVerificationRepository: ProviderAddressVerificationRepository,
     private val viaCepAddressLookupRepository: ViaCepAddressLookupRepository,
@@ -509,7 +510,7 @@ class ProviderRegistrationViewModel(
             try {
                 val validated = when (editing.draft.locationMode) {
                     ProviderLocationMode.MOBILE, ProviderLocationMode.PITTEC -> recheckImplicitService(editing)
-                    ProviderLocationMode.FIXED -> recheckFixedServices(editing)
+                    ProviderLocationMode.FIXED -> if (editing.draft.providerKind == com.trustarx.pitgo.core.account.ProviderKind.STORE) editing else recheckFixedServices(editing)
                     else -> editing
                 } ?: return@launch
                 proceedWithValidation(validated)
@@ -690,6 +691,7 @@ class ProviderRegistrationViewModel(
             }
             ProviderRegistrationResult.EmailUnavailable -> remoteFieldError(ProviderField.Email)
             ProviderRegistrationResult.CnpjUnavailable -> remoteFieldError(ProviderField.Cnpj)
+            ProviderRegistrationResult.DuplicatePlate -> remoteFieldError(ProviderField.Plate)
             ProviderRegistrationResult.DuplicateService -> remoteFieldError(ProviderField.Offers)
             is ProviderRegistrationResult.Failure -> applyFailure(result.reason)
         }
@@ -723,6 +725,8 @@ class ProviderRegistrationViewModel(
                     is ProviderEntryResult.Ready -> ifSessionCurrent {
                         val initialDraft = ProviderRegistrationDraft(
                             company = CompanyDraft(email = initialEmail),
+                            providerKind = initialKind,
+                            offers = if (initialKind == com.trustarx.pitgo.core.account.ProviderKind.STORE) emptyList() else listOf(OfferDraft(0L)),
                         )
                         _uiState.value = ProviderRegistrationUiState.Editing(
                             ProviderEditingContent(
@@ -732,6 +736,7 @@ class ProviderRegistrationViewModel(
                                 else LoadState.Content(result.categories),
                             ),
                         )
+                        initialKind?.let { onLocationModeSelected(ProviderLocationMode.valueOf(it.locationMode)) }
                     }
                     is ProviderEntryResult.Failure -> applyStartupFailure(result.reason)
                 }
@@ -951,6 +956,10 @@ class ProviderRegistrationViewModel(
         field: ProviderField,
         value: String,
     ): ProviderRegistrationDraft = when (field) {
+        ProviderField.Plate -> copy(vehicle = vehicle.copy(plate = value.uppercase().filter(Char::isLetterOrDigit).take(7)))
+        ProviderField.Make -> copy(vehicle = vehicle.copy(make = value))
+        ProviderField.VehicleModel -> copy(vehicle = vehicle.copy(model = value))
+        ProviderField.Color -> copy(vehicle = vehicle.copy(color = value))
         ProviderField.Name -> copy(company = company.copy(name = value))
         ProviderField.Description -> copy(company = company.copy(description = value))
         ProviderField.Email -> copy(company = company.copy(email = value))
@@ -995,6 +1004,7 @@ class ProviderRegistrationViewModel(
                 return ProviderRegistrationViewModel(
                     expectedUserId = account.userId,
                     initialEmail = account.authEmail,
+                    initialKind = account.providerKind,
                     repository = repository,
                     addressVerificationRepository = addressVerificationRepository,
                     viaCepAddressLookupRepository = viaCepAddressLookupRepository,

@@ -80,6 +80,8 @@ data class PitTecQuote(
     val customerFeeAmount: BigDecimal? = null,
     val customerTotalAmount: BigDecimal? = null,
     val expiresAtEpochMillis: Long? = null,
+    val durationMinutes: Int? = null,
+    val servicePricingVersion: Long? = null,
 ) {
     fun isValid() = amount.signum() > 0 && currency == "BRL" && version > 0
 }
@@ -149,7 +151,7 @@ data class PitTecDispatchSnapshot(
 
 enum class PitTecFailure {
     LOCATION_REQUIRED, LOCATION_UNAVAILABLE, OFFLINE, TIMEOUT, SESSION_EXPIRED,
-    SERVICE_UNAVAILABLE, UNSUPPORTED_DISPATCH, CONFIRMATION_EXPIRED, REVISION_CONFLICT,
+    SERVICE_UNAVAILABLE, PRICING_UNAVAILABLE, UNSUPPORTED_DISPATCH, CONFIRMATION_EXPIRED, REVISION_CONFLICT,
     INVALID_TRANSITION, CONTRACT, UNKNOWN,
 }
 

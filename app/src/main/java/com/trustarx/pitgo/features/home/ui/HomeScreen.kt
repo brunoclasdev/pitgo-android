@@ -76,6 +76,7 @@ fun HomeRoute(
     onOpenGarage: () -> Unit,
     onOpenAddress: () -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
+    onOpenStores: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val recoverable by viewModel.recoverable.collectAsStateWithLifecycle()
@@ -86,6 +87,7 @@ fun HomeRoute(
         onServiceClick = onServiceClick,
         onOpenGarage = onOpenGarage,
         onOpenAddress = onOpenAddress,
+        onOpenStores = onOpenStores,
         onBottomItemClick = onBottomItemClick,
     )
 }
@@ -99,6 +101,7 @@ fun HomeScreen(
     onOpenGarage: () -> Unit,
     onOpenAddress: () -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
+    onOpenStores: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -140,6 +143,7 @@ fun HomeScreen(
                 onServiceClick = onServiceClick,
                 onOpenGarage = onOpenGarage,
                 onOpenAddress = onOpenAddress,
+                onOpenStores = onOpenStores,
             )
             is HomeUiState.NoVehicle -> HomeGrid(
                 padding = padding,
@@ -151,6 +155,7 @@ fun HomeScreen(
                 onServiceClick = onServiceClick,
                 onOpenGarage = onOpenGarage,
                 onOpenAddress = onOpenAddress,
+                onOpenStores = onOpenStores,
             )
         }
     }
@@ -167,6 +172,7 @@ private fun HomeGrid(
     onServiceClick: (HomeService) -> Unit,
     onOpenGarage: () -> Unit,
     onOpenAddress: () -> Unit,
+    onOpenStores: () -> Unit = {},
 ) {
     val categories = services.groupBy { it.categoryName }.toSortedMap().entries.toList()
     var selectedCategory by remember { mutableStateOf<String?>(null) }
@@ -204,6 +210,9 @@ private fun HomeGrid(
             if (vehicle == null) NoVehicleCard(onOpenGarage) else VehicleCard(vehicle)
         }
         item(span = { GridItemSpan(maxLineSpan) }) { AddressRow(address, onOpenAddress) }
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            androidx.compose.material3.OutlinedButton(onClick = onOpenStores, modifier = Modifier.fillMaxWidth()) { Text("Lojas e produtos") }
+        }
         item(span = { GridItemSpan(maxLineSpan) }) {
             Text(
                 text = stringResource(R.string.home_services_question),

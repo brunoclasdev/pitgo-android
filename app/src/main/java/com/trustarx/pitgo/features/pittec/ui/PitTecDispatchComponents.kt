@@ -176,6 +176,7 @@ private fun QuoteCard(
         Text(stringResource(R.string.pittec_quote_provider, providerName))
         com.trustarx.pitgo.features.rating.ui.ProviderRatingSummaryText(snapshot.provider?.ratingSummary)
         Text(formatter.format(quote.amount), style = MaterialTheme.typography.headlineSmall)
+        quote.durationMinutes?.let { Text(stringResource(R.string.service_duration_minutes, it)) }
         Text(stringResource(R.string.pittec_quote_deadline, phase.remainingSeconds))
         phase.failure?.let { Text(quoteFailureTitle(it), color = MaterialTheme.colorScheme.error) }
         Row(
@@ -238,6 +239,7 @@ private fun quoteFailureTitle(reason: PitTecFailure): String = stringResource(
     when (reason) {
         PitTecFailure.CONFIRMATION_EXPIRED -> R.string.pittec_quote_expired
         PitTecFailure.REVISION_CONFLICT -> R.string.pittec_quote_updated
+        PitTecFailure.PRICING_UNAVAILABLE -> R.string.service_pricing_unavailable
         PitTecFailure.OFFLINE -> R.string.mobile_dispatch_offline
         PitTecFailure.TIMEOUT -> R.string.mobile_dispatch_timeout
         else -> R.string.pittec_quote_action_failed
@@ -247,6 +249,7 @@ private fun quoteFailureTitle(reason: PitTecFailure): String = stringResource(
 @Composable
 private fun failureTitle(reason: PitTecFailure): String = stringResource(
     when (reason) {
+        PitTecFailure.PRICING_UNAVAILABLE -> R.string.service_pricing_unavailable
         PitTecFailure.OFFLINE -> R.string.mobile_dispatch_offline
         PitTecFailure.TIMEOUT -> R.string.mobile_dispatch_timeout
         PitTecFailure.LOCATION_REQUIRED -> R.string.mobile_dispatch_location_message

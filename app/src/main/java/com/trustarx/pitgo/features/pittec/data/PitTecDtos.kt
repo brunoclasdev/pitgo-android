@@ -179,6 +179,8 @@ internal data class PitTecAppointmentDto(
 
 @Serializable
 internal data class PitTecQuoteDto(
+    @SerialName("duration_minutes") val durationMinutes: Int? = null,
+    @SerialName("service_pricing_version") val servicePricingVersion: Long? = null,
     @SerialName("service_amount") val serviceAmount: JsonElement? = null,
     @SerialName("distance_charge_amount") val distanceChargeAmount: JsonElement? = null,
     val amount: JsonElement? = null,
@@ -193,6 +195,7 @@ internal data class PitTecQuoteDto(
     @SerialName("expires_at") val expiresAt: String? = null,
 ) {
     fun toDomain() = PitTecQuote(
+        durationMinutes = durationMinutes, servicePricingVersion = servicePricingVersion,
         amount = (customerTotalAmount ?: providerAmount ?: amount ?: error("quote amount missing")).jsonPrimitive.content.toBigDecimal(),
         currency = currency,
         version = version,

@@ -30,6 +30,7 @@ internal data class ProviderAccountDto(
     @SerialName("pending_location_mode") val pendingLocationMode: String? = null,
     val active: Boolean = true,
     val available: Boolean = false,
+    @SerialName("provider_kind") val providerKind: String? = null,
 )
 
 internal fun AccountContextDto.toDomainOrNull(): AccountContext? {
@@ -63,6 +64,7 @@ internal fun ProviderAccountDto.toDomainOrNull(authEmail: String): ProviderSnaps
         active = active,
         available = available,
         pendingLocationMode = pendingMode,
+        providerKind = com.trustarx.pitgo.core.account.ProviderKind.parse(providerKind),
     )
 }
 

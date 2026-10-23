@@ -100,12 +100,6 @@ class ProviderIncomingRequestViewModel(
             else -> return
         }
         val appointment = snapshot.appointment ?: return
-        if (snapshot.dispatchKind == MobileDispatchKind.GUINCHO_DIRECT &&
-            pending in setOf(PendingDispatchAction.ACCEPT, PendingDispatchAction.DECLINE)) {
-            val current = _state.value as? ProviderIncomingUiState.Request ?: return
-            if (current.failure != null || current.pending != null ||
-                (appointment.responseDeadlineEpochMillis ?: 0L) <= System.currentTimeMillis() + clockOffset) return
-        }
         submit(pending) { block(appointment.id, appointment.revision) }
     }
 

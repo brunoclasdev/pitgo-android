@@ -31,6 +31,8 @@ data class GuinchoQuote(
     val providerName: String,
     val total: BigDecimal,
     val expiresAtEpochMillis: Long,
+    val durationMinutes: Int? = null,
+    val pricingRuleVersion: Long? = null,
 )
 enum class GuinchoDisputeStatus { OPEN, RESOLVED }
 enum class GuinchoDisputeResolution { COMPLETE, CANCEL_FULL_REFUND }

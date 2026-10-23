@@ -92,13 +92,21 @@ object ProviderRegistrationValidation {
             errors[ProviderField.LocationVerification] = ProviderFieldError.REQUIRED
         }
 
+        val isStore = draft.providerKind == com.trustarx.pitgo.core.account.ProviderKind.STORE
+        if (draft.providerKind == com.trustarx.pitgo.core.account.ProviderKind.GUINCHO) {
+            val v = draft.vehicle
+            if (!Regex("^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$").matches(v.plate.uppercase().filter(Char::isLetterOrDigit))) errors[ProviderField.Plate] = if (v.plate.isBlank()) ProviderFieldError.REQUIRED else ProviderFieldError.INVALID_PLATE
+            requiredOrLength(v.make.trim(), 100, ProviderField.Make, errors)
+            requiredOrLength(v.model.trim(), 100, ProviderField.VehicleModel, errors)
+            requiredOrLength(v.color.trim(), 60, ProviderField.Color, errors)
+        }
         val availableById = availableServices.associateBy(CatalogService::id)
-        if (draft.locationMode == ProviderLocationMode.FIXED && draft.primaryCategoryId == null) {
+        if (!isStore && draft.locationMode == ProviderLocationMode.FIXED && draft.primaryCategoryId == null) {
             errors[ProviderField.PrimaryCategory] = ProviderFieldError.REQUIRED
         }
-        if (draft.offers.isEmpty()) errors[ProviderField.Offers] = ProviderFieldError.REQUIRED
+        if (!isStore && draft.offers.isEmpty()) errors[ProviderField.Offers] = ProviderFieldError.REQUIRED
         val seenServices = mutableSetOf<String>()
-        val normalizedOffers = draft.offers.mapNotNull { offer ->
+        val normalizedOffers = (if (isStore) emptyList() else draft.offers).mapNotNull { offer ->
             val categoryField = ProviderField.Offer(offer.localId, OfferField.CATEGORY)
             val serviceField = ProviderField.Offer(offer.localId, OfferField.SERVICE)
             val priceField = ProviderField.Offer(offer.localId, OfferField.PRICE)
@@ -119,16 +127,17 @@ object ProviderRegistrationValidation {
                     errors[serviceField] = ProviderFieldError.DUPLICATE_SERVICE
             }
 
-            val price = if (offer.isFree) BigDecimal.ZERO else parsePrice(offer.priceInput)
-            if (!offer.isFree) {
+            val centralPricing = draft.providerKind != null
+            val price = if (centralPricing) BigDecimal.ZERO else if (offer.isFree) BigDecimal.ZERO else parsePrice(offer.priceInput)
+            if (!centralPricing && !offer.isFree) {
                 when {
                     offer.priceInput.isBlank() -> errors[priceField] = ProviderFieldError.REQUIRED
                     price == null -> errors[priceField] = ProviderFieldError.INVALID_PRICE
                     price <= BigDecimal.ZERO -> errors[priceField] = ProviderFieldError.PRICE_MUST_BE_POSITIVE
                 }
             }
-            val duration = offer.durationInput.toIntOrNull()
-            when {
+            val duration = if (centralPricing) 60 else offer.durationInput.toIntOrNull()
+            if (!centralPricing) when {
                 offer.durationInput.isBlank() -> errors[durationField] = ProviderFieldError.REQUIRED
                 duration == null -> errors[durationField] = ProviderFieldError.INVALID_DURATION
                 duration !in 1..10080 -> errors[durationField] = ProviderFieldError.INVALID_DURATION
@@ -155,6 +164,8 @@ object ProviderRegistrationValidation {
 
         return ProviderValidationResult(
             registration = ProviderRegistration(
+                providerKind = draft.providerKind,
+                vehicle = draft.vehicle.takeIf { draft.providerKind == com.trustarx.pitgo.core.account.ProviderKind.GUINCHO },
                 locationMode = requireNotNull(draft.locationMode),
                 company = CompanyRegistration(
                     name = normalizedName,
@@ -188,6 +199,9 @@ object ProviderRegistrationValidation {
     ): ProviderFieldError? = validate(draft, availableServices, addressVerification).errors[field]
 
     fun maximumLength(field: ProviderField): Int? = when (field) {
+        ProviderField.Plate -> 7
+        ProviderField.Make, ProviderField.VehicleModel -> 100
+        ProviderField.Color -> 60
         ProviderField.Name -> 150
         ProviderField.Description -> 2_000
         ProviderField.Email -> 254

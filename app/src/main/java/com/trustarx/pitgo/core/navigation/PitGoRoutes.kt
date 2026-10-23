@@ -8,7 +8,10 @@ object PitGoRoutes {
     const val Login = "login"
     const val SignUp = "sign-up"
     const val SignUpPattern = SignUp
+    const val ProviderKindSelection = "provider-kind-selection"
+    const val ProviderKindArg = "providerKind"
     const val ProviderSignUp = "provider-sign-up"
+    const val ProviderSignUpPattern = "$ProviderSignUp?$ProviderKindArg={$ProviderKindArg}"
     const val ProviderDashboard = "provider-dashboard"
     const val ProviderMigration = "provider-migration"
     const val AppointmentIdArg = "appointmentId"
@@ -42,6 +45,7 @@ object PitGoRoutes {
             "&$PaymentAppointmentIdArg={$PaymentAppointmentIdArg}&$PaymentQuoteVersionArg={$PaymentQuoteVersionArg}&$PaymentAmountArg={$PaymentAmountArg}"
     const val ProviderRequest = "provider-request/{$AppointmentIdArg}"
     const val Home = "home"
+    const val StoreCatalog = "store-catalog"
     const val GuinchoMap = "guincho-map"
     const val GuinchoHistory = "guincho-history"
     const val ServiceRating = "service-rating/{$AppointmentIdArg}"

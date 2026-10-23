@@ -39,12 +39,17 @@ data class OfferDraft(
     val isFree: Boolean = false,
 )
 
+@kotlinx.serialization.Serializable
+data class ProviderVehicle(val plate: String = "", val make: String = "", val model: String = "", val color: String = "")
+
 data class ProviderRegistrationDraft(
     val primaryCategoryId: String? = null,
     val locationMode: ProviderLocationMode? = null,
     val company: CompanyDraft = CompanyDraft(),
     val address: AddressDraft = AddressDraft(),
     val offers: List<OfferDraft> = listOf(OfferDraft(localId = 0L)),
+    val providerKind: com.trustarx.pitgo.core.account.ProviderKind? = null,
+    val vehicle: ProviderVehicle = ProviderVehicle(),
 )
 
 data class CompanyRegistration(
@@ -80,6 +85,8 @@ data class ProviderRegistration(
     val company: CompanyRegistration,
     val address: AddressRegistration,
     val offers: List<OfferRegistration>,
+    val providerKind: com.trustarx.pitgo.core.account.ProviderKind? = null,
+    val vehicle: ProviderVehicle? = null,
 )
 
 enum class ProviderLocationMode { FIXED, MOBILE, PITTEC }
@@ -138,6 +145,10 @@ sealed interface ProviderField {
     data object PrimaryCategory : ProviderField
     data object LocationMode : ProviderField
     data object LocationVerification : ProviderField
+    data object Plate : ProviderField
+    data object Make : ProviderField
+    data object VehicleModel : ProviderField
+    data object Color : ProviderField
     data object Name : ProviderField
     data object Description : ProviderField
     data object Email : ProviderField
@@ -159,6 +170,7 @@ sealed interface ProviderField {
 enum class ProviderFieldError {
     REQUIRED,
     INVALID_EMAIL,
+    INVALID_PLATE,
     INVALID_PHONE,
     INVALID_CNPJ,
     INVALID_POSTAL_CODE,
@@ -259,6 +271,7 @@ sealed interface ProviderRegistrationResult {
     data class AlreadyRegistered(val summary: ProviderSummary) : ProviderRegistrationResult
     data object EmailUnavailable : ProviderRegistrationResult
     data object CnpjUnavailable : ProviderRegistrationResult
+    data object DuplicatePlate : ProviderRegistrationResult
     data object DuplicateService : ProviderRegistrationResult
     data class Failure(val reason: ProviderFailure) : ProviderRegistrationResult
 }

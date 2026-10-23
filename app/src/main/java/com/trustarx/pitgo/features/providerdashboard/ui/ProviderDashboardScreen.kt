@@ -281,20 +281,6 @@ private fun ProviderDashboardScreen(
                                 )
                             }
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Small)) {
-                            Button(
-                                onClick = { onModeChanged(ProviderLocationMode.FIXED) },
-                                enabled = !state.updating,
-                            ) { Text(stringResource(R.string.provider_mode_fixed)) }
-                            Button(
-                                onClick = { onModeChanged(ProviderLocationMode.MOBILE) },
-                                enabled = !state.updating,
-                            ) { Text(stringResource(R.string.provider_mode_mobile)) }
-                            Button(
-                                onClick = { onModeChanged(ProviderLocationMode.PITTEC) },
-                                enabled = !state.updating,
-                            ) { Text(stringResource(R.string.provider_mode_pittec)) }
-                        }
                         Text(
                             when (state.tracking) {
                                 com.trustarx.pitgo.features.providertracking.model.ProviderTrackingState.Stopped -> stringResource(R.string.tracking_stopped)

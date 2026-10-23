@@ -41,9 +41,11 @@ internal data class GuinchoQuoteDto(
     @SerialName("customer_total_amount") val total: JsonElement,
     val currency: String,
     @SerialName("expires_at") val expiresAt: String,
+    @SerialName("duration_minutes") val durationMinutes: Int? = null,
+    @SerialName("pricing_rule_version") val pricingRuleVersion: Long? = null,
 ) {
     fun domain() = GuinchoQuote(id, version, providerId, providerName,
-        BigDecimal(total.jsonPrimitive.content), parseSupabaseInstant(expiresAt).toEpochMilli()).also {
+        BigDecimal(total.jsonPrimitive.content), parseSupabaseInstant(expiresAt).toEpochMilli(), durationMinutes, pricingRuleVersion).also {
         java.util.UUID.fromString(id)
         java.util.UUID.fromString(providerId)
         require(version > 0 && currency == "BRL" && it.total.signum() > 0 && providerName.isNotBlank())

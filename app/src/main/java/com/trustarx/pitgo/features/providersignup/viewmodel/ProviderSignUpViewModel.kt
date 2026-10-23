@@ -15,8 +15,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class ProviderSignUpViewModel(private val repository: ProviderSignUpRepository) : ViewModel() {
-    private val _state = MutableStateFlow(ProviderSignUpUiState())
+class ProviderSignUpViewModel(private val repository: ProviderSignUpRepository, kind: com.trustarx.pitgo.core.account.ProviderKind) : ViewModel() {
+    private val _state = MutableStateFlow(ProviderSignUpUiState(providerKind = kind))
     val state: StateFlow<ProviderSignUpUiState> = _state.asStateFlow()
 
     fun onEmailChanged(value: String) = edit { it.copy(email = value, emailError = null) }
@@ -36,7 +36,7 @@ class ProviderSignUpViewModel(private val repository: ProviderSignUpRepository) 
         }
         _state.value = validated.copy(submission = ProviderSignUpSubmission.Submitting)
         viewModelScope.launch {
-            _state.value = when (val result = repository.create(credentials)) {
+            _state.value = when (val result = repository.create(credentials, validated.providerKind)) {
                 ProviderSignUpResult.Success -> validated.copy(
                     password = "",
                     passwordConfirmation = "",
@@ -58,11 +58,11 @@ class ProviderSignUpViewModel(private val repository: ProviderSignUpRepository) 
     }
 
     companion object {
-        fun factory(repository: ProviderSignUpRepository): ViewModelProvider.Factory =
+        fun factory(repository: ProviderSignUpRepository, kind: com.trustarx.pitgo.core.account.ProviderKind = com.trustarx.pitgo.core.account.ProviderKind.PITTEC): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    ProviderSignUpViewModel(repository) as T
+                    ProviderSignUpViewModel(repository, kind) as T
             }
     }
 }

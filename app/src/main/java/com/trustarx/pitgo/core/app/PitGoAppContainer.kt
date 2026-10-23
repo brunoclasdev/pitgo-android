@@ -65,6 +65,7 @@ class PitGoAppContainer(context: Context) {
     val guinchoInspectionRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoInspectionRepository(supabase, guinchoInspectionFiles)
     val guinchoRouteRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoRouteRepository(supabase, guinchoInspectionFiles)
     val guinchoRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoRepository(supabase)
+    val storeRepository = com.trustarx.pitgo.features.store.repository.StoreRepository(supabase)
     val serviceRatingRepository = com.trustarx.pitgo.features.rating.repository.ServiceRatingRepository(supabase)
     val providerDashboardRepository = ProviderDashboardRepository(supabase)
     val mobileDispatchRepository = MobileDispatchRepository(supabase)

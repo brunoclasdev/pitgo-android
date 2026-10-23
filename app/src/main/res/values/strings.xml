@@ -939,4 +939,14 @@
     <string name="rating_received_empty">Você ainda não recebeu avaliações.</string>
     <string name="rating_without_comment">Sem comentário.</string>
     <string name="rating_more_comments">Carregar mais avaliações</string>
+    <string name="provider_vehicle_section">Veículo de atendimento</string>
+    <string name="provider_vehicle_plate">Placa</string>
+    <string name="provider_vehicle_make">Marca</string>
+    <string name="provider_vehicle_model">Modelo</string>
+    <string name="provider_vehicle_color">Cor</string>
+    <string name="provider_vehicle_plate_unavailable">Esta placa já está cadastrada.</string>
+    <string name="provider_central_pricing_hint">Os valores e a duração do atendimento são definidos pela PitGo.</string>
+    <string name="service_duration_minutes">Duração prevista: %1$d min</string>
+    <string name="service_pricing_unavailable">Tarifa indisponível no momento. Tente novamente mais tarde.</string>
+    <string name="provider_vehicle_plate_invalid">Informe uma placa válida, como ABC1234 ou ABC1D23.</string>
 </resources>

@@ -15,12 +15,12 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 class ProviderSignUpRepository(private val client: SupabaseClient) {
-    suspend fun create(credentials: ProviderCredentials): ProviderSignUpResult = try {
+    suspend fun create(credentials: ProviderCredentials, kind: com.trustarx.pitgo.core.account.ProviderKind): ProviderSignUpResult = try {
         client.auth.awaitInitialization()
         client.auth.signUpWith(Email) {
             email = credentials.email
             password = credentials.password
-            data = buildJsonObject { put("account_type", "PROVIDER") }
+            data = buildJsonObject { put("account_type", "PROVIDER"); put("provider_kind", kind.name) }
         }
         val current = client.auth.currentUserOrNull()
         if (current?.email.equals(credentials.email, ignoreCase = true)) {

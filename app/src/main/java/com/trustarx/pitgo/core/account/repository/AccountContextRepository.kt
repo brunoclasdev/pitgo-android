@@ -9,6 +9,8 @@ import com.trustarx.pitgo.core.account.model.ProviderAccountState
 import com.trustarx.pitgo.core.account.model.ProviderOnboardingSession
 import com.trustarx.pitgo.core.account.model.ProviderSnapshot
 import com.trustarx.pitgo.core.auth.model.ProfileBlockedReason
+import io.github.jan.supabase.auth.auth
+import kotlinx.serialization.json.jsonPrimitive
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.exceptions.HttpRequestException
 import io.github.jan.supabase.postgrest.exception.PostgrestRestException
@@ -65,7 +67,8 @@ class AccountContextRepository(
             }
             AccountType.PROVIDER -> when (context.providerState) {
                 ProviderAccountState.ONBOARDING -> AccountContextLoadResult.ProviderOnboarding(
-                    ProviderOnboardingSession(userId, authEmail),
+                    ProviderOnboardingSession(userId, authEmail, com.trustarx.pitgo.core.account.ProviderKind.parse(
+                        client.auth.currentUserOrNull()?.userMetadata?.get("provider_kind")?.jsonPrimitive?.content)),
                 )
                 ProviderAccountState.READY -> loadProvider(userId, authEmail)
                 ProviderAccountState.INCOMPLETE, null -> AccountContextLoadResult.Blocked(

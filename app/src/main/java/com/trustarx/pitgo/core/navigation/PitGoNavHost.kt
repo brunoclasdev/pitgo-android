@@ -1,5 +1,7 @@
 package com.trustarx.pitgo.core.navigation
 
+import androidx.compose.runtime.saveable.rememberSaveable
+
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.createSavedStateHandle
 
@@ -146,7 +148,21 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
     val currentRoute = currentBackStackEntry?.destination?.route
     val guinchoAccount = (sessionState as? AppSessionState.Authenticated.ProviderReady)?.account
         ?.takeIf { it.locationMode == ProviderLocationMode.MOBILE }
-    val guinchoOwner = remember(guinchoAccount?.providerId) { GuinchoSessionViewModelOwner() }
+    // Latches the provider id across transient session re-emissions (e.g. a realtime
+    // reconnect blip that briefly re-verifies the session) so guinchoOwner — and the
+    // ViewModel inside it, with any in-flight accept()/decline() RPC — only gets torn down
+    // on a real identity change (switch provider/logout), not a momentary null read.
+    var guinchoProviderId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(sessionState) {
+        when {
+            guinchoAccount != null -> guinchoProviderId = guinchoAccount.providerId
+            sessionState is AppSessionState.Unauthenticated -> guinchoProviderId = null
+            sessionState is AppSessionState.Authenticated && sessionState !is AppSessionState.Authenticated.ProviderReady ->
+                guinchoProviderId = null
+            sessionState is AppSessionState.Authenticated.ProviderReady -> guinchoProviderId = null
+        }
+    }
+    val guinchoOwner = remember(guinchoProviderId) { GuinchoSessionViewModelOwner() }
     DisposableEffect(guinchoOwner) { onDispose { guinchoOwner.viewModelStore.clear() } }
     val guinchoIncoming = guinchoAccount?.let { account ->
         viewModel<ProviderIncomingRequestViewModel>(viewModelStoreOwner = guinchoOwner,
@@ -239,6 +255,7 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
     val usesAppSurface = currentRoute in setOf(
         PitGoRoutes.SessionGate,
         PitGoRoutes.Home,
+        PitGoRoutes.StoreCatalog,
         PitGoRoutes.Garage,
         PitGoRoutes.Login,
         PitGoRoutes.Profile,
@@ -250,6 +267,8 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
         PitGoRoutes.RequestServicePattern,
         PitGoRoutes.SignUpPattern,
         PitGoRoutes.ProviderSignUp,
+        PitGoRoutes.ProviderSignUpPattern,
+        PitGoRoutes.ProviderKindSelection,
         PitGoRoutes.ProviderRegistration,
         PitGoRoutes.ProviderDashboard,
         PitGoRoutes.ProviderRatings,
@@ -302,6 +321,8 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
             PitGoRoutes.Login,
             PitGoRoutes.SignUpPattern,
             PitGoRoutes.ProviderSignUp,
+            PitGoRoutes.ProviderSignUpPattern,
+            PitGoRoutes.ProviderKindSelection,
         )
         when (val state = sessionState) {
             is AppSessionState.Unauthenticated -> if (!publicRoute) {
@@ -505,7 +526,7 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
             val navigateToProviderSignUp = dropUnlessResumed {
                 if (!navigationPending) {
                     navigationPending = true
-                    navController.navigate(PitGoRoutes.ProviderSignUp) {
+                    navController.navigate(PitGoRoutes.ProviderKindSelection) {
                         launchSingleTop = true
                     }
                 }
@@ -541,9 +562,18 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
             )
         }
 
-        composable(PitGoRoutes.ProviderSignUp) {
+        composable(PitGoRoutes.ProviderKindSelection) {
+            com.trustarx.pitgo.features.providersignup.ui.ProviderKindSelectionScreen(
+                onBack = { navController.popBackStack() },
+                onSelected = { kind -> navController.navigate("${PitGoRoutes.ProviderSignUp}?${PitGoRoutes.ProviderKindArg}=${kind.name}") },
+            )
+        }
+        composable(PitGoRoutes.ProviderSignUpPattern,
+            arguments = listOf(navArgument(PitGoRoutes.ProviderKindArg) { type = NavType.StringType; defaultValue = "PITTEC" })) { entry ->
+            val kind = com.trustarx.pitgo.core.account.ProviderKind.parse(entry.arguments?.getString(PitGoRoutes.ProviderKindArg))
+                ?: com.trustarx.pitgo.core.account.ProviderKind.PITTEC
             val providerSignUpViewModel: ProviderSignUpViewModel = viewModel(
-                factory = ProviderSignUpViewModel.factory(container.providerSignUpRepository),
+                factory = ProviderSignUpViewModel.factory(container.providerSignUpRepository, kind),
             )
             ProviderSignUpRoute(
                 viewModel = providerSignUpViewModel,
@@ -619,6 +649,13 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
             }
         }
 
+        composable(PitGoRoutes.StoreCatalog) {
+            if (sessionState is AppSessionState.Authenticated.Client) {
+                val storeViewModel: com.trustarx.pitgo.features.store.viewmodel.StoreViewModel = viewModel(
+                    factory = com.trustarx.pitgo.features.store.viewmodel.StoreViewModel.factory(container.storeRepository))
+                com.trustarx.pitgo.features.store.ui.StoreCatalogScreen(storeViewModel) { navController.popBackStack() }
+            }
+        }
         composable(PitGoRoutes.Home) {
             val account = (sessionState as? AppSessionState.Authenticated.Client)?.account
             if (account != null) {
@@ -660,6 +697,7 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
                 }
                 HomeRoute(
                     viewModel = homeViewModel,
+                    onOpenStores = { navController.navigate(PitGoRoutes.StoreCatalog) { launchSingleTop = true } },
                     onResumePayment = { payment -> navController.navigate(PitGoRoutes.resumePayment(payment)) { launchSingleTop = true } },
                     onServiceClick = { service ->
                         selectedService = service
@@ -817,10 +855,17 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
 
         composable(PitGoRoutes.ProviderRegistration) {
             val account = (sessionState as? AppSessionState.Authenticated.ProviderOnboarding)?.session
-            if (account != null) {
+            var onboardingKind by rememberSaveable(account?.userId) { mutableStateOf(account?.providerKind?.name) }
+            var onboardingGeneration by rememberSaveable(account?.userId) { mutableStateOf(0) }
+            if (account != null && onboardingKind == null) {
+                com.trustarx.pitgo.features.providersignup.ui.ProviderKindSelectionScreen(
+                    onBack = sessionViewModel::logout, onSelected = { onboardingKind = it.name; onboardingGeneration++ })
+            }
+            if (account != null && onboardingKind != null) {
                 val providerViewModel: ProviderRegistrationViewModel = viewModel(
+                    key = "provider-registration:${account.userId}:$onboardingGeneration:$onboardingKind",
                     factory = ProviderRegistrationViewModel.factory(
-                        account = account,
+                        account = account.copy(providerKind = com.trustarx.pitgo.core.account.ProviderKind.parse(onboardingKind)),
                         repository = container.providerRegistrationRepository,
                         addressVerificationRepository = container.providerAddressVerificationRepository,
                         viaCepAddressLookupRepository = container.viaCepAddressLookupRepository,
@@ -829,11 +874,7 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
                 )
                 ProviderRegistrationRoute(
                     viewModel = providerViewModel,
-                    onBack = {
-                        if (!navController.popBackStack()) {
-                            navController.navigateRoot(PitGoRoutes.Welcome)
-                        }
-                    },
+                    onBack = { onboardingKind = null },
                     onLogout = sessionViewModel::logout,
                     onFinished = {
                         sessionViewModel.refresh()
@@ -857,9 +898,11 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
                         container.providerIncomingRequestNotifier,
                     ),
                 )
-                if (account.locationMode == ProviderLocationMode.PITTEC) {
-                    // Real data end to end (offer/accept/decline/tracking); only the price shown
-                    // on this new layout is a fixed placeholder — PitTec has no real price.
+                if (account.providerKind == com.trustarx.pitgo.core.account.ProviderKind.STORE) {
+                    val storeViewModel: com.trustarx.pitgo.features.store.viewmodel.StoreViewModel = viewModel(
+                        factory = com.trustarx.pitgo.features.store.viewmodel.StoreViewModel.factory(container.storeRepository, account.providerId))
+                    com.trustarx.pitgo.features.store.ui.StoreProductManagementScreen(storeViewModel, sessionViewModel::logout)
+                } else if (account.locationMode == ProviderLocationMode.PITTEC) {
                     val pitTecHomeViewModel: PitTecProviderViewModel = viewModel(
                         factory = PitTecProviderViewModel.factory(container.deviceLocationRepository),
                     )

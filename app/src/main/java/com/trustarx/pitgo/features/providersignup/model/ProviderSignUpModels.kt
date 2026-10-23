@@ -8,6 +8,7 @@ data class ProviderSignUpUiState(
     val passwordError: ProviderSignUpFieldError? = null,
     val confirmationError: ProviderSignUpFieldError? = null,
     val submission: ProviderSignUpSubmission = ProviderSignUpSubmission.Editing,
+    val providerKind: com.trustarx.pitgo.core.account.ProviderKind = com.trustarx.pitgo.core.account.ProviderKind.PITTEC,
 ) {
     val isProcessing get() = submission == ProviderSignUpSubmission.Submitting
     val hasDraft get() = email.isNotBlank() || password.isNotBlank() || passwordConfirmation.isNotBlank()

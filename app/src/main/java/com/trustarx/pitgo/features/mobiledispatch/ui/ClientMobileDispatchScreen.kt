@@ -233,13 +233,7 @@ private fun DispatchContent(
                         onViewportIdle = {}, onFeatureClick = {}, onSurfaceState = {},
                         modifier = Modifier.fillMaxSize(),
                     )
-                }
-            }
-            item {
-                Card(Modifier.fillMaxWidth()) { Column(
-                    Modifier.padding(PitGoSpacing.Large),
-                    verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
-                ) {
+                com.trustarx.pitgo.core.ui.AddressEntryMapCard(Modifier.align(Alignment.BottomCenter).padding(12.dp).heightIn(max = 140.dp)) {
                     Text(candidate.providerName, style = MaterialTheme.typography.titleLarge)
                     Text(candidate.locality)
                     JourneyRouteSummary(journey)
@@ -249,7 +243,8 @@ private fun DispatchContent(
                         style = MaterialTheme.typography.titleMedium,
                     )
                     state.remainingSeconds?.let { Text(stringResource(R.string.mobile_dispatch_seconds, it)) }
-                } }
+                }
+                }
             }
             item { Button(
                 onClick = onRequest, enabled = state.pending == null && state.snapshot.status == MobileDispatchStatus.OPTION_FOUND,
