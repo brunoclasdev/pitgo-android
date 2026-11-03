@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.res.stringResource
@@ -41,18 +42,19 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context=LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     androidx.lifecycle.compose.LifecycleStartEffect(viewModel) {
         viewModel.startDiscoveryUpdates()
         onStopOrDispose { viewModel.stopDiscoveryUpdates() }
     }
     LaunchedEffect(state.checkout?.searchId) { state.checkout?.let(onContract) }
     LaunchedEffect(state.failure) { if(state.failure==com.trustarx.pitgo.features.guincho.model.GuinchoFailure.SESSION_EXPIRED) onSessionExpired() }
-    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { viewModel.loadVehicles() }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { viewModel.onResume() }
     val permission=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         if(result.values.any { it }) viewModel.locate() else viewModel.locationDenied()
     }
-    LaunchedEffect(viewModel) {
-        if(state.stage==GuinchoMapStage.PICKUP && state.pickup==null) {
+    LaunchedEffect(viewModel, state.restoring) {
+        if(!state.restorationFailed && !state.restoring && state.stage==GuinchoMapStage.PICKUP && state.pickup==null) {
             if(ContextCompat.checkSelfPermission(context,Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED)
                 viewModel.locate()
             else permission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION))
@@ -76,7 +78,10 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
     Scaffold(topBar={ TopAppBar(title={ Text(stringResource(R.string.guincho_title)) },
         navigationIcon={ TextButton(onClick=onBack) { Text(stringResource(R.string.guincho_back)) } }) }) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding).imePadding()) {
-            val cardHeight = maxHeight * 0.45f
+            val enteringDestination = state.stage == GuinchoMapStage.DESTINATION
+            val cardHeight = (if (keyboardVisible && enteringDestination) maxHeight - 24.dp
+                else if (enteringDestination) maxHeight * 0.72f
+                else maxHeight * 0.45f).coerceAtLeast(0.dp)
             Box(Modifier.fillMaxSize()) {
                 MapLibreMapHost(PitGoManagedMapStyle.configuration,MapRenderModel(journeyMarkers, journey.polyline),state.viewport,
                     rememberJourneyCamera(state.camera, journey.polyline,
@@ -87,10 +92,20 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
                     if(ContextCompat.checkSelfPermission(context,Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED)
                         viewModel.locate()
                     else permission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION))
-                },modifier=Modifier.align(Alignment.TopEnd)) { Text(stringResource(R.string.guincho_my_location)) }
+                },modifier=Modifier.align(Alignment.BottomEnd)) { Text(stringResource(R.string.guincho_my_location)) }
             }
             com.trustarx.pitgo.core.ui.AddressEntryMapCard(
-                Modifier.align(Alignment.BottomCenter).padding(12.dp).heightIn(max = cardHeight)) {
+                Modifier.align(Alignment.TopCenter).padding(12.dp).widthIn(max = 600.dp).heightIn(max = cardHeight),
+                containerColor = androidx.compose.ui.graphics.Color.White) {
+                if(state.restoring) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text(stringResource(R.string.guincho_restoring_request))
+                }
+                if(state.restorationFailed) {
+                    Text(stringResource(R.string.guincho_resume_failed))
+                    TextButton(onClick=viewModel::resumeSearch) { Text(stringResource(R.string.guincho_refresh)) }
+                }
+                if(state.restoredNotice) Text(stringResource(R.string.guincho_declined_search_resumed))
                 if(state.operation!=GuinchoMapOperation.IDLE) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (state.pickup != null && state.destination != null && addressConfirmed) {
                     Text(stringResource(R.string.journey_transport))
@@ -101,6 +116,8 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
                     JourneyRouteSummary(pickupJourney, stale = !state.online)
                 }
                 if(state.failure!=null) Text(stringResource(when(state.failure) {
+                    com.trustarx.pitgo.features.guincho.model.GuinchoFailure.VEHICLE_CATEGORY_REQUIRED -> R.string.vehicle_category_required
+                    com.trustarx.pitgo.features.guincho.model.GuinchoFailure.INCOMPATIBLE_VEHICLE -> R.string.guincho_incompatible
                     com.trustarx.pitgo.features.guincho.model.GuinchoFailure.PRICING_UNAVAILABLE -> R.string.service_pricing_unavailable
                     com.trustarx.pitgo.features.guincho.model.GuinchoFailure.ROUTE_UNAVAILABLE -> R.string.guincho_route_failure
                     com.trustarx.pitgo.features.guincho.model.GuinchoFailure.QUOTE_EXPIRED,
@@ -121,8 +138,8 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
                         }
                     }
                     GuinchoMapStage.DESTINATION -> {
-                        Text(stringResource(R.string.guincho_pickup_label,state.pickupAddress))
-                        Text(stringResource(R.string.guincho_destination_instruction))
+                        Text(stringResource(R.string.guincho_pickup_label,state.pickupAddress), maxLines = if(keyboardVisible) 2 else Int.MAX_VALUE)
+                        if (!keyboardVisible) Text(stringResource(R.string.guincho_destination_instruction))
                         OutlinedTextField(value=state.destinationAddress,onValueChange=viewModel::address,
                             label={ Text(stringResource(R.string.guincho_destination_address)) },modifier=Modifier.fillMaxWidth(),
                             singleLine=true,keyboardOptions=KeyboardOptions(imeAction=ImeAction.Search),
@@ -161,6 +178,7 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
                             FilterChip(selected=state.vehicleId==vehicle.id,onClick={ viewModel.vehicle(vehicle.id) },
                                 label={ Text(vehicle.displayName) })
                         }
+                        TextButton(onClick=onGarage) { Text(stringResource(R.string.vehicle_transport_category_label)) }
                         if(state.vehicles.isEmpty()) TextButton(onClick=onGarage) { Text(stringResource(R.string.guincho_add_vehicle)) }
                         Button(onClick=viewModel::confirmTrip,enabled=state.operation==GuinchoMapOperation.IDLE && state.vehicleId!=null,
                             modifier=Modifier.fillMaxWidth()) { Text(stringResource(R.string.guincho_find)) }
@@ -181,6 +199,7 @@ fun GuinchoMapRoute(viewModel: GuinchoMapViewModel, onBack: () -> Unit,
                         Row {
                             TextButton(onClick=viewModel::refresh,enabled=state.operation==GuinchoMapOperation.IDLE) { Text(stringResource(R.string.guincho_refresh)) }
                             TextButton(onClick=viewModel::editTrip) { Text(stringResource(R.string.guincho_edit)) }
+                            TextButton(onClick=viewModel::cancelSearch,enabled=state.operation==GuinchoMapOperation.IDLE) { Text("Cancelar") }
                         }
                     }
                 }

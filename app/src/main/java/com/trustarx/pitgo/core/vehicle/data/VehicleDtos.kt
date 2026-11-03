@@ -26,6 +26,7 @@ internal data class VehicleDto(
     val active: Boolean,
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String,
+    @SerialName("transport_category_id") val transportCategoryId: String? = null,
 )
 
 @Serializable
@@ -44,6 +45,7 @@ internal data class CreateVehicleRpcParams(
     @SerialName("p_engine") val engine: String?,
     @SerialName("p_mileage") val mileage: Int?,
     @SerialName("p_make_primary") val makePrimary: Boolean,
+    @SerialName("p_transport_category_id") val transportCategoryId: String? = null,
 )
 
 @Serializable
@@ -71,6 +73,7 @@ internal fun VehicleDto.toDomain() = Vehicle(
     active = active,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    transportCategoryId = transportCategoryId,
 )
 
 internal fun VehicleDraft.toRpcParams() = CreateVehicleRpcParams(
@@ -88,4 +91,5 @@ internal fun VehicleDraft.toRpcParams() = CreateVehicleRpcParams(
     engine = engine,
     mileage = mileage,
     makePrimary = makePrimary,
+    transportCategoryId = transportCategoryId,
 )

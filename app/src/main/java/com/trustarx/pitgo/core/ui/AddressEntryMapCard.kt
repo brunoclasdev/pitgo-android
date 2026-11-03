@@ -12,9 +12,13 @@ import androidx.compose.ui.unit.dp
 import com.trustarx.pitgo.core.design.theme.PitGoSpacing
 
 @Composable
-fun AddressEntryMapCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+fun AddressEntryMapCard(modifier: Modifier = Modifier,
+    containerColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surface,
+    content: @Composable ColumnScope.() -> Unit) {
     Surface(modifier = modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp, shadowElevation = 4.dp,
+        color = containerColor,
+        contentColor = if(containerColor == androidx.compose.ui.graphics.Color.White) androidx.compose.ui.graphics.Color(0xFF202124) else MaterialTheme.colorScheme.onSurface,
+        tonalElevation = 0.dp, shadowElevation = 4.dp,
         border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(PitGoSpacing.Medium),
             verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small), content = content)

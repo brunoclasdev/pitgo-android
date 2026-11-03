@@ -55,6 +55,7 @@ fun ProviderDashboardRoute(
     viewModel: ProviderDashboardViewModel,
     onLogout: () -> Unit,
     onOpenGuinchoHistory: () -> Unit,
+    onEditRegistration: () -> Unit,
     onOpenIncomingRequest: (String) -> Unit = {},
     ratingsContent: @Composable () -> Unit = {},
 ) {
@@ -96,6 +97,7 @@ fun ProviderDashboardRoute(
         state, onLogout,
         ratingsContent = ratingsContent,
         onOpenGuinchoHistory = onOpenGuinchoHistory,
+        onEditRegistration = onEditRegistration,
         onAvailabilityChanged = { available ->
             val content = state as? ProviderDashboardUiState.Content
             val mode = content?.provider?.locationMode
@@ -146,6 +148,7 @@ private fun ProviderDashboardScreen(
     state: ProviderDashboardUiState,
     onLogout: () -> Unit,
     onOpenGuinchoHistory: () -> Unit,
+    onEditRegistration: () -> Unit,
     onAvailabilityChanged: (Boolean) -> Unit,
     onModeChanged: (ProviderLocationMode) -> Unit,
     onOpenIncomingRequest: (String) -> Unit,
@@ -165,6 +168,7 @@ private fun ProviderDashboardScreen(
                 stringResource(R.string.provider_dashboard_title),
                 style = MaterialTheme.typography.headlineMedium,
             )
+            androidx.compose.material3.OutlinedButton(onClick=onEditRegistration,modifier=Modifier.fillMaxWidth()) { Text(stringResource(R.string.registration_edit_title)) }
             androidx.compose.material3.OutlinedButton(onClick = onOpenGuinchoHistory) {
                 Text(stringResource(R.string.guincho_history))
             }

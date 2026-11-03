@@ -20,6 +20,7 @@ data class Vehicle(
     val active: Boolean,
     val createdAt: String,
     val updatedAt: String,
+    val transportCategoryId: String? = null,
 ) {
     val displayName: String
         get() = listOfNotNull(brand, model, version).joinToString(" ")
@@ -40,6 +41,7 @@ data class VehicleDraft(
     val engine: String?,
     val mileage: Int?,
     val makePrimary: Boolean,
+    val transportCategoryId: String? = null,
 )
 
 enum class VehicleFormOrigin {

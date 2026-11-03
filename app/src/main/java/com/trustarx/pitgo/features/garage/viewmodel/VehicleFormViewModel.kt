@@ -38,6 +38,8 @@ sealed interface VehicleFormOperation {
 
 data class VehicleFormUiState(
     val origin: VehicleFormOrigin,
+    val transportCatalog: com.trustarx.pitgo.core.vehicle.model.TransportCatalogState = com.trustarx.pitgo.core.vehicle.model.TransportCatalogState.Loading,
+    val transportCategoryId: String? = null,
     val brand: String = "",
     val model: String = "",
     val version: String = "",
@@ -89,6 +91,7 @@ class VehicleFormViewModel(
             }
         }
         loadVehicleCount()
+        retryTransportCatalog()
     }
 
     fun onFieldChanged(field: VehicleField, value: String) {
@@ -116,6 +119,14 @@ class VehicleFormViewModel(
         )
     }
 
+    fun retryTransportCatalog() { viewModelScope.launch {
+        _uiState.update { it.copy(transportCatalog=com.trustarx.pitgo.core.vehicle.model.TransportCatalogState.Loading) }
+        val catalog=vehicleRepository.transportCatalog.load()
+        _uiState.update { it.copy(transportCatalog=catalog) }
+    } }
+    fun selectTransportCategory(id: String) { _uiState.update {
+        if (it.isProcessing) it else it.copy(transportCategoryId=id)
+    } }
     fun submit() {
         val current = _uiState.value
         if (current.isProcessing || current.operation is VehicleFormOperation.Success ||
@@ -143,7 +154,7 @@ class VehicleFormViewModel(
         _uiState.update { it.copy(errors = emptyMap(), operation = VehicleFormOperation.Submitting) }
         submitJob = viewModelScope.launch {
             try {
-                when (val result = vehicleRepository.createVehicle(userId, draft)) {
+                when (val result = vehicleRepository.createVehicle(userId, draft.copy(transportCategoryId=current.transportCategoryId))) {
                     is VehicleMutationResult.Success -> applySuccess(userId, result.vehicle)
                     is VehicleMutationResult.FieldFailure -> applyFieldFailure(userId, result)
                     is VehicleMutationResult.Failure -> if (isExpectedClient(userId)) {
@@ -160,6 +171,7 @@ class VehicleFormViewModel(
         _uiState.value = VehicleFormUiState(
             origin = origin,
             existingVehicleCount = _uiState.value.existingVehicleCount,
+            transportCatalog = _uiState.value.transportCatalog,
             operation = VehicleFormOperation.Editing,
         )
     }

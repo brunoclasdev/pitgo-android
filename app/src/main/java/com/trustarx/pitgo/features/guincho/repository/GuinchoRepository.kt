@@ -15,6 +15,10 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.*
 
 class GuinchoRepository(private val client: SupabaseClient) {
+    suspend fun cancelSearch() = call { client.postgrest.rpc("cancel_my_guincho_search"); Unit }
+    suspend fun resumeSearch(): GuinchoResult<GuinchoSearchResume> = call {
+        client.postgrest.rpc("get_my_guincho_search_resume").decodeAs<GuinchoSearchResumeDto>().domain()
+    }
     suspend fun reserve(quote: GuinchoQuote,operationId: String) = call {
         requireNotNull(client.postgrest.rpc("create_guincho_request_before_payment",buildJsonObject {
             put("p_quote_id",quote.id); put("p_operation_id",operationId)
@@ -65,6 +69,8 @@ class GuinchoRepository(private val client: SupabaseClient) {
         val code = runCatching { error.response.body<JsonObject>()["code"]?.jsonPrimitive?.content }.getOrNull()
         val reason = when {
             error.statusCode == 401 -> GuinchoFailure.SESSION_EXPIRED
+            code == "VEHICLE_CATEGORY_REQUIRED" || error.message?.contains("VEHICLE_CATEGORY_REQUIRED")==true -> GuinchoFailure.VEHICLE_CATEGORY_REQUIRED
+            code in setOf("INCOMPATIBLE_VEHICLE","GUINCHO_SIZE_REQUIRED","PROVIDER_EXCLUDED") || listOf("INCOMPATIBLE_VEHICLE","GUINCHO_SIZE_REQUIRED","PROVIDER_EXCLUDED").any { error.message?.contains(it)==true } -> GuinchoFailure.INCOMPATIBLE_VEHICLE
             code == "ROUTE_UNAVAILABLE" || error.message?.contains("ROUTE_UNAVAILABLE") == true -> GuinchoFailure.ROUTE_UNAVAILABLE
             code == "PROVIDER_UNAVAILABLE" || error.message?.contains("PROVIDER_UNAVAILABLE") == true -> GuinchoFailure.PROVIDER_UNAVAILABLE
             code == "QUOTE_EXPIRED" || error.message?.contains("QUOTE_EXPIRED") == true -> GuinchoFailure.QUOTE_EXPIRED

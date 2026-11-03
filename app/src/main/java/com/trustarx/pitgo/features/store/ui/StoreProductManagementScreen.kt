@@ -22,7 +22,7 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StoreProductManagementScreen(viewModel: StoreViewModel, onLogout: () -> Unit) {
+fun StoreProductManagementScreen(viewModel: StoreViewModel, onLogout: () -> Unit, onEditRegistration: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -51,7 +51,7 @@ fun StoreProductManagementScreen(viewModel: StoreViewModel, onLogout: () -> Unit
     androidx.activity.compose.BackHandler(enabled = state.draft != null) { viewModel.cancelEdit() }
     Scaffold(topBar = { TopAppBar(title = { Text(if (state.draft == null) "Minha loja" else "Produto") },
         navigationIcon = { if (state.draft != null) TextButton(onClick = viewModel::cancelEdit, enabled = enabled) { Text("Voltar") } },
-        actions = { if (state.draft == null) TextButton(onClick = onLogout) { Text("Sair") } }) }) { padding ->
+        actions = { if(state.draft==null) TextButton(onClick=onEditRegistration) { Text(androidx.compose.ui.res.stringResource(com.trustarx.pitgo.R.string.registration_edit_title)) }; if (state.draft == null) TextButton(onClick = onLogout) { Text("Sair") } }) }) { padding ->
         val draft = state.draft
         if (draft == null) Column(Modifier.fillMaxSize().padding(padding)) {
             Button(onClick = { viewModel.edit() }, enabled = enabled, modifier = Modifier.padding(horizontal = PitGoSpacing.Medium).fillMaxWidth()) { Text("Cadastrar produto") }

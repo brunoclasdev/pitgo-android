@@ -69,6 +69,7 @@ data class MobileAppointment(
     val responseDeadlineEpochMillis: Long?,
     val revision: Long,
     val cancelledBy: String?,
+    val cancellationReason: String? = null,
     val quoteVersion: Long = 1,
     val clientConfirmationDeadlineEpochMillis: Long? = null,
     val clientConfirmedAtEpochMillis: Long? = null,

@@ -37,7 +37,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.util.Locale
 
-class ProviderRegistrationRepository(private val client: SupabaseClient) {
+class ProviderRegistrationRepository(private val client: SupabaseClient,
+    val transportCatalog: com.trustarx.pitgo.core.vehicle.repository.TransportCatalogRepository = com.trustarx.pitgo.core.vehicle.repository.TransportCatalogRepository(client)) {
     suspend fun loadEntry(userId: String): ProviderEntryResult = try {
         val provider = loadProvider(userId)
         if (provider != null) {

@@ -41,7 +41,7 @@ import com.trustarx.pitgo.features.providertracking.model.ProviderTrackingState
 
 @Composable
 fun GuinchoProviderHomeRoute(home: GuinchoProviderHomeViewModel, dashboard: ProviderDashboardViewModel,
-    onHistory: () -> Unit, incomingContent: @Composable () -> Unit = {}, profile: @Composable () -> Unit) {
+    onHistory: () -> Unit, onEditRegistration: () -> Unit, incomingContent: @Composable () -> Unit = {}, profile: @Composable () -> Unit) {
     val state by home.state.collectAsStateWithLifecycle()
     val account by dashboard.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -60,6 +60,8 @@ fun GuinchoProviderHomeRoute(home: GuinchoProviderHomeViewModel, dashboard: Prov
         } else { home.start(false); if (enableAvailability) dashboard.onPrecisePermissionDenied() }
         enableAvailability = false
     }
+    val fleet by dashboard.fleet.collectAsStateWithLifecycle()
+    LifecycleStartEffect(dashboard) { dashboard.loadFleet(); onStopOrDispose {} }
     Scaffold(
         bottomBar = {
             PitGoBottomNavigation(
@@ -103,6 +105,35 @@ fun GuinchoProviderHomeRoute(home: GuinchoProviderHomeViewModel, dashboard: Prov
                 MapLibreMapHost(PitGoManagedMapStyle.configuration, MapRenderModel(markers), state.viewport,
                     state.camera, state.styleRevision, true, controller, home::viewport, {}, home::surface,
                     modifier = Modifier.fillMaxSize(), onUserGesture = home::gesture)
+            Card(Modifier.align(Alignment.TopCenter).padding(12.dp).widthIn(max=600.dp).fillMaxWidth(),
+                colors=CardDefaults.cardColors(containerColor=androidx.compose.ui.graphics.Color.White,
+                    contentColor=androidx.compose.ui.graphics.Color(0xFF202124)),
+                elevation=CardDefaults.cardElevation(defaultElevation=4.dp),
+                border=androidx.compose.foundation.BorderStroke(1.5.dp,MaterialTheme.colorScheme.primary)) {
+                Column(Modifier.fillMaxWidth().heightIn(max=260.dp).verticalScroll(rememberScrollState()).padding(12.dp)) {
+                val content = account as? ProviderDashboardUiState.Content
+                val availabilityLabel = stringResource(R.string.provider_dashboard_available)
+                if (content != null) {
+                    Text(content.provider.name, Modifier.fillMaxWidth(), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(when {
+                        !content.provider.available -> R.string.provider_dashboard_available_off
+                        content.tracking is ProviderTrackingState.Publishing -> R.string.provider_dashboard_available_on
+                        else -> R.string.guincho_home_sharing_pending
+                    }), Modifier.weight(1f))
+                    Switch(modifier = Modifier.semantics { contentDescription = availabilityLabel }, checked = content.provider.available, enabled = !content.updating, onCheckedChange = { available ->
+                        if (available) { enableAvailability = true; permission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)) }
+                        else dashboard.setAvailability(false)
+                    })
+                    }
+                }
+                if (content?.availabilityIssue != null) Text(stringResource(R.string.guincho_home_availability_issue), color = MaterialTheme.colorScheme.error)
+                if(!fleet.busy && !fleet.hasClassifiedDispatchVehicle) {
+                    Text(stringResource(R.string.guincho_complete_vehicle))
+                    TextButton(onClick=onEditRegistration) { Text(stringResource(R.string.registration_edit_title)) }
+                }
+                }
+            }
             }
             incomingContent()
             Column(Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -126,23 +157,7 @@ fun GuinchoProviderHomeRoute(home: GuinchoProviderHomeViewModel, dashboard: Prov
                     Text(stringResource(R.string.guincho_map_failure))
                     TextButton(onClick = home::retryMap) { Text(stringResource(R.string.guincho_refresh)) }
                 }
-                val content = account as? ProviderDashboardUiState.Content
-                val availabilityLabel = stringResource(R.string.provider_dashboard_available)
-                if (content != null) {
-                    Text(content.provider.name, Modifier.fillMaxWidth(), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(when {
-                        !content.provider.available -> R.string.provider_dashboard_available_off
-                        content.tracking is ProviderTrackingState.Publishing -> R.string.provider_dashboard_available_on
-                        else -> R.string.guincho_home_sharing_pending
-                    }), Modifier.weight(1f))
-                    Switch(modifier = Modifier.semantics { contentDescription = availabilityLabel }, checked = content.provider.available, enabled = !content.updating, onCheckedChange = { available ->
-                        if (available) { enableAvailability = true; permission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)) }
-                        else dashboard.setAvailability(false)
-                    })
-                    }
-                }
-                if (content?.availabilityIssue != null) Text(stringResource(R.string.guincho_home_availability_issue), color = MaterialTheme.colorScheme.error)
+
             }
         }
     }

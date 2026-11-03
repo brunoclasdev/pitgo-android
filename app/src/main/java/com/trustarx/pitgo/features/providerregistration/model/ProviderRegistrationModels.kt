@@ -40,7 +40,7 @@ data class OfferDraft(
 )
 
 @kotlinx.serialization.Serializable
-data class ProviderVehicle(val plate: String = "", val make: String = "", val model: String = "", val color: String = "")
+data class ProviderVehicle(val plate: String = "", val make: String = "", val model: String = "", val color: String = "", @kotlinx.serialization.SerialName("guincho_size_id") val guinchoSizeId: String? = null)
 
 data class ProviderRegistrationDraft(
     val primaryCategoryId: String? = null,
@@ -145,6 +145,7 @@ sealed interface ProviderField {
     data object PrimaryCategory : ProviderField
     data object LocationMode : ProviderField
     data object LocationVerification : ProviderField
+    data object GuinchoSize : ProviderField
     data object Plate : ProviderField
     data object Make : ProviderField
     data object VehicleModel : ProviderField
@@ -219,6 +220,7 @@ sealed interface ProviderSubmissionState {
 data class ProviderEditingContent(
     val draft: ProviderRegistrationDraft,
     val baselineDraft: ProviderRegistrationDraft,
+    val transportCatalog: com.trustarx.pitgo.core.vehicle.model.TransportCatalogState = com.trustarx.pitgo.core.vehicle.model.TransportCatalogState.Loading,
     val categories: LoadState<List<ServiceCategory>> = LoadState.Loading,
     val servicesByCategory: Map<String, LoadState<List<CatalogService>>> = emptyMap(),
     val postalCodeLookup: PostalCodeLookupState = PostalCodeLookupState.Idle,

@@ -52,15 +52,20 @@ data class GuinchoMapState(
     val locationUnavailable: Boolean = false,
     val surface: MapSurfaceState = MapSurfaceState(),
     val online: Boolean = true,
+    val restoring: Boolean = true,
+    val restorationFailed: Boolean = false,
+    val restoredNotice: Boolean = false,
+    val restoredDestination: String? = null,
     val checkout: com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchSnapshot? = null,
 ) {
     val fullDestinationAddress: String get() {
+        restoredDestination?.let { return it }
         val address = destinationAddress.split(',', limit = 2)
         return listOf(address.first().trim(), destinationNumber.trim(), address.getOrNull(1).orEmpty().trim())
             .filter { it.isNotEmpty() }.joinToString(", ")
     }
     val canConfirmDestination: Boolean get() = destination != null && !searchingAddress &&
-        destinationAddress.isNotBlank() && destinationNumber.isNotBlank() && fullDestinationAddress.length <= 500
+        destinationAddress.isNotBlank() && (destinationNumber.isNotBlank() || restoredDestination!=null) && fullDestinationAddress.length <= 500
     val markers get() = providers.map { MapMarkerSpec(it.id, it.coordinate, MapMarkerKind.MOBILE_PROVIDER,
         selected = selected?.id == it.id, accessibilityLabel = it.name) }
 }
@@ -76,6 +81,7 @@ class GuinchoMapViewModel(
 ) : ViewModel() {
     private val mutable = MutableStateFlow(GuinchoMapState())
     val state = mutable.asStateFlow()
+    private var resumeRequired=true
     private var work: Job? = null
     private var locationJob: Job? = null
     private var discoveryJob: Job? = null
@@ -99,7 +105,7 @@ class GuinchoMapViewModel(
                         else {
                             val selected = result.value.firstOrNull { it.id == latest.selected?.id }
                             latest.copy(providers = result.value, selected = selected,
-                                quote = if (selected == null) null else latest.quote)
+                                quote = if (selected == null || selected.dispatchVehicleId!=latest.selected?.dispatchVehicleId || selected.sizeId!=latest.selected?.sizeId) null else latest.quote)
                         }
                     }
                     is GuinchoResult.Failure -> if (result.reason == GuinchoFailure.SESSION_EXPIRED)
@@ -110,10 +116,13 @@ class GuinchoMapViewModel(
     }
     fun stopDiscoveryUpdates() { discoveryJob?.cancel(); discoveryJob = null }
     init {
+        resumeSearch()
         loadVehicles()
         viewModelScope.launch { connectivity.state.collect { value -> mutable.update {
             it.copy(online=value==com.trustarx.pitgo.core.network.ConnectivityState.ONLINE)
-        } } }
+        }
+            if(value==com.trustarx.pitgo.core.network.ConnectivityState.ONLINE && resumeRequired && work?.isActive!=true) resumeSearch()
+        } }
     }
     fun contract() {
         val current=mutable.value
@@ -132,16 +141,55 @@ class GuinchoMapViewModel(
             }
         }
     }
+    fun resumeSearch() {
+        if (work?.isActive == true) return
+        mutable.update { it.copy(restoring=true,restorationFailed=false) }
+        work = viewModelScope.launch {
+            when (val result = repository.resumeSearch()) {
+                is GuinchoResult.Failure -> mutable.update { it.copy(restoring=false,restorationFailed=true,failure=result.reason) }
+                is GuinchoResult.Success -> {
+                    resumeRequired=false
+                    when(val resumed=result.value) {
+                    GuinchoSearchResume.None -> mutable.update { it.copy(restoring=false) }
+                    is GuinchoSearchResume.Active -> mutable.update { it.copy(restoring=false, checkout=resumed.snapshot) }
+                    is GuinchoSearchResume.Search -> {
+                        cancelAddressSearch(); locationJob?.cancel()
+                        savedState.remove<String>("contract_quote_id"); savedState.remove<String>("contract_operation_id")
+                        val camera = discoveryOverview(resumed.trip.pickup)
+                        mutable.update { it.copy(restoring=false,restoredNotice=resumed.rejectedAppointmentId!=null,
+                            restoredDestination=resumed.trip.destinationAddress,
+                            vehicleId=resumed.trip.vehicleId,pickup=resumed.trip.pickup,pickupAddress=resumed.trip.pickupAddress,
+                            destination=resumed.trip.destination,destinationAddress=resumed.trip.destinationAddress,destinationNumber="",
+                            draft=resumed.draft,stage=GuinchoMapStage.DISCOVERY,checkout=null,selected=null,quote=null,
+                            viewport=camera.viewport,camera=camera,failure=null) }
+                        discover(resumed.draft)
+                    }
+                    }
+                }
+            }
+        }
+    }
+    fun onResume() {
+        loadVehicles()
+        if (resumeRequired && work?.isActive!=true) resumeSearch()
+    }
     fun loadVehicles() { viewModelScope.launch {
         when (val result = vehicles.listActiveVehicles(userId)) {
-            is VehicleListResult.Success -> mutable.update { it.copy(vehicles=result.vehicles,
-                vehicleId=it.vehicleId ?: result.vehicles.firstOrNull()?.id, failure=null) }
+            is VehicleListResult.Success -> {
+                val previous=mutable.value
+                val changed=previous.vehicles.any { it.id==previous.vehicleId } && previous.vehicles.firstOrNull { it.id==previous.vehicleId }?.transportCategoryId !=
+                    result.vehicles.firstOrNull { it.id==previous.vehicleId }?.transportCategoryId
+                mutable.update { it.copy(vehicles=result.vehicles,
+                    vehicleId=it.vehicleId ?: result.vehicles.firstOrNull()?.id,
+                    selected=if(changed) null else it.selected,quote=if(changed) null else it.quote) }
+                if(changed && previous.stage==GuinchoMapStage.DISCOVERY && !previous.restoring && previous.checkout==null) refresh()
+            }
             is VehicleListResult.Failure -> mutable.update { it.copy(failure=GuinchoFailure.SERVICE_UNAVAILABLE) }
         }
     } }
     fun locationDenied() { mutable.update { it.copy(locationUnavailable=true) } }
     fun locate() {
-        if (locationJob?.isActive == true || mutable.value.operation != GuinchoMapOperation.IDLE) return
+        if (resumeRequired || mutable.value.restoring || locationJob?.isActive == true || mutable.value.operation != GuinchoMapOperation.IDLE) return
         val selectingPickup = mutable.value.stage == GuinchoMapStage.PICKUP
         val selectingDestination = mutable.value.stage == GuinchoMapStage.DESTINATION
         if (selectingPickup || selectingDestination) mutable.update { it.copy(operation=GuinchoMapOperation.LOCATING) }
@@ -192,7 +240,7 @@ class GuinchoMapViewModel(
         cancelAddressSearch()
         selectedDestinationSuggestion = null
         val revision = addressRevision
-        mutable.update { it.copy(destination=null,destinationAddress="",searchingAddress=true,
+        mutable.update { it.copy(destination=null,destinationAddress="",restoredDestination=null,searchingAddress=true,
             addressSuggestions=emptyList(),addressSearchFailure=false,addressSearchCompleted=false,destinationNumberNotFound=false) }
         addressJob = viewModelScope.launch {
             val label = addresses.destinationAddress(coordinate)
@@ -208,7 +256,7 @@ class GuinchoMapViewModel(
         selectedDestinationSuggestion = null
         val query = value.take(200)
         val revision = addressRevision
-        mutable.update { it.copy(destinationAddress=query,destination=null,addressSuggestions=emptyList(),
+        mutable.update { it.copy(destinationAddress=query,restoredDestination=null,destination=null,addressSuggestions=emptyList(),
             searchingAddress=query.trim().length>=3,addressSearchCompleted=false,addressSearchFailure=false,
             destinationNumberNotFound=false,failure=null) }
         if (query.trim().length < 3) return
@@ -231,17 +279,22 @@ class GuinchoMapViewModel(
         cancelAddressSearch()
         destinationMapGesture = false
         selectedDestinationSuggestion = suggestion
-        mutable.update { it.copy(destination=suggestion.coordinate,destinationAddress=suggestion.label,
+        mutable.update { it.copy(destination=suggestion.coordinate,destinationAddress=suggestion.label,restoredDestination=null,
             addressSuggestions=emptyList(),
             searchingAddress=false,addressSearchCompleted=false,addressSearchFailure=false,destinationNumberNotFound=false,failure=null) }
     }
     fun number(value: String) {
         if (mutable.value.stage != GuinchoMapStage.DESTINATION) return
         if (mutable.value.operation == GuinchoMapOperation.RESOLVING_ADDRESS) cancelAddressSearch()
-        mutable.update { it.copy(destinationNumber=value.filterNot(Char::isISOControl).take(20),
+        mutable.update { it.copy(restoredDestination=null,destinationNumber=value.filterNot(Char::isISOControl).take(20),
             destinationNumberNotFound=false,addressSearchFailure=false,failure=null) }
     }
-    fun vehicle(id: String) { if(mutable.value.stage!=GuinchoMapStage.DISCOVERY) mutable.update { it.copy(vehicleId=id) } }
+    fun vehicle(id: String) {
+        if(mutable.value.operation==GuinchoMapOperation.RESERVING || mutable.value.checkout!=null) return
+        work?.cancel()
+        mutable.update { it.copy(vehicleId=id,selected=null,quote=null,providers=emptyList(),
+            stage=if(it.stage==GuinchoMapStage.DISCOVERY) GuinchoMapStage.CONFIRM else it.stage) }
+    }
     fun confirmPoint() {
         val current=mutable.value
         if(current.operation!=GuinchoMapOperation.IDLE || current.stage !in setOf(GuinchoMapStage.PICKUP,GuinchoMapStage.DESTINATION)) return
@@ -316,6 +369,29 @@ class GuinchoMapViewModel(
             ),
         )
     }
+    fun cancelSearch() {
+        val current = mutable.value
+        if(current.operation != GuinchoMapOperation.IDLE || current.checkout != null) return
+        work?.cancel()
+        cancelAddressSearch()
+        locationJob?.cancel()
+        mutable.update { it.copy(operation=GuinchoMapOperation.SAVING) }
+        work=viewModelScope.launch {
+            when(val result=repository.cancelSearch()) {
+                is GuinchoResult.Failure -> failed(result.reason)
+                is GuinchoResult.Success -> {
+                    savedState.remove<String>("contract_quote_id")
+                    savedState.remove<String>("contract_operation_id")
+                    selectedDestinationSuggestion=null
+                    destinationMapGesture=false
+                    resumeRequired=false
+                    mutable.value=GuinchoMapState(vehicles=current.vehicles,vehicleId=current.vehicleId,
+                        online=current.online,surface=current.surface,restoring=false)
+                    locate()
+                }
+            }
+        }
+    }
     fun editTrip() {
         if(mutable.value.operation==GuinchoMapOperation.RESERVING) return
         work?.cancel()
@@ -331,10 +407,13 @@ class GuinchoMapViewModel(
     }
     fun confirmTrip() {
         val current=mutable.value
+        if(current.vehicles.firstOrNull { it.id==current.vehicleId }?.transportCategoryId==null) {
+            mutable.update { it.copy(failure=GuinchoFailure.VEHICLE_CATEGORY_REQUIRED) }; return
+        }
         val input=GuinchoTripInput(current.vehicleId.orEmpty(),current.pickupAddress,
             current.pickup ?: current.viewport.center,current.fullDestinationAddress,
             current.destination ?: current.viewport.center)
-        if(!input.isValid() || current.pickup==null || current.destination==null || current.destinationNumber.isBlank()) {
+        if(!input.isValid() || current.pickup==null || current.destination==null || (current.destinationNumber.isBlank() && current.restoredDestination==null)) {
             mutable.update { it.copy(failure=GuinchoFailure.INVALID_INPUT) }; return
         }
         work?.cancel()
@@ -385,7 +464,7 @@ class GuinchoMapViewModel(
             }
         }
     }
-    private fun failed(reason: GuinchoFailure) { mutable.update { it.copy(failure=reason,operation=GuinchoMapOperation.IDLE,quote=if(reason in setOf(GuinchoFailure.QUOTE_EXPIRED,GuinchoFailure.QUOTE_CONFLICT,GuinchoFailure.PROVIDER_UNAVAILABLE)) null else it.quote) } }
+    private fun failed(reason: GuinchoFailure) { mutable.update { it.copy(failure=reason,operation=GuinchoMapOperation.IDLE,quote=if(reason in setOf(GuinchoFailure.QUOTE_EXPIRED,GuinchoFailure.QUOTE_CONFLICT,GuinchoFailure.PROVIDER_UNAVAILABLE,GuinchoFailure.INCOMPATIBLE_VEHICLE,GuinchoFailure.VEHICLE_CATEGORY_REQUIRED)) null else it.quote) } }
     companion object {
         fun factory(userId: String, repository: GuinchoRepository, vehicles: VehicleRepository,
             location: DeviceLocationRepository, addresses: com.trustarx.pitgo.features.guincho.repository.GuinchoAddressRepository, connectivity: com.trustarx.pitgo.core.network.ConnectivityObserver): ViewModelProvider.Factory = object: ViewModelProvider.Factory {

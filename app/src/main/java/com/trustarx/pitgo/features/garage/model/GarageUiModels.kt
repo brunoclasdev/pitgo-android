@@ -10,6 +10,8 @@ sealed interface GarageUiState {
     data class Content(
         val vehicles: List<Vehicle>,
         val changingPrimaryVehicleId: String? = null,
+        val transportCatalog: com.trustarx.pitgo.core.vehicle.model.TransportCatalogState = com.trustarx.pitgo.core.vehicle.model.TransportCatalogState.Loading,
+        val categoryUpdateFailed: Boolean = false,
     ) : GarageUiState
     data class Failure(val reason: GarageFailureReason) : GarageUiState
 }

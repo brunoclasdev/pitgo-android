@@ -60,7 +60,7 @@ Deno.serve(async req => {
       p_distance_meters: distance,
     });
     if (storeError) {
-      const codes = ['QUOTE_CONFLICT', 'PROVIDER_UNAVAILABLE', 'PRICING_UNAVAILABLE', 'ROUTE_UNAVAILABLE'];
+      const codes = ['QUOTE_CONFLICT', 'PROVIDER_UNAVAILABLE', 'PRICING_UNAVAILABLE', 'ROUTE_UNAVAILABLE', 'INCOMPATIBLE_VEHICLE', 'VEHICLE_CATEGORY_REQUIRED', 'GUINCHO_SIZE_REQUIRED', 'PROVIDER_EXCLUDED'];
       const code = codes.includes(storeError.message) ? storeError.message : 'SERVICE_UNAVAILABLE';
       return json(code === 'SERVICE_UNAVAILABLE' ? 503 : 409, { code });
     }

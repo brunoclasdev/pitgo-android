@@ -166,6 +166,7 @@ internal data class MobileAppointmentDto(
     @SerialName("response_deadline") val responseDeadline: String? = null,
     val revision: Long,
     @SerialName("cancelled_by") val cancelledBy: String? = null,
+    @SerialName("cancellation_reason") val cancellationReason: String? = null,
     @SerialName("quote_version") val quoteVersion: Long = 1,
     @SerialName("client_confirmation_deadline") val clientConfirmationDeadline: String? = null,
     @SerialName("client_confirmed_at") val clientConfirmedAt: String? = null,
@@ -185,6 +186,7 @@ internal data class MobileAppointmentDto(
         responseDeadlineEpochMillis = responseDeadline?.let { parseSupabaseInstant(it).toEpochMilli() },
         revision = revision,
         cancelledBy = cancelledBy,
+        cancellationReason = cancellationReason,
         quoteVersion = quoteVersion,
         clientConfirmationDeadlineEpochMillis = clientConfirmationDeadline
             ?.let { parseSupabaseInstant(it).toEpochMilli() },

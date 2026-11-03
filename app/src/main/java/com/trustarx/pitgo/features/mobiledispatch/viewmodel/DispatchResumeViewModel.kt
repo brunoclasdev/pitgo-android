@@ -18,16 +18,32 @@ import kotlinx.coroutines.launch
 
 sealed interface DispatchResumeState {
     data object Loading : DispatchResumeState
+    data class Search(val ownerId: String, val contextId: String, val rejectedAppointmentId: String) : DispatchResumeState
     data object None : DispatchResumeState
     data class Active(val ownerId: String, val snapshot: MobileDispatchSnapshot) : DispatchResumeState
 }
 
 class DispatchResumeViewModel(
-    sessionRepository: SessionRepository,
+    private val sessionRepository: SessionRepository,
     private val repository: MobileDispatchRepository,
+    private val guincho: com.trustarx.pitgo.features.guincho.repository.GuinchoRepository,
 ) : ViewModel() {
     private val _state = MutableStateFlow<DispatchResumeState>(DispatchResumeState.Loading)
     val state = _state.asStateFlow()
+    private val handledResumes = mutableSetOf<String>()
+    fun consumeSearch(search: DispatchResumeState.Search) {
+        handledResumes.add(search.ownerId+":"+search.rejectedAppointmentId)
+        if(_state.value==search) _state.value=DispatchResumeState.None
+    }
+    fun requestGuinchoResume(appointmentId: String) {
+        val owner = (sessionRepository.state.value as? AppSessionState.Authenticated.Client)?.userId ?: return
+        viewModelScope.launch {
+            val result=guincho.resumeSearch() as? com.trustarx.pitgo.features.guincho.model.GuinchoResult.Success ?: return@launch
+            val search=result.value as? com.trustarx.pitgo.features.guincho.model.GuinchoSearchResume.Search ?: return@launch
+            if(search.rejectedAppointmentId==appointmentId && sessionRepository.state.value.let { (it as? AppSessionState.Authenticated.Client)?.userId }==owner && !handledResumes.contains(owner+":"+appointmentId))
+                _state.value=DispatchResumeState.Search(owner,search.contextId,appointmentId)
+        }
+    }
     init {
         viewModelScope.launch {
             sessionRepository.state.collectLatest { session ->
@@ -37,7 +53,7 @@ class DispatchResumeViewModel(
                     _state.value = DispatchResumeState.None
                     return@collectLatest
                 }
-                if (authenticated == null) { _state.value = DispatchResumeState.None; return@collectLatest }
+                if (authenticated == null) { handledResumes.clear(); _state.value = DispatchResumeState.None; return@collectLatest }
                 if ((_state.value as? DispatchResumeState.Active)?.ownerId != authenticated.userId) {
                     _state.value = DispatchResumeState.Loading
                 }
@@ -105,7 +121,16 @@ class DispatchResumeViewModel(
                 while (true) {
                     when (val result = repository.restore()) {
                         is MobileDispatchResult.Success -> _state.value = DispatchResumeState.Active(authenticated.userId, result.snapshot)
-                        MobileDispatchResult.None -> _state.value = DispatchResumeState.None
+                        MobileDispatchResult.None -> {
+                            when (val resumed = guincho.resumeSearch()) {
+                                is com.trustarx.pitgo.features.guincho.model.GuinchoResult.Success -> {
+                                    val search = resumed.value as? com.trustarx.pitgo.features.guincho.model.GuinchoSearchResume.Search
+                                    _state.value = if (search?.rejectedAppointmentId != null && !handledResumes.contains(authenticated.userId+":"+search.rejectedAppointmentId))
+                                        DispatchResumeState.Search(authenticated.userId, search.contextId,search.rejectedAppointmentId) else DispatchResumeState.None
+                                }
+                                else -> Unit
+                            }
+                        }
                         is MobileDispatchResult.Failure -> Unit
                     }
                     delay(CLIENT_POLL_INTERVAL_MS)
@@ -118,11 +143,11 @@ class DispatchResumeViewModel(
         private const val PROVIDER_RESUBSCRIBE_DELAY_MS = 3_000L
         private const val PROVIDER_POLL_INTERVAL_MS = 5_000L
 
-        fun factory(session: SessionRepository, repository: MobileDispatchRepository) =
+        fun factory(session: SessionRepository, repository: MobileDispatchRepository, guincho: com.trustarx.pitgo.features.guincho.repository.GuinchoRepository) =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    DispatchResumeViewModel(session, repository) as T
+                    DispatchResumeViewModel(session, repository, guincho) as T
             }
     }
 }

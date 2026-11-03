@@ -39,11 +39,12 @@ class GarageViewModel(
         _uiState.value = GarageUiState.Loading
         loadInProgress = true
         viewModelScope.launch {
+            val catalog = vehicleRepository.transportCatalog.load()
             _uiState.value = when (val result = vehicleRepository.listActiveVehicles(account.userId)) {
                 is VehicleListResult.Success -> if (result.vehicles.isEmpty()) {
                     GarageUiState.Empty
                 } else {
-                    GarageUiState.Content(result.vehicles)
+                    GarageUiState.Content(result.vehicles, transportCatalog=catalog)
                 }
                 is VehicleListResult.Failure -> GarageUiState.Failure(result.reason.toGarageReason())
             }
@@ -51,6 +52,17 @@ class GarageViewModel(
         }
     }
 
+    fun setTransportCategory(vehicleId: String, categoryId: String) {
+        val current=_uiState.value as? GarageUiState.Content ?: return
+        if(current.changingPrimaryVehicleId!=null) return
+        _uiState.value=current.copy(changingPrimaryVehicleId=vehicleId,categoryUpdateFailed=false)
+        viewModelScope.launch {
+            when(val result=vehicleRepository.setTransportCategory(vehicleId,categoryId)) {
+                is VehicleMutationResult.Success -> _uiState.value=current.copy(vehicles=current.vehicles.map { if(it.id==vehicleId) result.vehicle else it })
+                else -> _uiState.value=current.copy(categoryUpdateFailed=true)
+            }
+        }
+    }
     fun setPrimary(vehicleId: String) {
         val current = _uiState.value as? GarageUiState.Content ?: return
         val account = (sessionRepository.state.value as? AppSessionState.Authenticated.Client)
@@ -69,7 +81,7 @@ class GarageViewModel(
                     val updated = current.vehicles.map { vehicle ->
                         vehicle.copy(isPrimary = vehicle.id == result.vehicle.id)
                     }
-                    _uiState.value = GarageUiState.Content(updated)
+                    _uiState.value = current.copy(vehicles=updated,changingPrimaryVehicleId=null)
                 }
                 is VehicleMutationResult.FieldFailure ->
                     _uiState.value = GarageUiState.Failure(GarageFailureReason.UNKNOWN)

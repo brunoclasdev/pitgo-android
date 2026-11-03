@@ -56,6 +56,7 @@ object PitGoRoutes {
     const val VehicleOnboarding = "vehicle-onboarding"
     const val Garage = "garage"
     const val Profile = "profile"
+    const val RegistrationEdit = "registration-edit"
     const val ClientAddress = "client-address"
     const val PaymentMethods = "payment-methods"
     const val ProviderRegistration = "provider-registration"

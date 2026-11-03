@@ -97,6 +97,8 @@ fun VehicleFormRoute(
         state = state,
         onFieldChanged = viewModel::onFieldChanged,
         onMakePrimaryChanged = viewModel::onMakePrimaryChanged,
+        onTransportCategory = viewModel::selectTransportCategory,
+        onRetryTransportCatalog = viewModel::retryTransportCatalog,
         onSubmit = viewModel::submit,
         onDiscard = {
             viewModel.discardDraft()
@@ -115,6 +117,8 @@ fun VehicleFormScreen(
     onSubmit: () -> Unit,
     onDiscard: () -> Unit,
     onBack: () -> Unit,
+    onTransportCategory: (String) -> Unit,
+    onRetryTransportCatalog: () -> Unit,
 ) {
     var showDiscard by rememberSaveable { mutableStateOf(false) }
     val sessionExpired = (state.operation as? VehicleFormOperation.Failure)?.reason ==
@@ -221,16 +225,37 @@ fun VehicleFormScreen(
                             )
                         }
                     }
+                    com.trustarx.pitgo.core.vehicle.ui.TransportCatalogPicker(
+                        state.transportCatalog, state.transportCategoryId, false, !state.isProcessing,
+                        onTransportCategory, onRetryTransportCatalog)
                     VehicleFailureBanner(state.operation)
                     VehicleField.entries.forEach { field ->
-                        VehicleInput(
-                            state = state,
-                            field = field,
-                            value = state.valueOf(field),
-                            onFieldChanged = onFieldChanged,
-                            focusRequester = focusRequesters.getValue(field),
-                            bringIntoViewRequester = bringIntoViewRequesters.getValue(field),
-                        )
+                        if (field == VehicleField.BRAND) {
+                            Column(verticalArrangement = Arrangement.spacedBy(PitGoSpacing.ExtraSmall)) {
+                                com.trustarx.pitgo.core.vehicle.ui.VehicleMakePicker(
+                                    value = state.brand,
+                                    enabled = !state.isProcessing,
+                                    onSelected = { onFieldChanged(VehicleField.BRAND, it) },
+                                    focusRequester = focusRequesters.getValue(field),
+                                )
+                                state.errors[field]?.let { error ->
+                                    Text(
+                                        text = vehicleErrorText(field, error),
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                        } else {
+                            VehicleInput(
+                                state = state,
+                                field = field,
+                                value = state.valueOf(field),
+                                onFieldChanged = onFieldChanged,
+                                focusRequester = focusRequesters.getValue(field),
+                                bringIntoViewRequester = bringIntoViewRequesters.getValue(field),
+                            )
+                        }
                     }
 
                     if (state.existingVehicleCount > 0) {

@@ -56,6 +56,7 @@ fun ProfileRoute(
     account: AccountSnapshot,
     legacyProviderMigrationAvailable: Boolean,
     onMigrateProvider: () -> Unit,
+    onEditRegistration: () -> Unit,
     onOpenAddress: () -> Unit,
     onOpenGarage: () -> Unit,
     onOpenPaymentMethods: () -> Unit,
@@ -71,6 +72,7 @@ fun ProfileRoute(
         legacyProviderMigrationAvailable = legacyProviderMigrationAvailable,
         onMigrateProvider = onMigrateProvider,
         onOpenAddress = onOpenAddress,
+        onEditRegistration = onEditRegistration,
         onOpenGarage = onOpenGarage,
         onOpenPaymentMethods = onOpenPaymentMethods,
         onOpenPaymentHistory = onOpenPaymentHistory,
@@ -87,6 +89,7 @@ private fun ProfileScreen(
     profileState: ProfileUiState,
     legacyProviderMigrationAvailable: Boolean,
     onMigrateProvider: () -> Unit,
+    onEditRegistration: () -> Unit,
     onOpenAddress: () -> Unit,
     onOpenGarage: () -> Unit,
     onOpenPaymentMethods: () -> Unit,
@@ -127,6 +130,7 @@ private fun ProfileScreen(
             Text(account.profile.displayName, style = MaterialTheme.typography.titleLarge)
             Text(account.authEmail, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
+            OutlinedButton(onClick=onEditRegistration,modifier=Modifier.fillMaxWidth()) { Text(stringResource(R.string.registration_edit_title)) }
             ProfileAddressCard(profileState.address, profileState.addressLoading, onOpenAddress)
             ProfileVehicleCard(account.primaryVehicle, onOpenGarage)
             ProfilePaymentMethodsCard(onOpenPaymentMethods)

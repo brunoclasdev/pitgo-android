@@ -98,6 +98,7 @@ fun PitTecProviderDashboardRoute(
     incomingViewModel: ProviderIncomingRequestViewModel,
     onLogout: () -> Unit,
     onOpenGuinchoHistory: () -> Unit,
+    onEditRegistration: () -> Unit,
     onOpenTracking: (String) -> Unit,
 ) {
     val dashboardState by dashboardViewModel.state.collectAsStateWithLifecycle()
@@ -160,6 +161,7 @@ fun PitTecProviderDashboardRoute(
         styleController = remember { ParticipantMapStyleController() },
         onLogout = onLogout,
         onOpenGuinchoHistory = onOpenGuinchoHistory,
+        onEditRegistration = onEditRegistration,
         onGrantLocationPermission = {
             locationPermission.launch(
                 arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION),
@@ -221,6 +223,7 @@ private fun PitTecProviderDashboardScreen(
     styleController: ParticipantMapStyleController,
     onLogout: () -> Unit,
     onOpenGuinchoHistory: () -> Unit,
+    onEditRegistration: () -> Unit,
     onGrantLocationPermission: () -> Unit,
     onOpenLocationSettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
@@ -273,6 +276,7 @@ private fun PitTecProviderDashboardScreen(
                     onRequestBatteryExemption = onRequestBatteryExemption,
                     onLogout = onLogout,
         onOpenGuinchoHistory = onOpenGuinchoHistory,
+        onEditRegistration = onEditRegistration,
                 )
             }
         }
@@ -599,6 +603,7 @@ private fun ProfileTab(
     onRequestBatteryExemption: () -> Unit,
     onLogout: () -> Unit,
     onOpenGuinchoHistory: () -> Unit,
+    onEditRegistration: () -> Unit,
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PitGoSpacing.Large),
@@ -670,6 +675,7 @@ private fun ProfileTab(
                 }
             }
         }
+        OutlinedButton(onClick=onEditRegistration,modifier=Modifier.fillMaxWidth()) { Text(stringResource(R.string.registration_edit_title)) }
         OutlinedButton(onClick = onOpenGuinchoHistory, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.guincho_history))
         }

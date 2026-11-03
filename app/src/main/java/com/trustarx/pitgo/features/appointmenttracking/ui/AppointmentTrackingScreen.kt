@@ -80,6 +80,7 @@ fun AppointmentTrackingRoute(
     isClient: Boolean,
     onBack: () -> Unit,
     onFinished: () -> Unit,
+    onGuinchoDeclined: () -> Unit = onFinished,
     onSessionExpired: () -> Unit,
     onRate: (String) -> Unit = { onFinished() },
     historical: Boolean = false,
@@ -126,6 +127,11 @@ fun AppointmentTrackingRoute(
         val snapshot = state.dispatch
         if (!historical && isClient && state.isGuincho &&
             snapshot?.appointment?.status == MobileAppointmentStatus.AWAITING_PAYMENT) onNeedsPayment(snapshot)
+    }
+    LaunchedEffect(state.dispatch?.appointment?.id, state.dispatch?.appointment?.cancellationReason, historical) {
+        if (!historical && isClient && state.isGuincho &&
+            state.dispatch?.appointment?.status == MobileAppointmentStatus.CANCELLED &&
+            state.dispatch?.appointment?.cancellationReason == "PROVIDER_DECLINED") onGuinchoDeclined()
     }
     LaunchedEffect(state.data, state.dispatch?.appointment?.status) {
         if (state.data is TrackingDataState.SessionExpired) onSessionExpired()

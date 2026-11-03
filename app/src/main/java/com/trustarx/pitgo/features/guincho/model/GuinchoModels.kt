@@ -22,6 +22,9 @@ data class GuinchoProvider(
     val name: String,
     val coordinate: MapCoordinate,
     val distanceMeters: Double,
+    val dispatchVehicleId: String? = null,
+    val sizeId: String? = null,
+    val sizeName: String? = null,
     val ratingSummary: com.trustarx.pitgo.features.rating.model.ProviderRatingSummary? = null,
 )
 data class GuinchoQuote(
@@ -33,6 +36,10 @@ data class GuinchoQuote(
     val expiresAtEpochMillis: Long,
     val durationMinutes: Int? = null,
     val pricingRuleVersion: Long? = null,
+    val dispatchVehicleId: String? = null,
+    val sizeId: String? = null,
+    val sizeName: String? = null,
+    val sizePriceVersion: Long? = null,
 )
 enum class GuinchoDisputeStatus { OPEN, RESOLVED }
 enum class GuinchoDisputeResolution { COMPLETE, CANCEL_FULL_REFUND }
@@ -54,9 +61,17 @@ data class GuinchoTripSummary(
 enum class GuinchoFailure {
     INVALID_INPUT, SESSION_EXPIRED, OFFLINE, TIMEOUT, ROUTE_UNAVAILABLE,
     PROVIDER_UNAVAILABLE, QUOTE_EXPIRED, QUOTE_CONFLICT, PRICING_UNAVAILABLE,
+    VEHICLE_CATEGORY_REQUIRED, INCOMPATIBLE_VEHICLE,
     SERVICE_UNAVAILABLE, CONTRACT, UNKNOWN,
 }
 sealed interface GuinchoResult<out T> {
     data class Success<T>(val value: T) : GuinchoResult<T>
     data class Failure(val reason: GuinchoFailure) : GuinchoResult<Nothing>
+}
+
+sealed interface GuinchoSearchResume {
+    data object None : GuinchoSearchResume
+    data class Active(val snapshot: com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchSnapshot) : GuinchoSearchResume
+    data class Search(val contextId: String, val generation: Long, val draft: GuinchoDraft,
+        val trip: GuinchoTripInput, val rejectedAppointmentId: String?) : GuinchoSearchResume
 }

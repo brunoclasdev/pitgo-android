@@ -119,6 +119,7 @@ fun ProviderRegistrationRoute(
     var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
     val editing = (state as? ProviderRegistrationUiState.Editing)?.content
     val isSubmitting = editing?.submission == ProviderSubmissionState.Submitting
+    LaunchedEffect(editing != null) { if(editing != null) viewModel.retryTransportCatalog() }
 
     fun handleBack() {
         when {
@@ -151,7 +152,7 @@ fun ProviderRegistrationRoute(
         onFreeChanged = viewModel::onFreeChanged,
         onAddOffer = viewModel::addOffer,
         onRemoveOffer = viewModel::removeOffer,
-        onRetryCatalog = viewModel::retryCatalog,
+        onRetryCatalog = { categoryId -> viewModel.retryCatalog(categoryId); viewModel.retryTransportCatalog() },
         onRetryImplicitService = viewModel::retryImplicitService,
         onSubmit = viewModel::submit,
         onFinished = onFinished,
@@ -459,10 +460,21 @@ private fun RegistrationForm(
         }
         if (content.draft.providerKind == com.trustarx.pitgo.core.account.ProviderKind.GUINCHO) {
             item { SectionTitle(R.string.provider_vehicle_section) }
+            item { com.trustarx.pitgo.core.vehicle.ui.TransportCatalogPicker(
+                content.transportCatalog, content.draft.vehicle.guinchoSizeId, true, !submitting,
+                { onFieldChanged(ProviderField.GuinchoSize, it) }, { onRetryCatalog(null) })
+                if(content.errors[ProviderField.GuinchoSize]!=null) Text(stringResource(R.string.field_required),color=MaterialTheme.colorScheme.error)
+            }
             item { FormTextField(content.draft.vehicle.plate, ProviderField.Plate, R.string.provider_vehicle_plate,
                 content, submitting, focusRequesters, onFieldChanged, KeyboardOptions(capitalization = KeyboardCapitalization.Characters)) }
-            item { FormTextField(content.draft.vehicle.make, ProviderField.Make, R.string.provider_vehicle_make,
-                content, submitting, focusRequesters, onFieldChanged, KeyboardOptions(capitalization = KeyboardCapitalization.Words)) }
+            item {
+                Column {
+                    com.trustarx.pitgo.core.vehicle.ui.VehicleMakePicker(content.draft.vehicle.make, !submitting) {
+                        onFieldChanged(ProviderField.Make, it)
+                    }
+                    if(content.errors[ProviderField.Make]!=null) Text(stringResource(R.string.field_required),color=MaterialTheme.colorScheme.error)
+                }
+            }
             item { FormTextField(content.draft.vehicle.model, ProviderField.VehicleModel, R.string.provider_vehicle_model,
                 content, submitting, focusRequesters, onFieldChanged, KeyboardOptions(capitalization = KeyboardCapitalization.Words)) }
             item { FormTextField(content.draft.vehicle.color, ProviderField.Color, R.string.provider_vehicle_color,
@@ -556,6 +568,9 @@ private fun RegistrationForm(
                     },
                     enabled = !submitting && !postalCodeLoading &&
                         content.categories is LoadState.Content &&
+                        (content.draft.providerKind != com.trustarx.pitgo.core.account.ProviderKind.GUINCHO ||
+                            (content.transportCatalog as? com.trustarx.pitgo.core.vehicle.model.TransportCatalogState.Ready)
+                                ?.catalog?.sizes?.isNotEmpty() == true) &&
                         content.draft.offers.isNotEmpty(),
                     modifier = Modifier.fillMaxWidth().heightIn(min = PitGoSize.PrimaryActionMinHeight),
                 ) {
@@ -1223,10 +1238,11 @@ private fun failureMessage(failure: ProviderFailure): String = when (failure) {
 }
 
 private fun formRowIndex(field: ProviderField, content: ProviderEditingContent): Int? = (when (field) {
-    ProviderField.Plate -> 18
-    ProviderField.Make -> 19
-    ProviderField.VehicleModel -> 20
-    ProviderField.Color -> 21
+    ProviderField.GuinchoSize -> 18
+    ProviderField.Plate -> 19
+    ProviderField.Make -> 20
+    ProviderField.VehicleModel -> 21
+    ProviderField.Color -> 22
     ProviderField.LocationMode -> 2
     ProviderField.Name -> 3
     ProviderField.Description -> 4

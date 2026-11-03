@@ -1,6 +1,7 @@
 package com.trustarx.pitgo.features.garage.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,10 +19,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,14 +30,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -70,6 +74,7 @@ fun GarageRoute(
         onRetry = viewModel::refresh,
         onAddVehicle = onAddVehicle,
         onSetPrimary = viewModel::setPrimary,
+        onCategory = viewModel::setTransportCategory,
         onBottomItemClick = onBottomItemClick,
     )
 }
@@ -80,8 +85,10 @@ fun GarageScreen(
     onRetry: () -> Unit,
     onAddVehicle: () -> Unit,
     onSetPrimary: (String) -> Unit,
+    onCategory: (String, String) -> Unit,
     onBottomItemClick: (BottomItemId) -> Unit,
 ) {
+    var selectedVehicleDetails by remember { mutableStateOf<Vehicle?>(null) }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets.safeDrawing.only(
@@ -140,7 +147,7 @@ fun GarageScreen(
                 }
             }
             is GarageUiState.Content -> LazyColumn(
-                modifier = Modifier.fillMaxSize().selectableGroup(),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = PitGoSpacing.Large,
                     top = padding.calculateTopPadding() + PitGoSpacing.Medium,
@@ -175,11 +182,21 @@ fun GarageScreen(
                         vehicle = vehicle,
                         changing = state.changingPrimaryVehicleId == vehicle.id,
                         enabled = state.changingPrimaryVehicleId == null,
-                        onSelect = { onSetPrimary(vehicle.id) },
+                        onClick = {
+                            if (vehicle.isPrimary) selectedVehicleDetails = vehicle
+                            else onSetPrimary(vehicle.id)
+                        },
                     )
                 }
             }
         }
+    }
+    selectedVehicleDetails?.let { selected ->
+        val vehicle = (state as? GarageUiState.Content)?.vehicles?.firstOrNull { it.id == selected.id } ?: selected
+        val catalog = (state as? GarageUiState.Content)?.transportCatalog
+            as? com.trustarx.pitgo.core.vehicle.model.TransportCatalogState.Ready
+        val porte = catalog?.catalog?.categories?.firstOrNull { it.id == vehicle.transportCategoryId }?.name
+        VehicleDetailsDialog(vehicle, porte, catalog, { onCategory(vehicle.id, it) }, onRetry, onDismiss = { selectedVehicleDetails = null })
     }
 }
 
@@ -200,17 +217,10 @@ private fun VehicleGarageCard(
     vehicle: Vehicle,
     changing: Boolean,
     enabled: Boolean,
-    onSelect: () -> Unit,
+    onClick: () -> Unit,
 ) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .selectable(
-                selected = vehicle.isPrimary,
-                enabled = enabled,
-                role = Role.RadioButton,
-                onClick = onSelect,
-            ),
+        modifier = Modifier.fillMaxWidth(),
         border = BorderStroke(
             width = if (vehicle.isPrimary) 2.dp else 1.dp,
             color = if (vehicle.isPrimary) {
@@ -221,39 +231,92 @@ private fun VehicleGarageCard(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = PitGoElevation.Card),
     ) {
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth().padding(PitGoSpacing.Medium),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
+            verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
         ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_vehicle),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(vehicle.displayName, style = MaterialTheme.typography.titleMedium)
-                listOfNotNull(vehicle.modelYear?.toString(), vehicle.plate)
-                    .joinToString(" · ")
-                    .takeIf(String::isNotBlank)
-                    ?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                if (vehicle.isPrimary) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_vehicle_primary),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(PitGoSize.FeatureIcon),
-                        )
-                        Text(
-                            stringResource(R.string.garage_primary),
-                            color = MaterialTheme.colorScheme.primary,
-                        )
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                    .padding(vertical = PitGoSpacing.Small),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(PitGoSpacing.Medium),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_vehicle),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(vehicle.displayName, style = MaterialTheme.typography.titleMedium)
+                    listOfNotNull(vehicle.modelYear?.toString(), vehicle.plate)
+                        .joinToString(" · ")
+                        .takeIf(String::isNotBlank)
+                        ?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    if (vehicle.isPrimary) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_vehicle_primary),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(PitGoSize.FeatureIcon),
+                            )
+                            Text(
+                                stringResource(R.string.garage_primary),
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
                 }
+                if (changing) CircularProgressIndicator(modifier = Modifier.size(PitGoSize.FeatureIcon))
             }
-            if (changing) CircularProgressIndicator(modifier = Modifier.size(PitGoSize.FeatureIcon))
+
         }
+    }
+}
+
+@Composable
+private fun VehicleDetailsDialog(vehicle: Vehicle, porte: String?, catalog: com.trustarx.pitgo.core.vehicle.model.TransportCatalogState?, onCategory: (String) -> Unit, onRetry: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.vehicle_details_title)) },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(PitGoSpacing.Small),
+            ) {
+                VehicleDetailRow(R.string.vehicle_brand, vehicle.brand)
+                VehicleDetailRow(R.string.vehicle_model, vehicle.model)
+                VehicleDetailRow(R.string.vehicle_version, vehicle.version)
+                VehicleDetailRow(R.string.vehicle_manufacture_year, vehicle.manufactureYear?.toString())
+                VehicleDetailRow(R.string.vehicle_model_year, vehicle.modelYear?.toString())
+                VehicleDetailRow(R.string.vehicle_plate, vehicle.plate)
+                com.trustarx.pitgo.core.vehicle.ui.TransportCatalogPicker(
+                    catalog ?: com.trustarx.pitgo.core.vehicle.model.TransportCatalogState.Loading,
+                    (catalog as? com.trustarx.pitgo.core.vehicle.model.TransportCatalogState.Ready)?.catalog?.categories?.firstOrNull { it.name == porte }?.id ?: vehicle.transportCategoryId,
+                    false, true, onCategory, onRetry,
+                )
+                VehicleDetailRow(R.string.vehicle_renavam, vehicle.renavam)
+                VehicleDetailRow(R.string.vehicle_chassis, vehicle.chassis)
+                VehicleDetailRow(R.string.vehicle_color, vehicle.color)
+                VehicleDetailRow(R.string.vehicle_fuel, vehicle.fuelType)
+                VehicleDetailRow(R.string.vehicle_transmission, vehicle.transmission)
+                VehicleDetailRow(R.string.vehicle_engine, vehicle.engine)
+                VehicleDetailRow(R.string.vehicle_mileage, vehicle.mileage?.toString())
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.vehicle_details_close)) }
+        },
+    )
+}
+
+@Composable
+private fun VehicleDetailRow(label: Int, value: String?) {
+    Column {
+        Text(stringResource(label), style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value?.takeIf(String::isNotBlank) ?: stringResource(R.string.vehicle_detail_not_informed))
     }
 }
 

@@ -24,11 +24,17 @@ internal data class GuinchoProviderDto(
     val latitude: Double,
     val longitude: Double,
     @SerialName("distance_meters") val distanceMeters: Double,
+    @SerialName("dispatch_vehicle_id") val dispatchVehicleId: String? = null,
+    @SerialName("size_id") val sizeId: String? = null,
+    @SerialName("size_name") val sizeName: String? = null,
     @SerialName("rating_summary") val ratingSummary: com.trustarx.pitgo.features.rating.model.ProviderRatingSummary? = null,
 ) {
-    fun domain() = GuinchoProvider(id, offerId, name, MapCoordinate(latitude, longitude), distanceMeters, ratingSummary?.validate()).also {
+    fun domain() = GuinchoProvider(id, offerId, name, MapCoordinate(latitude, longitude), distanceMeters, dispatchVehicleId,sizeId,sizeName,ratingSummary?.validate()).also {
         java.util.UUID.fromString(id)
         java.util.UUID.fromString(offerId)
+        dispatchVehicleId?.let { java.util.UUID.fromString(it) }
+        sizeId?.let { java.util.UUID.fromString(it) }
+        require(sizeName==null || sizeName.isNotBlank())
         require(name.isNotBlank() && it.coordinate.isValid && distanceMeters.isFinite() && distanceMeters >= 0)
     }
 }
@@ -43,11 +49,19 @@ internal data class GuinchoQuoteDto(
     @SerialName("expires_at") val expiresAt: String,
     @SerialName("duration_minutes") val durationMinutes: Int? = null,
     @SerialName("pricing_rule_version") val pricingRuleVersion: Long? = null,
+    @SerialName("dispatch_vehicle_id") val dispatchVehicleId: String? = null,
+    @SerialName("size_id") val sizeId: String? = null,
+    @SerialName("size_name") val sizeName: String? = null,
+    @SerialName("size_price_version") val sizePriceVersion: Long? = null,
 ) {
     fun domain() = GuinchoQuote(id, version, providerId, providerName,
-        BigDecimal(total.jsonPrimitive.content), parseSupabaseInstant(expiresAt).toEpochMilli(), durationMinutes, pricingRuleVersion).also {
+        BigDecimal(total.jsonPrimitive.content), parseSupabaseInstant(expiresAt).toEpochMilli(), durationMinutes, pricingRuleVersion,dispatchVehicleId,sizeId,sizeName,sizePriceVersion).also {
         java.util.UUID.fromString(id)
         java.util.UUID.fromString(providerId)
+        dispatchVehicleId?.let { java.util.UUID.fromString(it) }
+        sizeId?.let { java.util.UUID.fromString(it) }
+        require(sizePriceVersion==null || sizePriceVersion>0)
+        require(sizeName==null || sizeName.isNotBlank())
         require(version > 0 && currency == "BRL" && it.total.signum() > 0 && providerName.isNotBlank())
     }
 }
@@ -81,4 +95,34 @@ internal data class GuinchoDisputeDto(
 ) {
     fun domain() = GuinchoDispute(id, reason, GuinchoDisputeStatus.valueOf(status),
         resolution?.let(GuinchoDisputeResolution::valueOf), justification)
+}
+
+@Serializable
+internal data class GuinchoResumeDraftDto(val id: String, val revision: Long,
+    @SerialName("vehicle_id") val vehicleId: String,
+    @SerialName("pickup_address") val pickupAddress: String,
+    @SerialName("pickup_latitude") val pickupLatitude: Double,
+    @SerialName("pickup_longitude") val pickupLongitude: Double,
+    @SerialName("destination_address") val destinationAddress: String,
+    @SerialName("destination_latitude") val destinationLatitude: Double,
+    @SerialName("destination_longitude") val destinationLongitude: Double)
+@Serializable
+internal data class GuinchoSearchResumeDto(val outcome: String,
+    @SerialName("context_id") val contextId: String? = null, val generation: Long? = null,
+    val draft: GuinchoResumeDraftDto? = null,
+    @SerialName("rejected_appointment_id") val rejectedAppointmentId: String? = null,
+    val snapshot: com.trustarx.pitgo.features.mobiledispatch.data.MobileDispatchSnapshotDto? = null) {
+    fun domain(): GuinchoSearchResume = when(outcome) {
+        "NONE" -> GuinchoSearchResume.None
+        "ACTIVE_DISPATCH" -> GuinchoSearchResume.Active(requireNotNull(snapshot?.toDomainOrNull()))
+        "RESUMABLE_SEARCH" -> {
+            val d = requireNotNull(draft)
+            val trip = GuinchoTripInput(d.vehicleId, d.pickupAddress, MapCoordinate(d.pickupLatitude,d.pickupLongitude),
+                d.destinationAddress, MapCoordinate(d.destinationLatitude,d.destinationLongitude))
+            require(trip.isValid() && d.revision > 0 && requireNotNull(generation) > 0)
+            java.util.UUID.fromString(requireNotNull(contextId))
+            GuinchoSearchResume.Search(contextId, generation, GuinchoDraft(d.id,d.revision), trip, rejectedAppointmentId)
+        }
+        else -> error("Invalid resume contract")
+    }
 }

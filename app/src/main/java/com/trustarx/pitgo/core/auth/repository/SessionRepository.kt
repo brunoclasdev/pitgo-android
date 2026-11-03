@@ -80,6 +80,13 @@ class SessionRepository(
     suspend fun retry() = bootstrapMutex.withLock { verifyAndLoad() }
     suspend fun refresh() = bootstrapMutex.withLock { verifyAndLoad() }
 
+    fun applyClientProfile(profile: com.trustarx.pitgo.core.account.model.Profile) {
+        _state.update { current ->
+            val client=current as? AppSessionState.Authenticated.Client ?: return@update current
+            val account=client.account.copy(profile=profile)
+            if(profile.id==client.userId && account.isConsistent()) client.copy(account=account) else current
+        }
+    }
     fun applyPrimaryVehicle(vehicle: Vehicle): Boolean {
         var applied = false
         _state.update { current ->

@@ -25,7 +25,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 
-class VehicleRepository(private val client: SupabaseClient) {
+class VehicleRepository(private val client: SupabaseClient, val transportCatalog: TransportCatalogRepository = TransportCatalogRepository(client)) {
     suspend fun listActiveVehicles(userId: String): VehicleListResult = try {
         val vehicles = client.from(VEHICLES).select {
             filter {
@@ -44,6 +44,15 @@ class VehicleRepository(private val client: SupabaseClient) {
     } catch (error: Throwable) {
         VehicleListResult.Failure(classifyFailure(error))
     }
+
+    suspend fun setTransportCategory(vehicleId: String, categoryId: String): VehicleMutationResult = try {
+        val value = client.postgrest.rpc("set_my_vehicle_transport_category", kotlinx.serialization.json.buildJsonObject {
+            put("p_vehicle_id", kotlinx.serialization.json.JsonPrimitive(vehicleId))
+            put("p_category_id", kotlinx.serialization.json.JsonPrimitive(categoryId))
+        }).decodeAs<VehicleDto>().toDomain()
+        VehicleMutationResult.Success(value)
+    } catch (cancel: CancellationException) { throw cancel }
+      catch (error: Throwable) { classifyMutationFailure(error) }
 
     suspend fun createVehicle(
         expectedUserId: String,

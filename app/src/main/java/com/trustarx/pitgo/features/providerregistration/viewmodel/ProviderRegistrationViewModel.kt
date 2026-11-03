@@ -79,6 +79,10 @@ class ProviderRegistrationViewModel(
         bootstrap()
     }
 
+    fun retryTransportCatalog() { viewModelScope.launch {
+        val catalog=repository.transportCatalog.load()
+        updateEditing { it.copy(transportCatalog=catalog) }
+    } }
     fun retryStartup() = bootstrap()
 
     fun onFieldChanged(field: ProviderField, value: String) {
@@ -956,6 +960,7 @@ class ProviderRegistrationViewModel(
         field: ProviderField,
         value: String,
     ): ProviderRegistrationDraft = when (field) {
+        ProviderField.GuinchoSize -> copy(vehicle = vehicle.copy(guinchoSizeId = value))
         ProviderField.Plate -> copy(vehicle = vehicle.copy(plate = value.uppercase().filter(Char::isLetterOrDigit).take(7)))
         ProviderField.Make -> copy(vehicle = vehicle.copy(make = value))
         ProviderField.VehicleModel -> copy(vehicle = vehicle.copy(model = value))

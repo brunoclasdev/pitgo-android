@@ -140,13 +140,19 @@ fun GuinchoTrackingContent(state: AppointmentTrackingUiState,viewModel: Appointm
                 }
                 if (trackable && (waitingForLocation || calculatingRoute)) {
                     GuinchoRouteLoadingFeedback(
-                        modifier = Modifier.align(Alignment.TopCenter).padding(16.dp),
+                        modifier = Modifier.align(Alignment.BottomStart).padding(16.dp),
                         waitingForLocation = waitingForLocation,
                         updating = journey.snapshot != null,
                         transporting = transporting,
                     )
                 }
-            }
+                Surface(
+                    modifier = Modifier.align(Alignment.TopCenter).padding(12.dp).widthIn(max=600.dp).fillMaxWidth(),
+                    color = androidx.compose.ui.graphics.Color.White,
+                    contentColor = androidx.compose.ui.graphics.Color(0xFF202124),
+                    shape = MaterialTheme.shapes.large,
+                    shadowElevation = 4.dp,
+                ) {
             Column(Modifier.fillMaxWidth().heightIn(max=330.dp).verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 if (trackable && state.data !is TrackingDataState.Live && state.data != TrackingDataState.Loading) {
@@ -227,6 +233,8 @@ fun GuinchoTrackingContent(state: AppointmentTrackingUiState,viewModel: Appointm
                     else -> Text(stringResource(R.string.mobile_dispatch_restoring))
                 }
                 snapshot.guinchoDispute?.justification?.let { Text(it) }
+            }
+                }
             }
         }
     }

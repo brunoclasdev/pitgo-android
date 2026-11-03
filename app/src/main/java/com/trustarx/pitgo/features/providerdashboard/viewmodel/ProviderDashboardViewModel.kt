@@ -1,5 +1,6 @@
 package com.trustarx.pitgo.features.providerdashboard.viewmodel
 
+import com.trustarx.pitgo.features.providerdashboard.model.GuinchoFleetOperation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -35,7 +36,81 @@ class ProviderDashboardViewModel(
     )
     val state: StateFlow<ProviderDashboardUiState> = _state.asStateFlow()
 
+    private val _fleet = MutableStateFlow(com.trustarx.pitgo.features.providerdashboard.model.GuinchoFleetState())
+    val fleet = _fleet.asStateFlow()
+    fun discardNewGuinchoVehicleDraft() {
+        if(!_fleet.value.busy) _fleet.value=_fleet.value.copy(newVehicle=com.trustarx.pitgo.features.providerregistration.model.ProviderVehicle())
+    }
+    fun editNewGuinchoVehicle(field: com.trustarx.pitgo.features.providerdashboard.model.GuinchoFleetField,value: String) {
+        if(_fleet.value.busy) return
+        val draft=_fleet.value.newVehicle
+        val next=when(field) {
+            com.trustarx.pitgo.features.providerdashboard.model.GuinchoFleetField.PLATE -> draft.copy(plate=value.uppercase().filter(Char::isLetterOrDigit).take(7))
+            com.trustarx.pitgo.features.providerdashboard.model.GuinchoFleetField.MAKE -> draft.copy(make=value.take(100))
+            com.trustarx.pitgo.features.providerdashboard.model.GuinchoFleetField.MODEL -> draft.copy(model=value.take(100))
+            com.trustarx.pitgo.features.providerdashboard.model.GuinchoFleetField.COLOR -> draft.copy(color=value.take(60))
+            com.trustarx.pitgo.features.providerdashboard.model.GuinchoFleetField.SIZE -> draft.copy(guinchoSizeId=value)
+        }
+        _fleet.value=_fleet.value.copy(newVehicle=next)
+    }
+    fun registerGuinchoVehicle() {
+        val draft=_fleet.value.newVehicle
+        if(_fleet.value.busy) return
+        if(!Regex("^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$").matches(draft.plate) || draft.make.isBlank() || draft.model.isBlank() || draft.color.isBlank() || draft.guinchoSizeId==null) {
+            _fleet.value=_fleet.value.copy(operation=GuinchoFleetOperation.INVALID_INPUT);return
+        }
+        _fleet.value=_fleet.value.copy(operation=GuinchoFleetOperation.SAVING)
+        viewModelScope.launch {
+            try {
+                repository.registerGuinchoVehicle(draft)
+                _fleet.value=_fleet.value.copy(vehicles=repository.guinchoVehicles(),operation=GuinchoFleetOperation.IDLE,
+                    newVehicle=com.trustarx.pitgo.features.providerregistration.model.ProviderVehicle())
+            } catch(cancel:kotlinx.coroutines.CancellationException) { throw cancel }
+              catch(_:Exception) { _fleet.value=_fleet.value.copy(operation=GuinchoFleetOperation.FAILED) }
+        }
+    }
+    fun loadFleet() {
+        if(_fleet.value.busy) return
+        val content=_state.value as? ProviderDashboardUiState.Content ?: return
+        if(content.provider.providerKind!=com.trustarx.pitgo.core.account.ProviderKind.GUINCHO) return
+        _fleet.value=_fleet.value.copy(operation=GuinchoFleetOperation.LOADING)
+        viewModelScope.launch {
+            try {
+                val catalog=repository.transportCatalog.load()
+                val vehicles=repository.guinchoVehicles()
+                _fleet.value=_fleet.value.copy(catalog=catalog,vehicles=vehicles,operation=GuinchoFleetOperation.IDLE)
+            } catch(cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+              catch(_: Exception) { _fleet.value=_fleet.value.copy(operation=GuinchoFleetOperation.FAILED) }
+        }
+    }
+    fun saveGuinchoVehicle(vehicle: com.trustarx.pitgo.features.providerdashboard.model.GuinchoFleetVehicle,
+        draft: com.trustarx.pitgo.features.providerregistration.model.ProviderVehicle) {
+        if(_fleet.value.busy) return
+        if(!Regex("^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$").matches(draft.plate) || draft.make.isBlank() || draft.model.isBlank() || draft.color.isBlank() || draft.guinchoSizeId==null) {
+            _fleet.value=_fleet.value.copy(operation=GuinchoFleetOperation.INVALID_INPUT);return
+        }
+        _fleet.value=_fleet.value.copy(operation=GuinchoFleetOperation.SAVING)
+        viewModelScope.launch {
+            try {
+                repository.updateGuinchoVehicle(vehicle,draft)
+                _fleet.value=_fleet.value.copy(vehicles=repository.guinchoVehicles(),operation=GuinchoFleetOperation.IDLE)
+            } catch(cancel:kotlinx.coroutines.CancellationException) { throw cancel }
+              catch(_:Exception) { _fleet.value=_fleet.value.copy(operation=GuinchoFleetOperation.FAILED) }
+        }
+    }
+    fun selectGuinchoVehicle(vehicle: com.trustarx.pitgo.features.providerdashboard.model.GuinchoFleetVehicle, sizeId: String) {
+        if(_fleet.value.busy) return
+        _fleet.value=_fleet.value.copy(operation=GuinchoFleetOperation.SAVING)
+        viewModelScope.launch {
+            try {
+                repository.setGuinchoVehicle(vehicle,sizeId)
+                _fleet.value=_fleet.value.copy(vehicles=repository.guinchoVehicles(),operation=GuinchoFleetOperation.IDLE)
+            } catch(cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+              catch(_: Exception) { _fleet.value=_fleet.value.copy(operation=GuinchoFleetOperation.FAILED) }
+        }
+    }
     init {
+        loadFleet()
         viewModelScope.launch {
             sessionRepository.state.collect { session ->
                 val provider = (session as? AppSessionState.Authenticated.ProviderReady)?.account

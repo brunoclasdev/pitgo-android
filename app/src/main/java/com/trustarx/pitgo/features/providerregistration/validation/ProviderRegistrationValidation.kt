@@ -95,6 +95,7 @@ object ProviderRegistrationValidation {
         val isStore = draft.providerKind == com.trustarx.pitgo.core.account.ProviderKind.STORE
         if (draft.providerKind == com.trustarx.pitgo.core.account.ProviderKind.GUINCHO) {
             val v = draft.vehicle
+            if (v.guinchoSizeId.isNullOrBlank()) errors[ProviderField.GuinchoSize] = ProviderFieldError.REQUIRED
             if (!Regex("^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$").matches(v.plate.uppercase().filter(Char::isLetterOrDigit))) errors[ProviderField.Plate] = if (v.plate.isBlank()) ProviderFieldError.REQUIRED else ProviderFieldError.INVALID_PLATE
             requiredOrLength(v.make.trim(), 100, ProviderField.Make, errors)
             requiredOrLength(v.model.trim(), 100, ProviderField.VehicleModel, errors)
