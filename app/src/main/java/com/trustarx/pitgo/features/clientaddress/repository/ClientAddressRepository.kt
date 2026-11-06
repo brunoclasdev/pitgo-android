@@ -29,7 +29,7 @@ class ClientAddressRepository(private val client: SupabaseClient) {
     }
 
     suspend fun save(address: ClientAddress): ClientAddressResult = call {
-        client.postgrest.rpc(
+        val saved = client.postgrest.rpc(
             "upsert_my_client_address",
             buildJsonObject {
                 put("p_street", address.street)
@@ -43,6 +43,8 @@ class ClientAddressRepository(private val client: SupabaseClient) {
                 put("p_longitude", address.longitude)
             },
         ).decodeAs<AddressEnvelopeDto>()
+        client.postgrest.rpc("sync_my_registration_complement", buildJsonObject { put("p_account_type", "CLIENT") })
+        saved
     }
 
     private suspend fun call(

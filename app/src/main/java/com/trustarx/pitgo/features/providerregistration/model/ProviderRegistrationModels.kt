@@ -236,7 +236,7 @@ sealed interface ProviderRegistrationUiState {
 }
 
 sealed interface ProviderEntryResult {
-    data class Ready(val categories: List<ServiceCategory>) : ProviderEntryResult
+    data class Ready(val categories: List<ServiceCategory>, val draft: ProviderRegistrationDraft? = null, val services: List<CatalogService> = emptyList()) : ProviderEntryResult
     data class AlreadyRegistered(val summary: ProviderSummary) : ProviderEntryResult
     data class Failure(val reason: ProviderFailure) : ProviderEntryResult
 }

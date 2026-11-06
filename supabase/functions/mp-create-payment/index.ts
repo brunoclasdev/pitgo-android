@@ -1,9 +1,13 @@
+import { registrationAccess } from '../_shared/registration-access.ts';
 import { cents, decimal, mpRequest, object } from '../_shared/mercadopago-http.ts';
 import { getOrder, normalizeOrder, searchOrders } from '../_shared/mercadopago-orders.ts';
 import { applyEvidence, defer, serviceClient } from '../_shared/payment-reconciliation.ts';
 import { authenticatedUser, isUuid, json, snapshot } from '../_shared/payment-response.ts';
 
 Deno.serve(async req => {
+  const registrationDenied = await registrationAccess(req, 'CLIENT');
+  if (registrationDenied) return registrationDenied;
+
   if (req.method !== 'POST') return json(405, { code: 'METHOD_NOT_ALLOWED' });
   try {
     const db = serviceClient(), user = await authenticatedUser(db, req);

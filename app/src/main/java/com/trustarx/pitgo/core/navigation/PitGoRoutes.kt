@@ -3,6 +3,8 @@ package com.trustarx.pitgo.core.navigation
 import android.net.Uri
 
 object PitGoRoutes {
+    const val Registration = "registration-verification"
+    const val PasswordRecovery = "password-recovery"
     const val SessionGate = "session-gate"
     const val Welcome = "welcome"
     const val Login = "login"

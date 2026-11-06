@@ -1,3 +1,4 @@
+import { registrationAccess } from '../_shared/registration-access.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), {
@@ -8,6 +9,9 @@ const coordinate = (value: unknown, maximum: number): value is number =>
 const normalizedNumber = (value: string) => value.normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '').toLocaleLowerCase('pt-BR');
 
 Deno.serve(async req => {
+  const registrationDenied = await registrationAccess(req, 'CLIENT');
+  if (registrationDenied) return registrationDenied;
+
   if (req.method !== 'POST') return json(405, { code: 'METHOD_NOT_ALLOWED' });
   const url = Deno.env.get('SUPABASE_URL');
   const anon = Deno.env.get('SUPABASE_ANON_KEY');

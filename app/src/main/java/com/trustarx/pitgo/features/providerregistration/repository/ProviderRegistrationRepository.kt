@@ -35,20 +35,39 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import java.util.Locale
 
 class ProviderRegistrationRepository(private val client: SupabaseClient) {
     suspend fun loadEntry(userId: String): ProviderEntryResult = try {
         val provider = loadProvider(userId)
-        if (provider != null) {
+        val registration = client.postgrest.rpc("get_my_registration", buildJsonObject { put("p_account_type", "PROVIDER") })
+            .decodeAs<com.trustarx.pitgo.features.registrationverification.data.RegistrationCase>()
+        if (provider != null && registration.status !in setOf(com.trustarx.pitgo.features.registrationverification.model.RegistrationStatus.INCOMPLETE,com.trustarx.pitgo.features.registrationverification.model.RegistrationStatus.CORRECTION_REQUESTED)) {
             ProviderEntryResult.AlreadyRegistered(loadSummary(provider))
         } else {
-            ProviderEntryResult.Ready(loadAllCategories(activeOnly = true))
+            ProviderEntryResult.Ready(loadAllCategories(activeOnly = true), restoreDraft(registration.data), loadAllServices(null,selectableOnly=false))
         }
     } catch (cancellation: CancellationException) {
         throw cancellation
     } catch (error: Throwable) {
         ProviderEntryResult.Failure(classifyFailure(error))
+    }
+
+    private fun restoreDraft(data:kotlinx.serialization.json.JsonObject): com.trustarx.pitgo.features.providerregistration.model.ProviderRegistrationDraft? {
+        val p=data["provider"] as? kotlinx.serialization.json.JsonObject ?: return null
+        val a=data["address"] as? kotlinx.serialization.json.JsonObject ?: return null
+        fun kotlinx.serialization.json.JsonObject.text(k:String)=get(k)?.jsonPrimitive?.contentOrNull.orEmpty()
+        val mode=runCatching {com.trustarx.pitgo.features.providerregistration.model.ProviderLocationMode.valueOf(p.text("location_mode"))}.getOrNull()
+        val offers=data["offers"]?.jsonArray.orEmpty().mapIndexed {index,item->
+            val o=item.jsonObject
+            com.trustarx.pitgo.features.providerregistration.model.OfferDraft(localId=index.toLong(),serviceId=o.text("service_id"),priceInput=o.text("price"),durationInput=o.text("duration_minutes"),description=o.text("description"),isFree=o.text("is_free")=="true")
+        }
+        return com.trustarx.pitgo.features.providerregistration.model.ProviderRegistrationDraft(
+            locationMode=mode,company=com.trustarx.pitgo.features.providerregistration.model.CompanyDraft(p.text("name"),p.text("description"),p.text("email"),p.text("phone"),p.text("cnpj")),
+            address=com.trustarx.pitgo.core.address.model.AddressDraft(street=a.text("street"),number=a.text("number"),neighborhood=a.text("neighborhood"),postalCode=a.text("zip_code"),city=a.text("city"),state=a.text("state"),complement=a.text("complement")),offers=offers)
     }
 
     suspend fun loadServices(categoryId: String): ProviderCatalogResult<CatalogService> = try {
@@ -96,10 +115,7 @@ class ProviderRegistrationRepository(private val client: SupabaseClient) {
             CREATE_PROVIDER_REGISTRATION,
             Json.encodeToJsonElement(params).jsonObject,
         ).decodeAs<ProviderRegistrationRpcResultDto>()
-        client.postgrest.rpc(
-            SET_PROVIDER_AVAILABILITY,
-            buildJsonObject { put("p_available", true) },
-        )
+        client.postgrest.rpc("sync_my_registration_complement", buildJsonObject { put("p_account_type", "PROVIDER") })
         val summary = loadSummary(requireNotNull(loadProvider(userId)))
         if (rpcResult.outcome == OUTCOME_ALREADY_REGISTERED) {
             ProviderRegistrationResult.AlreadyRegistered(summary)

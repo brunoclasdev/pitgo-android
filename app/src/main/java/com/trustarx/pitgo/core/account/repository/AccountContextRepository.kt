@@ -18,6 +18,7 @@ import io.ktor.client.plugins.HttpRequestTimeoutException
 import kotlinx.coroutines.CancellationException
 
 sealed interface AccountContextLoadResult {
+    data class Restricted(val userId: String, val email: String, val mode: String) : AccountContextLoadResult
     data class Client(
         val account: com.trustarx.pitgo.core.account.model.AccountSnapshot,
         val legacyProviderMigrationAvailable: Boolean,
@@ -37,9 +38,19 @@ class AccountContextRepository(
     private val client: SupabaseClient,
     private val clientAccountRepository: AccountRepository,
 ) {
-    suspend fun load(userId: String, authEmail: String): AccountContextLoadResult = try {
-        val context = client.postgrest.rpc(GET_CONTEXT).decodeAs<AccountContextDto>()
-            .toDomainOrNull() ?: return AccountContextLoadResult.Blocked(
+    var selectedMode: String? = null
+    var memberships: Set<String> = emptySet()
+        private set
+    suspend fun load(userId: String, authEmail: String): AccountContextLoadResult { return try {
+        val dto = client.postgrest.rpc(GET_CONTEXT, kotlinx.serialization.json.buildJsonObject {
+            selectedMode?.let { put("p_account_type", kotlinx.serialization.json.JsonPrimitive(it)) }
+        }).decodeAs<AccountContextDto>()
+        memberships = dto.memberships.map { it.accountType }.toSet()
+        val membership = dto.memberships.firstOrNull { it.accountType == dto.accountType }
+        if (membership != null && !membership.allowed && !membership.legacy && membership.status != com.trustarx.pitgo.features.registrationverification.model.RegistrationStatus.APPROVED) {
+            return AccountContextLoadResult.Restricted(userId, authEmail, dto.accountType)
+        }
+        val context = dto.toDomainOrNull() ?: return AccountContextLoadResult.Blocked(
             ProfileBlockedReason.INCONSISTENT,
         )
         when (context.accountType) {
@@ -90,6 +101,8 @@ class AccountContextRepository(
         AccountContextLoadResult.Unknown
     }
 
+    }
+
     private suspend fun loadProvider(
         userId: String,
         authEmail: String,
@@ -106,7 +119,7 @@ class AccountContextRepository(
     }
 
     private companion object {
-        const val GET_CONTEXT = "get_my_account_context"
+        const val GET_CONTEXT = "get_my_account_context_v2"
         const val PROVIDERS = "providers"
     }
 }

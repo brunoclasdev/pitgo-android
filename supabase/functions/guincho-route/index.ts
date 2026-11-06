@@ -1,3 +1,4 @@
+import { registrationAccess } from '../_shared/registration-access.ts';
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const json = (http: number, body: unknown) => new Response(JSON.stringify(body), {
@@ -7,6 +8,9 @@ const unavailable = (http: number, code: string, retryable = true, retry = 1000)
   json(http, { status: "UNAVAILABLE", code, retryable, retry_after_ms: retry });
 
 Deno.serve(async (request) => {
+  const registrationDenied = await registrationAccess(request, 'ANY');
+  if (registrationDenied) return registrationDenied;
+
   if (request.method !== "POST") return unavailable(405, "METHOD_NOT_ALLOWED", false);
   const url = Deno.env.get("SUPABASE_URL"), anon = Deno.env.get("SUPABASE_ANON_KEY"), service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!url || !anon || !service) return unavailable(503, "SERVICE_UNAVAILABLE");

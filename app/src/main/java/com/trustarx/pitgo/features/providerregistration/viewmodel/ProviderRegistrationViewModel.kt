@@ -721,13 +721,15 @@ class ProviderRegistrationViewModel(
                         _uiState.value = ProviderRegistrationUiState.AlreadyRegistered(result.summary)
                     }
                     is ProviderEntryResult.Ready -> ifSessionCurrent {
-                        val initialDraft = ProviderRegistrationDraft(
-                            company = CompanyDraft(email = initialEmail),
-                        )
+                        val restored = result.draft
+                        val categorized = restored?.offers?.map { offer -> offer.copy(categoryId=result.services.firstOrNull { it.id==offer.serviceId }?.categoryId) }
+                        val initialDraft = restored?.copy(offers=categorized.orEmpty(),primaryCategoryId=categorized?.firstOrNull()?.categoryId) ?: ProviderRegistrationDraft(company = CompanyDraft(email = initialEmail))
+                        nextOfferId = (initialDraft.offers.maxOfOrNull {it.localId} ?: 0L) + 1L
                         _uiState.value = ProviderRegistrationUiState.Editing(
                             ProviderEditingContent(
                                 draft = initialDraft,
                                 baselineDraft = initialDraft,
+                                servicesByCategory = result.services.groupBy {it.categoryId}.mapValues {LoadState.Content(it.value)},
                                 categories = if (result.categories.isEmpty()) LoadState.Empty
                                 else LoadState.Content(result.categories),
                             ),

@@ -1,3 +1,4 @@
+import { registrationAccess } from './registration-access.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { object } from './mercadopago-http.ts';
 import { authenticatedUser, isUuid, json } from './payment-response.ts';
@@ -9,6 +10,8 @@ import { serviceClient } from './payment-reconciliation.ts';
 export async function cancellationResponse(req: Request, refundOnly: boolean) {
   if (req.method !== 'POST') return json(405, { code: 'METHOD_NOT_ALLOWED' });
   try {
+    const denied = await registrationAccess(req);
+    if (denied) return denied;
     const user = await authenticatedUser(serviceClient(), req);
     if (!user) return json(401, { code: 'SESSION_REQUIRED' });
     const input = object(await req.json().catch(() => null));

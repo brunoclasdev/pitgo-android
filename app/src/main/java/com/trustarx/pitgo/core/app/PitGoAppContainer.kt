@@ -61,6 +61,7 @@ class PitGoAppContainer(context: Context) {
     val appointmentTrackingRepository = AppointmentTrackingRepository(supabase)
     val serviceMapRepository = ServiceMapRepository(supabase)
     val guinchoAddressRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoAddressRepository(context, supabase)
+    val registrationFiles = com.trustarx.pitgo.features.registrationverification.data.RegistrationDocumentCaptureFiles(context)
     val guinchoInspectionFiles = com.trustarx.pitgo.features.guincho.data.GuinchoInspectionCaptureFiles(context)
     val guinchoInspectionRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoInspectionRepository(supabase, guinchoInspectionFiles)
     val guinchoRouteRepository = com.trustarx.pitgo.features.guincho.repository.GuinchoRouteRepository(supabase, guinchoInspectionFiles)
@@ -87,7 +88,8 @@ class PitGoAppContainer(context: Context) {
         beforeInitialize = {
             supabase.auth.awaitInitialization()
             com.trustarx.pitgo.core.environment.EnvironmentStateRepository(context).validate {
-                guinchoInspectionFiles.clear()
+                registrationFiles.clear()
+            guinchoInspectionFiles.clear()
                 guinchoInspectionRepository.pending.hide()
                 guinchoInspectionFiles.clearReadCache()
                 supabase.auth.sessionManager.deleteSession()
@@ -100,6 +102,7 @@ class PitGoAppContainer(context: Context) {
             supabase.auth.loadFromStorage()
         },
         beforeSignOut = { provider ->
+            registrationFiles.clear()
             guinchoInspectionFiles.clear()
             guinchoInspectionRepository.pending.hide()
             guinchoInspectionFiles.clearReadCache()
@@ -115,6 +118,7 @@ class PitGoAppContainer(context: Context) {
             deviceLocationRepository.clearAllVisibleUses()
         },
     )
+    val registrationRepository = com.trustarx.pitgo.features.registrationverification.repository.RegistrationVerificationRepository(supabase)
     val signUpRepository = SupabaseSignUpRepository(
         client = supabase,
         accountRepository = accountRepository,

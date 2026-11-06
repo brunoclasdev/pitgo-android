@@ -15,6 +15,8 @@ sealed interface AppSessionState {
     sealed interface Authenticated : AppSessionState {
         val userId: String
 
+        data class Restricted(override val userId: String, val email: String, val mode: String) : Authenticated
+
         data class Client(
             val account: AccountSnapshot,
             val legacyProviderMigrationAvailable: Boolean = false,

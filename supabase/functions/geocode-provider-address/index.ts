@@ -25,7 +25,7 @@ Deno.serve(async (request) => {
   if (userError || !userData.user) return json(401, { code: "SESSION_REQUIRED" });
   const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
   const { data: role } = await admin.from("account_roles").select("account_type")
-    .eq("user_id", userData.user.id).maybeSingle();
+    .eq("user_id", userData.user.id).eq("account_type", "PROVIDER").maybeSingle();
   if (role?.account_type !== "PROVIDER") return json(403, { code: "PROVIDER_REQUIRED" });
 
   let payload: Record<string, unknown>;
@@ -33,7 +33,7 @@ Deno.serve(async (request) => {
   const address = payload.address as Record<string, unknown> | undefined;
   if (!address || address.country !== "BR") return json(400, { code: "INVALID_INPUT" });
   const neighborhood = address.neighborhood ?? address.neighbornhood;
-  const normalizedAddress = { ...address, neighborhood };
+  const normalizedAddress: Record<string, unknown> = { ...address, neighborhood };
   delete normalizedAddress.neighbornhood;
   const parts = [address.street, address.number, neighborhood, address.city,
     address.state, address.zip_code, "Brasil"].map((value) => String(value ?? "").trim());

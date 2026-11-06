@@ -1,3 +1,4 @@
+import { registrationAccess } from '../_shared/registration-access.ts';
 // Removes a saved card: deletes the Customer Card at Mercado Pago, then the local row. Existing
 // payments made with it are untouched (they keep their own denormalized card_brand/last_four —
 // see specs/018-mercadopago-payments/data-model.md).
@@ -9,6 +10,9 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 });
 
 Deno.serve(async (request) => {
+  const registrationDenied = await registrationAccess(request, 'CLIENT');
+  if (registrationDenied) return registrationDenied;
+
   if (request.method !== "POST") return json(405, { code: "METHOD_NOT_ALLOWED" });
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");

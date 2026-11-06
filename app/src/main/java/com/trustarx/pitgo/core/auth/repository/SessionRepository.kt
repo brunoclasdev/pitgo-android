@@ -77,6 +77,13 @@ class SessionRepository(
         initialized = true
     }
 
+    fun hasMode(mode: String): Boolean = mode in accountRepository.memberships
+
+    suspend fun selectMode(mode: String) {
+        accountRepository.selectedMode = mode
+        refresh()
+    }
+
     suspend fun retry() = bootstrapMutex.withLock { verifyAndLoad() }
     suspend fun refresh() = bootstrapMutex.withLock { verifyAndLoad() }
 
@@ -133,6 +140,7 @@ class SessionRepository(
         }
 
     suspend fun signOut() {
+        accountRepository.selectedMode = null
         val provider = (_state.value as? AppSessionState.Authenticated.ProviderReady)?.account
         beforeSignOut(provider)
         _state.value = AppSessionState.Unauthenticated(UnauthenticatedReason.SIGNED_OUT)
@@ -158,6 +166,7 @@ class SessionRepository(
 
     private suspend fun loadAccount(userId: String, authEmail: String) {
         _state.value = when (val result = accountRepository.load(userId, authEmail)) {
+            is AccountContextLoadResult.Restricted -> AppSessionState.Authenticated.Restricted(result.userId, result.email, result.mode)
             is AccountContextLoadResult.Client -> AppSessionState.Authenticated.Client(
                 result.account, result.legacyProviderMigrationAvailable,
             )

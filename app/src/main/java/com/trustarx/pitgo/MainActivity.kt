@@ -33,8 +33,13 @@ import com.trustarx.pitgo.core.navigation.PitGoNavHost
 import com.trustarx.pitgo.core.preferences.AppearanceMode
 
 class MainActivity : ComponentActivity() {
+    private var recoveryOpen by mutableStateOf<String?>(null)
     private var incomingOpen by mutableStateOf<GuinchoNotificationOpen?>(null)
     private fun readIncoming(intent: Intent?) {
+        val link = intent?.data
+        if (link?.scheme == BuildConfig.APPLICATION_ID && link.host == "password-recovery") {
+            recoveryOpen = link.toString()
+        }
         val id = intent?.getStringExtra(ProviderIncomingRequestNotifier.EXTRA_APPOINTMENT) ?: return
         val provider = intent.getStringExtra(ProviderIncomingRequestNotifier.EXTRA_PROVIDER) ?: return
         incomingOpen = GuinchoNotificationOpen(id, provider, SystemClock.elapsedRealtimeNanos())
@@ -72,7 +77,7 @@ class MainActivity : ComponentActivity() {
                     showBrandSplash = false
                 }
                 Box(Modifier.fillMaxSize()) {
-                    PitGoNavHost(container = container, incomingOpen = incomingOpen, onIncomingConsumed = { incomingOpen = null })
+                    PitGoNavHost(container = container, incomingOpen = incomingOpen, onIncomingConsumed = { incomingOpen = null }, recoveryUri = recoveryOpen, onRecoveryConsumed = { recoveryOpen = null; intent?.data = null })
                     if (showBrandSplash) {
                         Image(
                             painter = painterResource(R.drawable.pitgo_image1200),

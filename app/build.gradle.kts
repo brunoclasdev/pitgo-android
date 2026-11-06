@@ -286,6 +286,7 @@ android {
 }
 
 dependencies {
+    implementation("com.googlecode.libphonenumber:libphonenumber:9.0.42")
     testImplementation("junit:junit:4.13.2")
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 

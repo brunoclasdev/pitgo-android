@@ -1,3 +1,4 @@
+import { registrationAccess } from '../_shared/registration-access.ts';
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 // See contracts/pittec-routing-ui.md. This function never accepts coordinates from the request
@@ -25,6 +26,9 @@ const MAX_DISTANCE_METERS = 2_000_000;
 const UPSTREAM_TIMEOUT_MS = 8_000;
 
 Deno.serve(async (request) => {
+  const registrationDenied = await registrationAccess(request, 'ANY');
+  if (registrationDenied) return registrationDenied;
+
   if (request.method !== "POST") return json(405, { code: "METHOD_NOT_ALLOWED" });
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");

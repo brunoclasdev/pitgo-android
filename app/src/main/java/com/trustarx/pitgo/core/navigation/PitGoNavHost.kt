@@ -27,6 +27,8 @@ import android.content.ContextWrapper
 import com.trustarx.pitgo.core.account.model.ProviderLocationMode
 import androidx.compose.foundation.isSystemInDarkTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import io.github.jan.supabase.auth.auth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -117,12 +119,59 @@ private class GuinchoSessionViewModelOwner : ViewModelStoreOwner {
 private const val TRACKING_WATCHDOG_INTERVAL_MS = 30_000L
 
 @Composable
-fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotificationOpen? = null, onIncomingConsumed: () -> Unit = {}) {
+fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotificationOpen? = null, onIncomingConsumed: () -> Unit = {}, recoveryUri: String? = null, onRecoveryConsumed: () -> Unit = {}) {
+    var recoveryRequested by remember { mutableStateOf(false) }
+    if (recoveryUri != null || recoveryRequested) {
+        val recoveryOwner = remember { object : androidx.lifecycle.ViewModelStoreOwner { override val viewModelStore = androidx.lifecycle.ViewModelStore() } }
+        androidx.compose.runtime.DisposableEffect(recoveryOwner) { onDispose { recoveryOwner.viewModelStore.clear() } }
+        val recovery: com.trustarx.pitgo.features.login.viewmodel.PasswordRecoveryViewModel = viewModel(viewModelStoreOwner=recoveryOwner,key="password-recovery")
+        com.trustarx.pitgo.features.login.ui.PasswordRecoveryScreen(recovery,recoveryUri,
+            onBack={recoveryRequested=false;onRecoveryConsumed()},onDone={recoveryRequested=false;onRecoveryConsumed()})
+        return
+    }
     val navController = rememberNavController()
     val sessionViewModel: SessionViewModel = viewModel(
         factory = SessionViewModel.factory(container.sessionRepository),
     )
     val sessionState by sessionViewModel.state.collectAsStateWithLifecycle()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (sessionState is AppSessionState.Authenticated.Restricted) sessionViewModel.refresh()
+    }
+    val registrationScope = androidx.compose.runtime.rememberCoroutineScope()
+    var registrationMode by remember { mutableStateOf<String?>(null) }
+    var registrationComplement by remember { mutableStateOf(false) }
+    val restricted = sessionState as? AppSessionState.Authenticated.Restricted
+    val verifiedSession = sessionState as? AppSessionState.Authenticated
+    val activeRegistrationMode = registrationMode ?: restricted?.mode
+    if (activeRegistrationMode != null && verifiedSession != null) {
+        val registrationOwner = remember(verifiedSession.userId,activeRegistrationMode) {
+            object : androidx.lifecycle.ViewModelStoreOwner { override val viewModelStore = androidx.lifecycle.ViewModelStore() }
+        }
+        androidx.compose.runtime.DisposableEffect(registrationOwner) { onDispose { registrationOwner.viewModelStore.clear() } }
+        val registrationVm: com.trustarx.pitgo.features.registrationverification.viewmodel.RegistrationVerificationViewModel = viewModel(
+            viewModelStoreOwner=registrationOwner, key="registration:${verifiedSession.userId}:$activeRegistrationMode",
+            factory=com.trustarx.pitgo.features.registrationverification.viewmodel.RegistrationVerificationViewModel.factory(activeRegistrationMode,container.registrationRepository,container.registrationFiles))
+        androidx.activity.compose.BackHandler(enabled=registrationComplement || restricted==null) {
+            registrationComplement=false
+            if(restricted==null)registrationMode=null
+        }
+        if(registrationComplement && activeRegistrationMode=="PROVIDER") {
+            val form: ProviderRegistrationViewModel = viewModel(viewModelStoreOwner=registrationOwner,key="registration-provider:${verifiedSession.userId}",factory=ProviderRegistrationViewModel.factory(
+                account=com.trustarx.pitgo.core.account.model.ProviderOnboardingSession(verifiedSession.userId,container.registrationRepository.email()),
+                repository=container.providerRegistrationRepository,addressVerificationRepository=container.providerAddressVerificationRepository,
+                viaCepAddressLookupRepository=container.viaCepAddressLookupRepository,sessionRepository=container.sessionRepository))
+            ProviderRegistrationRoute(form,onBack={registrationComplement=false},onLogout=sessionViewModel::logout,
+                onFinished={registrationComplement=false;registrationVm.refresh()},onSessionExpired=sessionViewModel::refresh)
+        } else if(registrationComplement) {
+            val form:ClientAddressViewModel=viewModel(viewModelStoreOwner=registrationOwner,key="registration-address:${verifiedSession.userId}",factory=ClientAddressViewModel.factory(container.clientAddressRepository,container.viaCepAddressLookupRepository))
+            ClientAddressRoute(form,onBack={registrationComplement=false},onSaved={registrationComplement=false;registrationVm.refresh()},onSessionExpired=sessionViewModel::refresh)
+        } else {
+            com.trustarx.pitgo.features.registrationverification.ui.RegistrationDocumentsScreen(registrationVm,container.registrationFiles,verifiedSession.userId,
+                onCompleteData={registrationComplement=true},onRefreshSession={registrationMode=null;sessionViewModel.refresh()},
+                onBack={if(restricted==null)registrationMode=null else registrationScope.launch {container.sessionRepository.selectMode("CLIENT")}},onLogout={registrationMode=null;sessionViewModel.logout()},showBack=restricted==null || (activeRegistrationMode=="PROVIDER" && container.sessionRepository.hasMode("CLIENT")))
+        }
+        return
+    }
     val inspectionSync: com.trustarx.pitgo.features.guincho.viewmodel.GuinchoInspectionSyncViewModel = viewModel(
         factory = com.trustarx.pitgo.features.guincho.viewmodel.GuinchoInspectionSyncViewModel.factory(
             container.guinchoInspectionRepository, container.sessionRepository, container.connectivityObserver))
@@ -307,6 +356,7 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
             is AppSessionState.Unauthenticated -> if (!publicRoute) {
                 navController.navigateRoot(PitGoRoutes.Welcome)
             }
+            is AppSessionState.Authenticated.Restricted -> Unit
             is AppSessionState.Authenticated.Client -> {
                 val providerOnly = currentRoute in setOf(
                     PitGoRoutes.ProviderRegistration,
@@ -476,6 +526,19 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
         )
     }
     Column(Modifier.fillMaxSize()) {
+        if(verifiedSession!=null && (sessionState is AppSessionState.Authenticated.Client || container.sessionRepository.hasMode("CLIENT"))) {
+            androidx.compose.material3.TextButton(onClick={registrationScope.launch {
+                val target=if(sessionState is AppSessionState.Authenticated.Client) "PROVIDER" else "CLIENT"
+                try {
+                    val result=container.registrationRepository.start(target,java.util.UUID.randomUUID().toString())
+                    if(result.status==com.trustarx.pitgo.features.registrationverification.model.RegistrationStatus.APPROVED || result.status==null)container.sessionRepository.selectMode(target)
+                    else registrationMode=target
+                }catch(c:kotlinx.coroutines.CancellationException){throw c}catch(_:Exception){sessionViewModel.refresh()}
+            }}) { androidx.compose.material3.Text(androidx.compose.ui.res.stringResource(R.string.registration_modes)) }
+        }
+        if(currentRoute==PitGoRoutes.Login) {
+            androidx.compose.material3.TextButton(onClick={recoveryRequested=true}) {androidx.compose.material3.Text(androidx.compose.ui.res.stringResource(R.string.registration_forgot_password))}
+        }
     NavHost(navController = navController, startDestination = PitGoRoutes.SessionGate, modifier = Modifier.weight(1f)) {
         composable(PitGoRoutes.SessionGate) {
             SessionGateScreen(
@@ -528,28 +591,14 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
         }
 
         composable(PitGoRoutes.SignUp) {
-            val signUpViewModel: SignUpViewModel = viewModel(
-                factory = SignUpViewModel.factory(
-                    repository = container.signUpRepository,
-                    lockedPersonType = null,
-                ),
-            )
-            SignUpRoute(
-                onBack = { navController.popBackStack() },
-                onAccountCreated = sessionViewModel::refresh,
-                viewModel = signUpViewModel,
-            )
+            val basic:com.trustarx.pitgo.features.signup.viewmodel.BasicRegistrationViewModel=viewModel(
+                factory=com.trustarx.pitgo.features.signup.viewmodel.BasicRegistrationViewModel.factory("CLIENT",container.registrationRepository))
+            com.trustarx.pitgo.features.signup.ui.BasicRegistrationScreen(basic,onBack={navController.popBackStack()},onCreated=sessionViewModel::refresh)
         }
-
         composable(PitGoRoutes.ProviderSignUp) {
-            val providerSignUpViewModel: ProviderSignUpViewModel = viewModel(
-                factory = ProviderSignUpViewModel.factory(container.providerSignUpRepository),
-            )
-            ProviderSignUpRoute(
-                viewModel = providerSignUpViewModel,
-                onBack = { navController.popBackStack() },
-                onAccountCreated = sessionViewModel::refresh,
-            )
+            val basic:com.trustarx.pitgo.features.signup.viewmodel.BasicRegistrationViewModel=viewModel(
+                factory=com.trustarx.pitgo.features.signup.viewmodel.BasicRegistrationViewModel.factory("PROVIDER",container.registrationRepository))
+            com.trustarx.pitgo.features.signup.ui.BasicRegistrationScreen(basic,onBack={navController.popBackStack()},onCreated=sessionViewModel::refresh)
         }
 
         composable(PitGoRoutes.VehicleOnboarding) {

@@ -16,6 +16,7 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <queries>
+        <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
         <package android:name="com.waze" />
         <package android:name="com.google.android.apps.maps" />
     </queries>
@@ -38,6 +39,10 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/guincho_inspection_file_paths" />
         </provider>
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.registration-files" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/registration_document_file_paths" />
+        </provider>
         <service
             android:name=".features.providertracking.service.ProviderLocationTrackingService"
             android:exported="false"
@@ -45,11 +50,18 @@
 
         <activity
             android:name=".MainActivity"
+            android:launchMode="singleTop"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="${applicationId}" android:host="password-recovery" />
             </intent-filter>
         </activity>
     </application>

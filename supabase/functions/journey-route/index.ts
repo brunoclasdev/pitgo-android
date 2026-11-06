@@ -1,3 +1,4 @@
+import { registrationAccess } from '../_shared/registration-access.ts';
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 // Public-road directions between points the app already knows. This endpoint never looks up
@@ -14,6 +15,9 @@ const validPoint = (point: unknown): point is { latitude: number; longitude: num
 };
 
 Deno.serve(async (request) => {
+  const registrationDenied = await registrationAccess(request, 'ANY');
+  if (registrationDenied) return registrationDenied;
+
   if (request.method !== "POST") return fail(405, "METHOD_NOT_ALLOWED");
   const url = Deno.env.get("SUPABASE_URL"), key = Deno.env.get("SUPABASE_ANON_KEY");
   const base = Deno.env.get("PITTEC_ROUTING_BASE_URL");

@@ -27,7 +27,7 @@ data class ProviderSnapshot(
     val pendingLocationMode: ProviderLocationMode? = null,
 ) {
     fun isConsistent(): Boolean = userId.isNotBlank() && providerId.isNotBlank() &&
-        name.isNotBlank() && email.equals(authEmail, ignoreCase = true) && phone.isNotBlank() &&
+        name.isNotBlank() && email.isNotBlank() && phone.isNotBlank() &&
         active
 }
 

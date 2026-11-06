@@ -12,6 +12,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 internal data class AccountContextDto(
     @SerialName("account_type") val accountType: String,
+    val memberships: List<com.trustarx.pitgo.features.registrationverification.data.RegistrationMembership> = emptyList(),
     @SerialName("client_state") val clientState: String? = null,
     @SerialName("provider_state") val providerState: String? = null,
     @SerialName("provider_id") val providerId: String? = null,

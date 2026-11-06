@@ -20,7 +20,7 @@ api_url = "http://127.0.0.1"
 [auth]
 enabled = true
 site_url = "http://127.0.0.1:3000"
-additional_redirect_urls = []
+additional_redirect_urls = ["com.trustarx.pitgo://password-recovery", "com.trustarx.pitgo.dev://password-recovery", "com.trustarx.pitgo.homol://password-recovery"]
 jwt_expiry = 3600
 enable_signup = true
 minimum_password_length = 8
@@ -84,3 +84,6 @@ verify_jwt = true
 verify_jwt = true
 
 # Private Vault-backed worker secret; authenticated-user JWTs do not authorize dispatch.
+
+[functions.registration-evidence-confirm]
+verify_jwt = true
