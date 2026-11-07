@@ -132,7 +132,7 @@ fun AppointmentTrackingRoute(
         val status = state.dispatch?.appointment?.status
         if (status == MobileAppointmentStatus.DISPUTED) wasDisputed = true
         if (!historical && !completionHandled && (status == MobileAppointmentStatus.COMPLETED ||
-                (wasDisputed && status == MobileAppointmentStatus.CANCELLED))) {
+                ((!isClient || wasDisputed) && status == MobileAppointmentStatus.CANCELLED))) {
             completionHandled = true
             val ratingAppointment = viewModel.completedRatingAppointmentId()
             if (ratingAppointment != null) onRate(ratingAppointment) else onFinished()

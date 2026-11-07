@@ -14,6 +14,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.LifecycleStartEffect
+import com.trustarx.pitgo.features.mobiledispatch.model.MobileDispatchResult
 import com.trustarx.pitgo.features.mobiledispatch.model.ProviderIncomingUiState
 import com.trustarx.pitgo.features.mobiledispatch.model.PendingDispatchAction
 import com.trustarx.pitgo.features.guincho.ui.GuinchoIncomingRequestCard
@@ -243,15 +244,27 @@ fun PitGoNavHost(container: PitGoAppContainer, incomingOpen: GuinchoNotification
         if (response == PendingDispatchAction.DECLINE) navController.navigateRoot(PitGoRoutes.ProviderDashboard)
         if (response != null) guinchoIncoming?.consumeResponse()
     }
-    var resumedGuinchoId by remember(guinchoAccount?.providerId) { mutableStateOf<String?>(null) }
-    LaunchedEffect(guinchoState, currentRoute) {
+    LaunchedEffect(guinchoState, currentBackStackEntry) {
         val active = (guinchoState as? ProviderIncomingUiState.Active)?.snapshot ?: return@LaunchedEffect
+        if (active.dispatchKind != MobileDispatchKind.GUINCHO_DIRECT) return@LaunchedEffect
         val appointment = active.appointment ?: return@LaunchedEffect
-        val resumeStage = "${appointment.id}:${appointment.status}"
-        if (active.dispatchKind == MobileDispatchKind.GUINCHO_DIRECT && appointment.status in setOf(
-            MobileAppointmentStatus.AWAITING_PAYMENT, MobileAppointmentStatus.ACCEPTED, MobileAppointmentStatus.IN_PROGRESS, MobileAppointmentStatus.AWAITING_CLIENT_COMPLETION_CONFIRMATION)
-            && resumeStage != resumedGuinchoId && currentRoute !in setOf(PitGoRoutes.AppointmentTracking, PitGoRoutes.GuinchoInspection)) {
-            resumedGuinchoId = resumeStage
+        val entry = currentBackStackEntry ?: return@LaunchedEffect
+        fun shouldResume(status: MobileAppointmentStatus) = shouldResumeGuinchoAppointment(
+            status = status,
+            appointmentId = appointment.id,
+            currentRoute = entry.destination.route,
+            currentAppointmentId = entry.arguments?.getString(PitGoRoutes.AppointmentIdArg),
+            historical = entry.arguments?.getBoolean(PitGoRoutes.AppointmentHistoryArg) == true,
+        )
+        if (!shouldResume(appointment.status)) return@LaunchedEffect
+        // The incoming poll may still contain the state from before completion/cancellation.
+        // Confirm the current status before navigating away from the provider's home.
+        val latest = container.mobileDispatchRepository.appointmentSnapshot(appointment.id)
+            as? MobileDispatchResult.Success ?: return@LaunchedEffect
+        if (latest.snapshot.appointment?.id == appointment.id &&
+            latest.snapshot.dispatchKind == MobileDispatchKind.GUINCHO_DIRECT &&
+            latest.snapshot.appointment?.status?.let(::shouldResume) == true &&
+            navController.currentBackStackEntry == entry) {
             navController.navigate(PitGoRoutes.appointmentTracking(appointment.id)) { launchSingleTop = true }
         }
     }
